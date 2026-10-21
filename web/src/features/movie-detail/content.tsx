@@ -5,7 +5,8 @@ import { ErrorState, InlineError } from '@/components/error-state'
 import type { MovieDetailTarget } from './dialog-context'
 import { MovieHero } from './hero'
 import { MovieMagnets } from './magnets'
-import { MoviePreviews } from './previews'
+import { MovieMediaPreviews } from './extensions/trailer'
+import { JavLibraryRating, MovieComments } from './extensions/social'
 import { MovieRecommendations } from './recommendations'
 import { MovieDetailSkeleton } from './skeleton'
 
@@ -37,8 +38,17 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
           刷新失败，请重试。
         </InlineError>
       ) : null}
-      <MovieHero movie={detail.data} libraryStatus={detail.data.scrape_status} />
-      <MoviePreviews images={detail.data.preview_images} />
+      <MovieHero
+        movie={detail.data}
+        libraryStatus={detail.data.scrape_status}
+        extraStats={<JavLibraryRating code={detail.data.code} />}
+      />
+      <MovieMediaPreviews
+        images={detail.data.preview_images}
+        video={detail.data.preview_video}
+        cover={detail.data.cover}
+      />
+      <MovieComments javdbId={detail.data.id} code={detail.data.code} />
       {detail.data.id ? <LibraryCatalogueExtras movieId={detail.data.id} /> : null}
     </div>
   )
@@ -101,9 +111,14 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
           刷新失败，请重试。
         </InlineError>
       ) : null}
-      <MovieHero movie={detail.data} />
-      <MoviePreviews images={detail.data.preview_images} />
+      <MovieHero movie={detail.data} extraStats={<JavLibraryRating code={detail.data.code} />} />
+      <MovieMediaPreviews
+        images={detail.data.preview_images}
+        video={detail.data.preview_video}
+        cover={detail.data.cover}
+      />
       <MovieMagnets movieID={movieId} query={magnets} />
+      <MovieComments javdbId={movieId} code={detail.data.code} />
       <MovieRecommendations title="TA（们）还出演过" movies={detail.data.actor_movies} />
       <MovieRecommendations title="你可能也喜欢" movies={detail.data.related_movies} />
     </div>

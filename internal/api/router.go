@@ -18,6 +18,7 @@ type Dependencies struct {
 	Logger         *slog.Logger
 	Access         AccessGate
 	Catalogue      CatalogueManager
+	MovieExtras    MovieExtrasManager
 	Metadata       MetadataManager
 	Drive          DriveManager
 	Offline        OfflineManager
@@ -72,6 +73,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	api.HEAD("/strm/play/:fileID/*filename", noStore(), strmHandler)
 
 	protected := api.Group("", authMiddleware(deps.Access))
+	registerMovieExtras(protected, deps.MovieExtras)
 
 	settingsAPI := protected.Group("/settings", noStore())
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))
