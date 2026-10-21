@@ -44,6 +44,7 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
         extraStats={<JavLibraryRating code={detail.data.code} />}
       />
       <MovieMediaPreviews
+        key={`library:${movieId}`}
         images={detail.data.preview_images}
         video={detail.data.preview_video}
         cover={detail.data.cover}
@@ -113,6 +114,7 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
       ) : null}
       <MovieHero movie={detail.data} extraStats={<JavLibraryRating code={detail.data.code} />} />
       <MovieMediaPreviews
+        key={movieId}
         images={detail.data.preview_images}
         video={detail.data.preview_video}
         cover={detail.data.cover}

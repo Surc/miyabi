@@ -99,7 +99,11 @@ git diff --check
 
 Go SDK 可通过命令完整路径或临时 PATH 使用，不把运行器临时目录写进项目配置。`.node.mjs` 用 Node 原生 TypeScript 类型剥离运行，不纳入 Vitest 的 include。全量 Go 番号语料测试可能较慢，不能当作挂起而跳过。
 
-当前重建版本的完整验证结果将在同一分支完成验证后记录；旧提交的测试结果不作为本版本证据。
+2026-10-21 本次重建版本已重新验证：完整 Go 套件 36 个测试包通过（保留原有 19 个测试/子测试 skip 事件），Vitest 32 文件/210 测试通过，Node 独立逻辑 14 测试通过；TypeScript、Oxlint、Oxfmt、修改 Go 文件的 gofmt、差异空白检查、前端生产构建和 Go 可执行文件构建通过。旧提交的测试结果不作为本版本证据。
+
+全量 Go 首次运行暴露上游已有的 `TestProxiedFingerprintClientSwitchesProxyAndCloses` 夹具不匹配：tls-client 通过 CONNECT 访问代理，而旧测试服务器只返回普通 HTTP 响应。独立新增 `internal/netx/fingerprint_proxy_test.go` 模拟 CONNECT 隧道，原测试仅替换两个代理服务器的构造，保留全部切换和关闭断言；生产网络代码未改。上游修复相同夹具后可移除这个测试专用补丁。
+
+本轮 JavLibrary 实际 HTTP 探测返回 195 字节的 `Site Unavailable` 页面，无法在此环境验证真实评分或评论页面；不代表站点全局不可用。JavDB 在线评论与浏览器实际播放仍未验收，应在对应网络与浏览器上确认。为此 PR 保持 draft，不自动合并或发布。
 
 浏览器验收仍由用户完成：查看默认/双向日期排序及未知日期、两站评分并列、切换评论与加载更多/失败重试、无 JavDB 关联的媒体库详情、MP4/HLS 播放、关闭/切换影片/隐私模式释放媒体及无预告回退。离线夹具测试不能证明第三方在线可用性或实际浏览器解码能力。
 
