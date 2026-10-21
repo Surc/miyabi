@@ -1,6 +1,5 @@
 import type { BrowseMoviesParams } from '@/api/discover'
-import { useDiscoverMovies } from '@/api/discover'
-import { DiscoverResults } from './results'
+import { CachedBrowseResults } from './extensions/cached-results'
 
 export function BrowseResults({
   params,
@@ -9,17 +8,5 @@ export function BrowseResults({
   params: BrowseMoviesParams & { page: number }
   onPageChange: (page: number) => void
 }) {
-  const movies = useDiscoverMovies(params)
-  return (
-    <DiscoverResults
-      movies={movies.data}
-      loading={movies.isPending}
-      fetching={movies.isFetching}
-      error={movies.isError}
-      searching={false}
-      page={params.page}
-      onPageChange={onPageChange}
-      onRetry={() => movies.refetch()}
-    />
-  )
+  return <CachedBrowseResults params={params} page={params.page} onPageChange={onPageChange} />
 }

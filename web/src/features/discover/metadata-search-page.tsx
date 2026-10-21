@@ -1,6 +1,6 @@
 import { BellOffIcon, BellPlusIcon, LoaderCircleIcon } from 'lucide-react'
 
-import { useDiscoverMovies, useDiscoverTags, type JavDBZone } from '@/api/discover'
+import { useDiscoverTags, type JavDBZone } from '@/api/discover'
 import { useAddSubscription, useRemoveSubscription, useSubscription } from '@/api/subscriptions'
 import { AppPage } from '@/components/app-page'
 import { InlineError } from '@/components/error-state'
@@ -20,7 +20,7 @@ import { CommonFilterSelect } from './common-filter-select'
 import { DISCOVER_PAGE_SIZE, DISCOVER_ZONES } from './constants'
 import { metadataBrowseParams } from './metadata-params'
 import { METADATA_LABELS, type MetadataSearch } from './metadata-search'
-import { DiscoverResults } from './results'
+import { CachedBrowseResults } from './extensions/cached-results'
 
 export function MetadataSearchPage({
   search,
@@ -36,13 +36,13 @@ export function MetadataSearchPage({
   const taxonomy = useDiscoverTags(search.kind === 'tag' ? (search.zone ?? 'censored') : 'censored')
   const mainOptions = taxonomy.data?.find(category => category.id === 'main')?.tags ?? []
 
-  const movies = useDiscoverMovies({
+  const params = {
     page: search.page,
     limit: DISCOVER_PAGE_SIZE,
     sort: 'release',
     order: 'desc',
     ...metadataBrowseParams(search)
-  })
+  } as const
 
   return (
     <AppPage>
@@ -87,15 +87,11 @@ export function MetadataSearchPage({
           />
         ) : null}
       </PageHeader>
-      <DiscoverResults
-        movies={movies.data}
-        loading={movies.isPending}
-        fetching={movies.isFetching}
-        error={movies.isError}
-        searching
+      <CachedBrowseResults
+        params={params}
         page={search.page}
         onPageChange={onPageChange}
-        onRetry={() => movies.refetch()}
+        searching
       />
     </AppPage>
   )

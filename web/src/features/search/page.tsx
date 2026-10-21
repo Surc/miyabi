@@ -1,7 +1,6 @@
 import { SearchIcon, XIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
-import { useSearchMovies } from '@/api/discover'
 import { AppPage } from '@/components/app-page'
 import { PageHeader } from '@/components/page-header'
 import {
@@ -10,8 +9,7 @@ import {
   InputGroupButton,
   InputGroupInput
 } from '@/components/ui/input-group'
-import { DISCOVER_PAGE_SIZE } from '@/features/discover/constants'
-import { DiscoverResults } from '@/features/discover/results'
+import { CachedBrowseResults } from '@/features/discover/extensions/cached-results'
 
 export function SearchPage({
   keyword,
@@ -97,17 +95,5 @@ function SearchResults({
   page: number
   onPageChange: (page: number) => void
 }) {
-  const movies = useSearchMovies({ query: keyword, page, limit: DISCOVER_PAGE_SIZE })
-  return (
-    <DiscoverResults
-      movies={movies.data}
-      loading={movies.isPending}
-      fetching={movies.isFetching}
-      error={movies.isError}
-      searching
-      page={page}
-      onPageChange={onPageChange}
-      onRetry={() => movies.refetch()}
-    />
-  )
+  return <CachedBrowseResults query={keyword} page={page} onPageChange={onPageChange} searching />
 }
