@@ -21,7 +21,8 @@ func TestProxiedFingerprintClientSwitchesProxyAndCloses(t *testing.T) {
 			_, _ = io.WriteString(w, label)
 		}))
 	}
-	direct, first, second := server("direct"), server("first"), server("second")
+	direct := server("direct")
+	first, second := fingerprintProxy(t, "first"), fingerprintProxy(t, "second")
 	defer direct.Close()
 	defer first.Close()
 	defer second.Close()
