@@ -182,26 +182,38 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	pools := newTaskPools(taskSvc, logger)
 	extras := catalogue.NewMovieExtras(catalogueSvc)
+	browseExtension, err := catalogue.NewBrowseExtension(cfg.DataDir, catalogueSvc, extras)
+	if err != nil {
+		extras.Close()
+		embySvc.Close()
+		scrapeSvc.Close()
+		metadataSvc.Close()
+		catalogueSvc.Close()
+		driveSvc.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("initialize discovery cache: %w", err)
+	}
 
 	router := api.NewRouter(api.Dependencies{
-		Logger:         logger,
-		Access:         api.NewAccessGateService(cfg.AccessPassword, cfg.JWTSecret),
-		Catalogue:      catalogueSvc,
-		MovieExtras:    extras,
-		Metadata:       metadataSvc,
-		Drive:          driveSvc,
-		Offline:        offlineSvc,
-		Monitor:        monitorSvc,
-		Library:        libSvc,
-		STRM:           strm.New(store.Client, driveSvc),
-		Tasks:          &taskViews{Service: taskSvc, database: store.Client, library: libSvc, monitor: monitorSvc},
-		Artwork:        scrapeSvc,
-		Maintenance:    maintenanceSvc,
-		Network:        networkSvc,
-		Emby:           embySvc,
-		Frontend:       miyabi.Frontend(),
-		STRMToken:      cfg.STRMToken,
-		TrustedProxies: cfg.TrustedProxies,
+		Logger:          logger,
+		Access:          api.NewAccessGateService(cfg.AccessPassword, cfg.JWTSecret),
+		Catalogue:       catalogueSvc,
+		MovieExtras:     extras,
+		BrowseExtension: browseExtension,
+		Metadata:        metadataSvc,
+		Drive:           driveSvc,
+		Offline:         offlineSvc,
+		Monitor:         monitorSvc,
+		Library:         libSvc,
+		STRM:            strm.New(store.Client, driveSvc),
+		Tasks:           &taskViews{Service: taskSvc, database: store.Client, library: libSvc, monitor: monitorSvc},
+		Artwork:         scrapeSvc,
+		Maintenance:     maintenanceSvc,
+		Network:         networkSvc,
+		Emby:            embySvc,
+		Frontend:        miyabi.Frontend(),
+		STRMToken:       cfg.STRMToken,
+		TrustedProxies:  cfg.TrustedProxies,
 	})
 
 	server := &http.Server{

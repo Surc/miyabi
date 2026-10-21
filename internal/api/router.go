@@ -15,24 +15,25 @@ import (
 )
 
 type Dependencies struct {
-	Logger         *slog.Logger
-	Access         AccessGate
-	Catalogue      CatalogueManager
-	MovieExtras    MovieExtrasManager
-	Metadata       MetadataManager
-	Drive          DriveManager
-	Offline        OfflineManager
-	Monitor        SubscriptionManager
-	Library        LibraryManager
-	STRM           STRMRelay
-	Tasks          TaskManager
-	Artwork        ArtworkReader
-	Maintenance    MaintenanceManager
-	Network        NetworkManager
-	Emby           EmbyManager
-	Frontend       fs.FS
-	STRMToken      string
-	TrustedProxies []string
+	Logger          *slog.Logger
+	Access          AccessGate
+	Catalogue       CatalogueManager
+	MovieExtras     MovieExtrasManager
+	BrowseExtension BrowseExtensionManager
+	Metadata        MetadataManager
+	Drive           DriveManager
+	Offline         OfflineManager
+	Monitor         SubscriptionManager
+	Library         LibraryManager
+	STRM            STRMRelay
+	Tasks           TaskManager
+	Artwork         ArtworkReader
+	Maintenance     MaintenanceManager
+	Network         NetworkManager
+	Emby            EmbyManager
+	Frontend        fs.FS
+	STRMToken       string
+	TrustedProxies  []string
 }
 
 // NewRouter requires an Access gate, including when password protection is disabled.
@@ -74,6 +75,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 
 	protected := api.Group("", authMiddleware(deps.Access))
 	registerMovieExtras(protected, deps.MovieExtras)
+	registerBrowseExtension(protected, deps.BrowseExtension)
 
 	settingsAPI := protected.Group("/settings", noStore())
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))
