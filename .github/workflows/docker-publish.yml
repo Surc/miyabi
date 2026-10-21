@@ -8,9 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  IMAGE_NAME: ghcr.io/ppxb/miyabi
-
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -149,6 +146,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR names must be lowercase; derive the namespace so forks publish to
+      # their own registry while the upstream repository keeps the same address.
+      - name: Resolve image name
+        shell: bash
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Extract metadata
         id: meta
