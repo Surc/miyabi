@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/error-state'
 import { formatSize } from '@/lib/format'
+import { discoverKeys } from '@/api/movie-detail-cache'
 import { SettingsSection, SettingRow } from '@/features/settings/shared'
 
 const fields: Array<{
@@ -73,6 +74,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
     mutationFn: saveBrowseSettings,
     onSuccess: settings => {
       client.setQueryData(browseKeys.settings, settings)
+      void client.invalidateQueries({ queryKey: [...browseKeys.all, 'rating'] })
       close()
     }
   })
@@ -84,6 +86,10 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
     onSuccess: data => {
       client.setQueryData(browseKeys.stats, data)
       client.removeQueries({ queryKey: [...browseKeys.all, 'rating'] })
+      client.removeQueries({
+        queryKey: discoverKeys.all,
+        predicate: query => !query.getObserversCount()
+      })
       resetBrowseSessions()
       setScope(undefined)
     }

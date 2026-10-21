@@ -90,7 +90,11 @@ export class BrowsePreloader {
     for (const listener of this.listeners) listener()
   }
   private acceptResource(entry: Entry, result: Cached<ResourceSnapshot>) {
-    entry.movie = { ...entry.movie, title: result.data.movie.title, cover: result.data.movie.cover }
+    entry.movie = {
+      ...entry.movie,
+      title: result.data.movie.title || entry.movie.title,
+      cover: result.data.movie.cover || entry.movie.cover
+    }
     entry.resources = {
       ...result,
       data: {

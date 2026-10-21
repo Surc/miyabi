@@ -38,6 +38,10 @@ type BrowseResources struct {
 	HasSubtitle bool               `json:"has_subtitle"`
 	HasCracked  bool               `json:"has_cracked"`
 }
+type browseReference struct {
+	Code  string `json:"code"`
+	Cover string `json:"cover"`
+}
 type browseExtensionSource interface {
 	Browse(context.Context, domain.BrowseOptions) ([]Movie, error)
 	Search(context.Context, string, domain.SearchOptions) ([]Movie, error)
@@ -47,6 +51,14 @@ type browseExtensionSource interface {
 }
 type browseRatingReader interface {
 	JavLibraryRating(context.Context, string) (domain.ExternalRating, error)
+}
+type browseGenerationKey struct{}
+
+func browseGeneration(ctx context.Context, current uint64) uint64 {
+	if inherited, ok := ctx.Value(browseGenerationKey{}).(uint64); ok {
+		return inherited
+	}
+	return current
 }
 
 // BrowseExtension is opt-in: durable data and fresh resource summaries never
@@ -107,7 +119,11 @@ func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 // Initial reads return last-known data immediately. A separate refresh request
 // revalidates only stale values; failures retain the last successful snapshot.
 func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
+	if err := ctx.Err(); err != nil {
+		return BrowseCached[T]{}, err
+	}
 	r, ok, generation := s.store.read(namespace, key)
+	generation = browseGeneration(ctx, generation)
 	var cached BrowseCached[T]
 	if ok {
 		ok = json.Unmarshal(r.Data, &cached.Data) == nil
@@ -121,6 +137,7 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 	var result BrowseCached[T]
 	callKey := fmt.Sprintf("%d:%s:%s", generation, namespace, key)
 	data, err := s.loads.get(ctx, callKey, func(ctx context.Context) (json.RawMessage, error) {
+		ctx = context.WithValue(ctx, browseGenerationKey{}, generation)
 		value, complete, err := load(ctx)
 		if err != nil {
 			return nil, err
@@ -166,6 +183,7 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 func (s *BrowseExtension) BrowsePage(ctx context.Context, options domain.BrowseOptions, refresh bool) (BrowseCached[[]Movie], error) {
 	key := fmt.Sprintf("browse:%#v", options)
 	_, _, generation := s.store.read("indexes", key)
+	generation = browseGeneration(ctx, generation)
 	return browseLoad(ctx, s, "indexes", key, time.Duration(s.Settings().ListMinutes)*time.Minute, refresh, func(ctx context.Context) ([]Movie, bool, error) {
 		items, err := s.source.Browse(ctx, options)
 		if err == nil && ctx.Err() == nil {
@@ -177,6 +195,7 @@ func (s *BrowseExtension) BrowsePage(ctx context.Context, options domain.BrowseO
 func (s *BrowseExtension) SearchPage(ctx context.Context, query string, options domain.SearchOptions, refresh bool) (BrowseCached[[]Movie], error) {
 	key := fmt.Sprintf("search:%q:%#v", query, options)
 	_, _, generation := s.store.read("indexes", key)
+	generation = browseGeneration(ctx, generation)
 	return browseLoad(ctx, s, "indexes", key, time.Duration(s.Settings().ListMinutes)*time.Minute, refresh, func(ctx context.Context) ([]Movie, bool, error) {
 		items, err := s.source.Search(ctx, query, options)
 		if err == nil && ctx.Err() == nil {
@@ -187,11 +206,30 @@ func (s *BrowseExtension) SearchPage(ctx context.Context, query string, options 
 }
 func (s *BrowseExtension) seedRatings(items []Movie, generation uint64) {
 	for _, item := range items {
+		reference := browseReference{Code: item.Code, Cover: item.Cover}
+		if old, ok, _ := s.store.read("references", item.ID); ok {
+			var previous browseReference
+			if json.Unmarshal(old.Data, &previous) == nil {
+				if reference.Code == "" {
+					reference.Code = previous.Code
+				}
+				if reference.Cover == "" {
+					reference.Cover = previous.Cover
+				}
+			}
+		}
+		ref, _ := json.Marshal(reference)
+		if err := s.store.write("references", item.ID, browseRecord{s.now(), ref}, generation); err != nil {
+			slog.Warn("persist browse reference", "error", err)
+		}
 		value, max := item.Rating, int(item.RatingMax)
 		if max == 0 {
 			max = 5
 		}
 		rating := domain.ExternalRating{Source: item.RatingSource, Score: &value, Max: max, Found: true}
+		if value <= 0 {
+			rating.Score = nil
+		}
 		if rating.Source == "" {
 			rating.Source = "javdb"
 		}
@@ -203,6 +241,7 @@ func (s *BrowseExtension) seedRatings(items []Movie, generation uint64) {
 }
 func (s *BrowseExtension) movie(ctx context.Context, id string) (domain.MovieDetail, error) {
 	_, _, generation := s.store.read("works", id)
+	generation = browseGeneration(ctx, generation)
 	result, err := browseLoad(ctx, s, "works", id, 0, false, func(ctx context.Context) (domain.MovieDetail, bool, error) {
 		item, err := s.source.CatalogueDetail(ctx, id)
 		// Dynamic values are stored independently and never become permanent metadata.
@@ -235,14 +274,14 @@ func (s *BrowseExtension) Resources(ctx context.Context, id string, refresh bool
 func (s *BrowseExtension) Rating(ctx context.Context, source, id string, refresh bool) (BrowseCached[domain.ExternalRating], error) {
 	return browseLoad(ctx, s, "ratings", source+":"+id, time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
 		if source == "javlibrary" {
-			movie, err := s.movie(ctx, id)
+			ref, err := s.reference(ctx, id)
 			if err != nil {
 				return domain.ExternalRating{}, false, err
 			}
 			if s.ratings == nil {
 				return domain.ExternalRating{}, false, fmt.Errorf("rating source unavailable")
 			}
-			rating, err := s.ratings.JavLibraryRating(ctx, movie.Code)
+			rating, err := s.ratings.JavLibraryRating(ctx, ref.Code)
 			return rating, true, err
 		}
 		movie, err := s.source.CatalogueDetail(ctx, id)
@@ -254,18 +293,36 @@ func (s *BrowseExtension) Rating(ctx context.Context, source, id string, refresh
 		if provider == "" {
 			provider = "javdb"
 		}
-		return domain.ExternalRating{Source: provider, Score: &movie.Rating, Max: max, Found: true}, true, err
+		rating := domain.ExternalRating{Source: provider, Score: &movie.Rating, Max: max, Found: true}
+		if movie.Rating <= 0 {
+			rating.Score = nil
+		}
+		return rating, true, err
 	})
 }
 func (s *BrowseExtension) Image(ctx context.Context, id string) (domain.Media, error) {
-	movie, err := s.movie(ctx, id)
+	_, _, generation := s.store.read("works", id)
+	ctx = context.WithValue(ctx, browseGenerationKey{}, browseGeneration(ctx, generation))
+	ref, err := s.reference(ctx, id)
 	if err != nil {
 		return domain.Media{}, err
 	}
 	// Target URLs come only from verified metadata, never from request parameters.
-	result, err := browseLoad(ctx, s, "images", id+":"+movie.Cover, 0, false, func(ctx context.Context) (domain.Media, bool, error) {
-		media, err := s.source.Media(ctx, movie.Cover)
+	result, err := browseLoad(ctx, s, "images", id+":"+ref.Cover, 0, false, func(ctx context.Context) (domain.Media, bool, error) {
+		media, err := s.source.Media(ctx, ref.Cover)
 		return media, true, err
 	})
 	return result.Data, err
+}
+
+// Lists already supply trustworthy cover URLs and codes. Images and optional
+// ratings must not fan out full-detail requests ahead of the resource queue.
+func (s *BrowseExtension) reference(ctx context.Context, id string) (browseReference, error) {
+	r, ok, _ := s.store.read("references", id)
+	var ref browseReference
+	if ok && json.Unmarshal(r.Data, &ref) == nil && ref.Code != "" {
+		return ref, nil
+	}
+	movie, err := s.movie(ctx, id)
+	return browseReference{Code: movie.Code, Cover: movie.Cover}, err
 }

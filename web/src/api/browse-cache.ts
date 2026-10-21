@@ -143,6 +143,8 @@ export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
     retry: false
   })
 }
+const snapshotAccess = new WeakMap<object, number>()
+let snapshotSequence = 0
 export function seedBrowseMagnets(
   client: ReturnType<typeof useQueryClient>,
   id: string,
@@ -169,12 +171,17 @@ export function seedBrowseMagnets(
         },
         { updatedAt: new Date(result.updated_at).getTime() }
       )
-    // Full snapshots stay durable on the NAS; retain only two idle batches in RAM.
+    for (const key of [discoverKeys.movie(id), discoverKeys.magnets(id)]) {
+      const query = client.getQueryCache().find({ queryKey: key, exact: true })
+      if (query) snapshotAccess.set(query, ++snapshotSequence)
+    }
+    // Rank by use, not source timestamps: restored snapshots may share an old
+    // update time. Only extension-owned idle entries participate in eviction.
     const idle = client
       .getQueryCache()
       .findAll({ queryKey: discoverKeys.all })
-      .filter(query => query.queryKey[1] === 'movie' && !query.getObserversCount())
-      .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt)
+      .filter(query => snapshotAccess.has(query) && !query.getObserversCount())
+      .sort((a, b) => (snapshotAccess.get(b) ?? 0) - (snapshotAccess.get(a) ?? 0))
     for (const query of idle.slice(pages * 20 * 4))
       client.removeQueries({ queryKey: query.queryKey, exact: true })
   }

@@ -220,3 +220,27 @@ test('rating slots enforce the limit and remove canceled queued requests', async
   )
   expect(max).toBe(2)
 })
+test('expired resources keep last-known rows but must be revalidated before counting ready', async () => {
+  let calls = 0
+  const loader = new BrowsePreloader(
+    {
+      page: async () => Array.from({ length: 20 }, (_, i) => movie(i + 1)),
+      resources: async id => {
+        calls++
+        const result = resources(id)
+        result.updated_at = '2026-10-21T01:00:00Z'
+        return result
+      }
+    },
+    false
+  )
+  loader.setTarget(1, 1)
+  await loader.start()
+  expect(loader.expireResources(30 * 60_000, Date.parse('2026-10-21T01:29:00Z'))).toBe(false)
+  expect(loader.expireResources(30 * 60_000, Date.parse('2026-10-21T01:31:00Z'))).toBe(true)
+  expect(loader.getSnapshot().rows).toHaveLength(20)
+  expect(loader.getSnapshot().ready).toBe(0)
+  await loader.start()
+  expect(calls).toBe(40)
+  expect(loader.getSnapshot().phase).toBe('complete')
+})

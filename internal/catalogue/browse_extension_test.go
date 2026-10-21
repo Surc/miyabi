@@ -16,6 +16,9 @@ type browseFake struct {
 	pages, details, magnets, images, ratings int
 	partial, fail                            bool
 	started, release                         chan struct{}
+	detailStarted, detailRelease             chan struct{}
+	tags                                     []string
+	unrated                                  bool
 }
 
 func (f *browseFake) Browse(ctx context.Context, options domain.BrowseOptions) ([]Movie, error) {
@@ -27,24 +30,36 @@ func (f *browseFake) Browse(ctx context.Context, options domain.BrowseOptions) (
 	if f.fail {
 		return nil, errors.New("offline")
 	}
-	return []Movie{{Movie: domain.Movie{ID: "film", Code: "ABP-123", Rating: 4.2, RatingMax: 5, RatingSource: "javdb"}}}, nil
+	return []Movie{{Movie: domain.Movie{ID: "film", Code: "ABP-123", Cover: "https://example.com/cover.jpg", Rating: 4.2, RatingMax: 5, RatingSource: "javdb"}}}, nil
 }
 func (f *browseFake) Search(ctx context.Context, query string, options domain.SearchOptions) ([]Movie, error) {
 	return f.Browse(ctx, domain.BrowseOptions{Page: options.Page})
 }
 func (f *browseFake) CatalogueDetail(ctx context.Context, id string) (domain.MovieDetail, error) {
 	f.details++
+	if f.detailStarted != nil {
+		close(f.detailStarted)
+		<-f.detailRelease
+	}
 	if f.fail {
 		return domain.MovieDetail{}, errors.New("offline")
 	}
-	return domain.MovieDetail{Movie: domain.Movie{ID: id, Code: "ABP-123", Title: "Title", Cover: "https://example.com/cover.jpg", Rating: 4.2, RatingMax: 5, HasSubtitle: true, MagnetsCount: 2}, Zone: domain.ZoneCensored}, nil
+	score := 4.2
+	if f.unrated {
+		score = 0
+	}
+	return domain.MovieDetail{Movie: domain.Movie{ID: id, Code: "ABP-123", Title: "Title", Cover: "https://example.com/cover.jpg", Rating: score, RatingMax: 5, HasSubtitle: true, MagnetsCount: 2}, Zone: domain.ZoneCensored}, nil
 }
 func (f *browseFake) BrowseResourceSnapshot(ctx context.Context, movie domain.MovieDetail) ([]Magnet, bool, error) {
 	f.magnets++
 	if f.fail {
 		return nil, false, errors.New("offline")
 	}
-	return []Magnet{{Magnet: domain.Magnet{Hash: "hash", Tags: []string{domain.MagnetTagSubtitle, domain.MagnetTagCracked}}}}, !f.partial, nil
+	tags := f.tags
+	if tags == nil {
+		tags = []string{domain.MagnetTagSubtitle, domain.MagnetTagCracked}
+	}
+	return []Magnet{{Magnet: domain.Magnet{Hash: "hash", Tags: tags}}}, !f.partial, nil
 }
 func (f *browseFake) Media(ctx context.Context, url string) (domain.Media, error) {
 	f.images++
@@ -238,5 +253,60 @@ func TestBrowseIndexesAreSeparatedByPageAndFilters(t *testing.T) {
 	var rating domain.ExternalRating
 	if !ok || json.Unmarshal(r.Data, &rating) != nil || rating.Max != 5 || rating.Source != "javdb" {
 		t.Fatal("source rating lost")
+	}
+}
+func TestClearRejectsNestedImageWritesAfterMetadataReturns(t *testing.T) {
+	f := &browseFake{detailStarted: make(chan struct{}), detailRelease: make(chan struct{})}
+	s, _ := newBrowseTest(t, f)
+	done := make(chan error, 1)
+	go func() { _, err := s.Image(context.Background(), "film"); done <- err }()
+	<-f.detailStarted
+	if _, err := s.ClearCache("all"); err != nil {
+		t.Fatal(err)
+	}
+	close(f.detailRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.CacheStats()
+	if err != nil || stats.Bytes != 0 {
+		t.Fatalf("cleared data resurrected: %+v %v", stats, err)
+	}
+}
+func TestUncensoredResourceDoesNotCreateCrackedBadge(t *testing.T) {
+	f := &browseFake{tags: []string{domain.MagnetTagUncensored}}
+	s, _ := newBrowseTest(t, f)
+	r, err := s.Resources(t.Context(), "film", false)
+	if err != nil || r.Data.HasCracked || r.Data.HasSubtitle || !r.Data.Complete {
+		t.Fatalf("resource labels=%+v %v", r, err)
+	}
+}
+func TestUnratedAndCanceledCacheReadsRemainDistinct(t *testing.T) {
+	f := &browseFake{unrated: true}
+	s, _ := newBrowseTest(t, f)
+	r, err := s.Rating(t.Context(), "javdb", "film", false)
+	if err != nil || !r.Data.Found || r.Data.Score != nil {
+		t.Fatalf("unrated=%+v %v", r, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.Rating(ctx, "javdb", "film", false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel=%v", err)
+	}
+}
+func TestCoverAndRatingUseListReferencesWithoutDetailFanout(t *testing.T) {
+	f := &browseFake{}
+	s, _ := newBrowseTest(t, f)
+	if _, err := s.BrowsePage(t.Context(), domain.BrowseOptions{Page: 1, Limit: 20}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Image(t.Context(), "film"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Rating(t.Context(), "javlibrary", "film", false); err != nil {
+		t.Fatal(err)
+	}
+	if f.details != 0 || f.magnets != 0 || f.images != 1 || f.ratings != 1 {
+		t.Fatalf("unexpected fanout %+v", f)
 	}
 }
