@@ -54,6 +54,7 @@ type App struct {
 	monitors  *monitor.Service
 	driveSvc  *drive.Drive
 	catalogue *catalogue.Service
+	extras    *catalogue.MovieExtras
 	scrape    *scrape.Service
 	metadata  *metadata.Service
 	embySvc   *emby.Service
@@ -180,11 +181,13 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	taskRegistry.Register(tasks.NewHandler(tasks.KindSubscriptionBatch, monitorSvc.BatchHandler, monitorSvc.BatchFinished))
 
 	pools := newTaskPools(taskSvc, logger)
+	extras := catalogue.NewMovieExtras(catalogueSvc)
 
 	router := api.NewRouter(api.Dependencies{
 		Logger:         logger,
 		Access:         api.NewAccessGateService(cfg.AccessPassword, cfg.JWTSecret),
 		Catalogue:      catalogueSvc,
+		MovieExtras:    extras,
 		Metadata:       metadataSvc,
 		Drive:          driveSvc,
 		Offline:        offlineSvc,
@@ -218,6 +221,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		monitors:  monitorSvc,
 		driveSvc:  driveSvc,
 		catalogue: catalogueSvc,
+		extras:    extras,
 		scrape:    scrapeSvc,
 		metadata:  metadataSvc,
 		embySvc:   embySvc,
@@ -278,6 +282,9 @@ func (a *App) Run(ctx context.Context) error {
 
 // Close releases resources held by the application.
 func (a *App) Close() error {
+	if a.extras != nil {
+		a.extras.Close()
+	}
 	if a.embySvc != nil {
 		a.embySvc.Close()
 	}

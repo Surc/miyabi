@@ -1,4 +1,5 @@
 import { CalendarIcon, ClockIcon, StarIcon, type LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import type { DiscoverMovie, DiscoverMovieDetail } from '@/api/discover'
 import type { LibraryMovieDetail } from '@/api/library'
@@ -9,10 +10,12 @@ import { MovieMetadata } from './metadata'
 
 export function MovieHero({
   movie,
-  libraryStatus
+  libraryStatus,
+  extraStats
 }: {
   movie: DiscoverMovieDetail | LibraryMovieDetail
   libraryStatus?: LibraryMovieDetail['scrape_status']
+  extraStats?: ReactNode
 }) {
   return (
     <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-8">
@@ -42,7 +45,7 @@ export function MovieHero({
           ) : null}
         </div>
 
-        <MovieStats movie={movie} />
+        <MovieStats movie={movie} extraStats={extraStats} />
 
         {!libraryStatus && 'release_status' in movie ? (
           <div className="flex flex-wrap gap-2">
@@ -57,12 +60,14 @@ export function MovieHero({
 }
 
 function MovieStats({
-  movie
+  movie,
+  extraStats
 }: {
   movie: Pick<
     DiscoverMovie,
     'release_date' | 'duration' | 'rating' | 'rating_source' | 'rating_max'
   >
+  extraStats?: ReactNode
 }) {
   const stats: Array<{ label: string; value: string; icon: LucideIcon }> = []
   if (movie.release_date) {
@@ -81,7 +86,7 @@ function MovieStats({
       icon: StarIcon
     })
   }
-  if (stats.length === 0) return null
+  if (stats.length === 0 && !extraStats) return null
 
   return (
     <dl className="flex flex-wrap divide-x divide-border/60 rounded-2xl bg-muted py-1 ring-1 ring-border dark:bg-card/60 dark:ring-0">
@@ -97,6 +102,7 @@ function MovieStats({
           <dd className="text-sm font-semibold tabular-nums sm:text-base">{stat.value}</dd>
         </div>
       ))}
+      {extraStats}
     </dl>
   )
 }

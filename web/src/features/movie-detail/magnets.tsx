@@ -26,6 +26,8 @@ import { formatSize } from '@/lib/format'
 import { notifyOfflineTask, notifyTaskError } from '@/features/tasks/task-toast'
 import { MovieSubscriptionAction } from './subscription-action'
 import { MovieMagnetsSkeleton } from './skeleton'
+import { sortMagnets, type MagnetOrder } from './extensions/magnet-dates'
+import { MagnetPublication, MagnetSort } from './extensions/magnet-publication'
 
 const sourceLabels: Record<string, string> = { javdb: 'JavDB', javbus: 'JavBus' }
 
@@ -54,6 +56,7 @@ export function MovieMagnets({
   const hasDirectory = Boolean(account.data?.directory)
   const [copiedHash, setCopiedHash] = useState('')
   const [copyError, setCopyError] = useState(false)
+  const [order, setOrder] = useState<MagnetOrder>('recommended')
 
   async function copy(magnet: DiscoverMagnet) {
     setCopyError(false)
@@ -67,7 +70,10 @@ export function MovieMagnets({
 
   return (
     <section className="space-y-4">
-      <h2 className="text-xl font-semibold tracking-normal">磁力链</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold tracking-normal">磁力链</h2>
+        {query.data?.length ? <MagnetSort value={order} onChange={setOrder} /> : null}
+      </div>
       {connected && account.data?.account && !hasDirectory ? (
         <p className="text-sm text-muted-foreground">
           请先到{' '}
@@ -92,7 +98,7 @@ export function MovieMagnets({
         <MovieSubscriptionAction movieID={movieID} />
       ) : (
         <div className="space-y-4">
-          {query.data.map(magnet => (
+          {sortMagnets(query.data, order).map(magnet => (
             <MagnetCard
               key={`${movieID}:${magnet.hash}`}
               movieID={movieID}
@@ -162,6 +168,7 @@ function MagnetCard({
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm leading-6 text-muted-foreground">
               <span className="text-xs">{formatSize(magnet.size)}</span>
+              <MagnetPublication value={magnet.created_at} />
               {magnet.sources?.map(source => (
                 <Badge key={source} variant="outline">
                   {sourceLabels[source] ?? source}

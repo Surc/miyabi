@@ -14,6 +14,10 @@ vi.mock('@/api/discover', () => ({
 }))
 vi.mock('@/api/browse-history', () => ({ useRecordMovieView: vi.fn() }))
 vi.mock('@/api/library', () => ({ useLibraryMovie: vi.fn() }))
+vi.mock('@/api/movie-extras', () => ({
+  useJavLibraryRating: () => ({ isPending: true }),
+  useMovieComments: () => ({ isPending: true })
+}))
 
 beforeEach(() => {
   vi.clearAllMocks()

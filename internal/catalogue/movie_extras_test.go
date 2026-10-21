@@ -1,0 +1,84 @@
+package catalogue
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javlibrary"
+)
+
+type socialLibraryStub struct {
+	lookups, comments int
+	fail              bool
+}
+
+func (s *socialLibraryStub) Lookup(ctx context.Context, code string) (javlibrary.Film, error) {
+	s.lookups++
+	if err := ctx.Err(); err != nil {
+		return javlibrary.Film{}, err
+	}
+	if s.fail {
+		return javlibrary.Film{}, fmt.Errorf("upstream failure")
+	}
+	score := 8.3
+	return javlibrary.Film{ID: code, Rating: domain.ExternalRating{Source: "javlibrary", Max: 10, Found: true, Score: &score}}, nil
+}
+func (s *socialLibraryStub) Comments(_ context.Context, id string, page int) (domain.MovieComments, error) {
+	s.comments++
+	return domain.MovieComments{Source: "javlibrary", Page: page, Items: []domain.MovieComment{{ID: id, Content: "comment"}}}, nil
+}
+func (*socialLibraryStub) Close() {}
+
+func TestExtrasCacheSharesLookupAndIsolatesPages(t *testing.T) {
+	e := NewMovieExtras(&Service{})
+	defer e.Close()
+	stub := &socialLibraryStub{}
+	e.library = stub
+	rating, err := e.JavLibraryRating(t.Context(), " abp-123 ")
+	if err != nil || rating.Max != 10 {
+		t.Fatal(rating, err)
+	}
+	for _, page := range []int{1, 1, 2} {
+		if _, err := e.MovieComments(t.Context(), "javlibrary", "", "ABP-123", page); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stub.lookups != 1 || stub.comments != 2 {
+		t.Fatalf("lookups=%d comments=%d", stub.lookups, stub.comments)
+	}
+	if _, err := e.JavLibraryRating(t.Context(), "ABP-124"); err != nil {
+		t.Fatal(err)
+	}
+	if stub.lookups != 2 {
+		t.Fatal("different film reused lookup")
+	}
+	if _, err := e.MovieComments(t.Context(), "javdb", "film", "", 1); !domain.IsKind(err, domain.KindUpstream) {
+		t.Fatal("missing optional capability was not isolated", err)
+	}
+}
+
+func TestExtrasNeverCachesFailureAndPropagatesCancellation(t *testing.T) {
+	e := NewMovieExtras(&Service{})
+	defer e.Close()
+	stub := &socialLibraryStub{fail: true}
+	e.library = stub
+	for range 2 {
+		if _, err := e.JavLibraryRating(t.Context(), "ABP-123"); !domain.IsKind(err, domain.KindUpstream) {
+			t.Fatal(err)
+		}
+	}
+	if stub.lookups != 2 {
+		t.Fatal("failure cached")
+	}
+	stub.fail = false
+	if _, err := e.JavLibraryRating(t.Context(), "ABP-123"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := e.JavLibraryRating(ctx, "ABP-123"); err != context.Canceled {
+		t.Fatal(err)
+	}
+}
