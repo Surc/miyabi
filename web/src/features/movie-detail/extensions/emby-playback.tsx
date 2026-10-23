@@ -1,5 +1,5 @@
 import { LoaderCircleIcon, PlayIcon } from 'lucide-react'
-import { useEmbyPlayback, isEmbyPlayURL } from '@/api/emby-playback'
+import { useEmbyPlayback, isEmbyPlayURL, isEmbyPlaybackFresh } from '@/api/emby-playback'
 import { Button } from '@/components/ui/button'
 import { describeApiError } from '@/api/client'
 
@@ -22,11 +22,18 @@ function AndroidEmbyPlayback({ code }: { code: string }) {
   const query = useEmbyPlayback(code)
   const target = query.data
   const ready =
-    !query.isError && !query.isFetching && target?.status === 'ready' && isEmbyPlayURL(target.url)
+    !query.isError &&
+    !query.isFetching &&
+    !query.isStale &&
+    isEmbyPlaybackFresh(query.dataUpdatedAt) &&
+    target?.status === 'ready' &&
+    isEmbyPlayURL(target.url)
   let message = '需先在安卓 Emby App 登录同一服务器；点击后直接播放，默认从首个视频文件开始。'
   if (!code.trim()) message = '缺少影片番号，无法定位 Emby 播放资源。'
   else if (query.isError) message = describeApiError(query.error)
-  else if (query.isPending) message = '正在确认 Emby 中的播放资源…'
+  else if (query.isPending || query.isFetching) message = '正在确认 Emby 中的播放资源…'
+  else if (query.isStale || !isEmbyPlaybackFresh(query.dataUpdatedAt))
+    message = '播放信息已过期，请重新检查后点击播放。'
   else if (target?.status === 'disabled') message = '请先在设置中启用并配置 Emby。'
   else if (target?.status === 'not_exported') message = '影片尚未导出播放文件，请先完成入库与同步。'
   else if (target?.status === 'not_found')
@@ -38,7 +45,15 @@ function AndroidEmbyPlayback({ code }: { code: string }) {
       <div className="flex flex-wrap gap-2">
         {ready ? (
           <Button asChild>
-            <a href={target.url}>
+            <a
+              href={target.url}
+              onClick={event => {
+                if (!isEmbyPlaybackFresh(query.dataUpdatedAt)) {
+                  event.preventDefault()
+                  void query.refetch()
+                }
+              }}
+            >
               <PlayIcon />在 Emby App 中播放
             </a>
           </Button>

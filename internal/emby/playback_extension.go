@@ -2,7 +2,6 @@ package emby
 
 import (
 	"context"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -44,6 +43,10 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	if cfg.LocalDir == "" {
 		return PlaybackTarget{}, domain.E(domain.KindInvalid, "请先配置 Emby 导出目录", nil)
 	}
+	client, err := newPlaybackClient(cfg, s.client.http)
+	if err != nil {
+		return PlaybackTarget{}, err
+	}
 	directory := export.EmbyMovieDir(cfg.LocalDir, code)
 	file, err := firstPlaybackFile(directory, nfo.FileStem(code))
 	if err != nil {
@@ -52,21 +55,11 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	if file == "" {
 		return PlaybackTarget{Status: "not_exported"}, nil
 	}
-	mediaPath := translatePath(filepath.Join(directory, file), cfg.LocalDir, cfg.MediaPath)
+	mediaPath := playbackMediaPath(filepath.Join(directory, file), cfg.LocalDir, cfg.MediaPath)
 	if mediaPath == "" {
 		return PlaybackTarget{}, domain.E(domain.KindInvalid, "Emby 媒体库路径与导出目录不匹配", nil)
 	}
 
-	// Scope this client's redirect policy to the extension. An Emby API key must
-	// never follow a redirect to another origin; existing clients are untouched.
-	httpClient := *s.client.http
-	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
-		if len(via) >= 3 || next.URL.Scheme != via[0].URL.Scheme || next.URL.Host != via[0].URL.Host {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	}
-	client := &embyClient{http: &httpClient}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	query := url.Values{"Path": {mediaPath}, "Fields": {"Path"}, "Limit": {"2"}, "Recursive": {"true"}, "IncludeItemTypes": {"Movie"}, "EnableImages": {"false"}, "EnableUserData": {"false"}}
@@ -77,7 +70,7 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 			IsFolder bool   `json:"IsFolder"`
 		} `json:"Items"`
 	}
-	if err := client.request(ctx, cfg, http.MethodGet, "/Items?"+query.Encode(), nil, "", &result); err != nil {
+	if err := client.get(ctx, "Items", query, &result); err != nil {
 		return PlaybackTarget{}, err
 	}
 	if result.Items == nil {
@@ -85,7 +78,7 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	}
 	itemID := ""
 	for _, item := range *result.Items {
-		if item.IsFolder || item.Path != mediaPath || !playbackID.MatchString(item.ID) {
+		if item.IsFolder || !samePlaybackPath(mediaPath, item.Path) || !playbackID.MatchString(item.ID) {
 			return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 影片路径或标识不匹配，无法确认播放目标", nil)
 		}
 		if itemID != "" && itemID != item.ID {
@@ -96,8 +89,10 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	if itemID == "" {
 		return PlaybackTarget{Status: "not_found"}, nil
 	}
-	info, err := client.ping(ctx, cfg)
-	if err != nil {
+	var info struct {
+		ID string `json:"Id"`
+	}
+	if err := client.get(ctx, "System/Info", nil, &info); err != nil {
 		return PlaybackTarget{}, err
 	}
 	if !playbackID.MatchString(info.ID) {

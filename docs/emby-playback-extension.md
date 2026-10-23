@@ -13,7 +13,7 @@
 
 App 登录态、客户端版本、访问服务器的网络和播放权限由 Emby 负责；Miyabi 不传入账号、密码或 API Key。Miyabi 不能观测外部 App 是否成功启动，实际开播与续播行为需在用户设备验收。多文件影片默认选择首个生成的视频文件，不保证自动连续播放全部分集。
 
-`server_url` 是 Miyabi 后端访问 Emby 的地址，允许已有 `/emby` 前缀；生成的协议只包含服务器 ID 和影片 ID。现有 `public_url` 仍指 **Miyabi 的 STRM 访问地址**，不要将它改作 Emby Web 地址。此功能只支持 Miyabi 当前导出目录结构，不以番号模糊查找任意其他来源媒体库。
+`server_url` 是 Miyabi 后端访问 Emby 的 HTTP(S) 基址，允许已有 `/emby` 前缀及末尾斜线；直接播放扩展拒绝含账号、查询参数或片段的地址。生成的协议只包含服务器 ID 和影片 ID。现有 `public_url` 仍指 **Miyabi 的 STRM 访问地址**，不要将它改作 Emby Web 地址。此功能只支持 Miyabi 当前导出目录结构，不以番号模糊查找任意其他来源媒体库。
 
 ## 独立接口与行为
 
@@ -32,15 +32,19 @@ GET /api/extensions/emby/playback?code=ABC-123
 
 参数错误、目录读取错误、网络/鉴权失败、响应格式变化、路径不符、目标歧义均保留为错误，不伪装成未入库。取消沿用原上下文语义。当前详情可手动“重新检查”。
 
-新服务从 `export.EmbyMovieDir` 和 `nfo.FileStem` 定位生成文件，排除无关名称、目录和符号链接；多文件按 cd 数字顺序选择。复用 `translatePath` 映射 Emby 路径，使用 [官方 GET /Items 的 Path 参数](https://dev.emby.media/reference/RestAPI/ItemsService/getItems.html) 精确查询，并校验返回 Path/Id。确认唯一影片后读取 `/System/Info` 的服务器 ID。链接中不包含 STRM 地址或令牌，API Key 只放后端请求头，扩展请求禁止跨源重定向。
+新服务从 `export.EmbyMovieDir` 和 `nfo.FileStem` 定位生成文件，排除无关名称、目录和文件符号链接；多文件按 cd 数字顺序选择。独立 `playbackMediaPath` 映射 Emby 路径，使用 [官方 GET /Items 的 Path 参数](https://dev.emby.media/reference/RestAPI/ItemsService/getItems.html) 精确查询，并校验返回 Path/Id。支持 POSIX 根目录 `/`、绝对盘符路径及 UNC 共享路径；仅在可识别的盘符/UNC 路径上统一正反斜线，盘符统一大小写，目录和文件名仍精确区分大小写。百分号转义保留为字面文件名，不 URL 解码；相对目标路径和 `..` 路径段被拒绝。旧 `translatePath`、STRM 导出和配置结构不变。
 
-前端只为安卓当前详情查询，30 秒短缓存，关闭详情时可取消；列表预加载不访问 Emby。修改 Emby 设置后使播放查询失效。目标提前解析为普通链接，点击时同步打开协议，避免等待异步查找后丢失浏览器用户手势。
+确认唯一影片后读取 `/System/Info` 的服务器 ID。链接中不包含 STRM 地址或令牌，API Key 只放后端请求头。扩展请求保留总计 12 秒超时，禁止跨源重定向和无限重定向，成功响应最多读取 1 MiB JSON；非成功响应只报告 HTTP 状态，不回传 Emby 错误正文。非空列表中路径、标识或类型异常均失败，不能降级成 `not_found`。
+
+前端只为安卓当前详情查询：可见时每 30 秒重新检查，后台暂停轮询，返回前台或网络恢复时重新检查，关闭详情时取消请求。列表预加载不访问 Emby，修改 Emby 设置后取消并重置播放查询。获取中、错误或已过期数据不显示播放链接，点击时另核对时钟，避免后台定时器延迟导致误用旧链接。过期点击只重新查询，就绪后需再次点击。正常目标提前解析为普通链接，点击时同步打开协议，避免等待异步查找后丢失浏览器用户手势。
 
 ## 模块与升级接入点
 
 | 新增模块 | 职责 |
 | --- | --- |
-| `internal/emby/playback_extension.go` | 复用配置快照/路径映射/HTTP 客户端，增加只读目标解析方法 |
+| `internal/emby/playback_extension.go` | 复用配置快照，增加只读目标解析方法 |
+| `internal/emby/playback_paths.go` | 播放专用跨系统路径映射和严格路径比较 |
+| `internal/emby/playback_client.go` | 播放专用基址校验、重定向限制和有界 JSON 读取 |
 | `internal/api/emby_playback_extension.go` | 可选窄接口、独立路由与参数验证 |
 | `web/src/api/emby-playback.ts` | 独立缓存 keys、取消、协议校验 |
 | `web/src/features/movie-detail/extensions/emby-playback.tsx` | 平台适配、播放入口、不可用与重试状态 |
@@ -51,12 +55,12 @@ GET /api/extensions/emby/playback?code=ABC-123
 ## 本次一并落地的既有要求
 
 - 列表与详情统一显示“番号 · 名称”，相同番号避免重复，无番号保留原标题。只改变展示，不写回来源资料、NFO、文件名或旧 API。**已有资料无需重刮或重建**，升级页面即应用。
-- 发布工作流仅保留 `linux/amd64`，适合用户 J4125；移除 ARM64 和 QEMU。仍只由版本标签触发，功能分支推送不发布镜像，历史 v0.3.0 标签与镜像不变。
+- 发布工作流仅保留 `linux/amd64`，适合用户 J4125；移除 ARM64 和 QEMU。后续 v0.4.0 发布适配增加仅限 master 的手动版本发布；版本标签也可触发，普通功能分支推送不发布镜像。
 
 ## 验证与验收
 
 2026-10-23 在用户追加“先不编译”前，已通过 Emby/API 两包 Go 专项回归、前端完整 Vitest 37 文件/238 测试、TypeScript、Oxlint、Oxfmt 和前端生产构建。专项回归覆盖精确路径、错误目标、多个目标、空结果、取消、重定向、分集顺序、鉴权、链接/按钮状态及番号展示，使用本地 HTTP fixtures 和 SSR，无需真实媒体或账号。
 
-收到“先不编译”后不再运行编译、打包或发布。之后只完成 Go 格式检查、diff 空白检查和工作流 YAML/amd64 目标/仅标签触发的静态核对。随后补充的 `TestPlaybackServerFailuresDoNotBecomeNotFoundOrLaunchLinks` 四个子场景尚未执行；完整 Go 回归、race、服务端可执行文件与镜像构建也未执行，恢复编译授权后再补。前述通过结果不能覆盖这些未执行项。本次没有修改依赖声明、锁文件或 README。
+此前“先不编译”期间只完成静态检查，新增的 `TestPlaybackServerFailuresDoNotBecomeNotFoundOrLaunchLinks` 四个子场景当时尚未执行。之后恢复测试并完成 v0.4.0 发布；本轮用户继续授权“修复后合并然后发布”，以 `master@1e142f4` 为补丁基线重新验证上述四个场景及新增修复。最新记录见 [v0.4.1 回归记录](validation-emby-v0.4.1.md)，不能用较早测试替代本轮结果。没有修改依赖声明、锁文件或 README。
 
 浏览器及真实 Emby App 验收由用户完成：确认正常影片点击后直接进入播放、未扫描时给出提示、服务器配置变更后链接更新、多文件从首文件开始、App 未安装或未登录时的系统表现。尚未完成这些检查，不能将协议与 fixture 测试写成实机开播已通过。

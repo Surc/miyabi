@@ -46,27 +46,39 @@ func TestJavLibraryDiagnosticsStayInSanitizedAccessLog(t *testing.T) {
 	}
 	client := javlibrary.New(manager)
 	defer client.Close()
-	var logs bytes.Buffer
-	router := NewRouter(Dependencies{
-		Logger:      slog.New(slog.NewJSONHandler(&logs, nil)),
-		Access:      NewAccessGateService("", ""),
-		MovieExtras: &javLibraryDiagnosticManager{client: client},
-	})
-	request := httptest.NewRequest(http.MethodGet, "/api/extensions/movie/javlibrary-rating?code=ABP-123", nil)
-	request.Header.Set("X-Request-Id", "javlibrary-diagnostic-test")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway || response.Body.String() != `{"error":"外部评分或评论暂不可用，请稍后重试"}` {
-		t.Fatalf("public response changed: %d %s", response.Code, response.Body.String())
+	for _, incomingID := range []string{"", "javlibrary-diagnostic-test"} {
+		t.Run("incoming="+incomingID, func(t *testing.T) {
+			var logs bytes.Buffer
+			router := NewRouter(Dependencies{
+				Logger:      slog.New(slog.NewJSONHandler(&logs, nil)),
+				Access:      NewAccessGateService("", ""),
+				MovieExtras: &javLibraryDiagnosticManager{client: client},
+			})
+			request := httptest.NewRequest(http.MethodGet, "/api/extensions/movie/javlibrary-rating?code=ABP-123", nil)
+			if incomingID != "" {
+				request.Header.Set("X-Request-Id", incomingID)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusBadGateway || response.Body.String() != `{"error":"外部评分或评论暂不可用，请稍后重试"}` {
+				t.Fatalf("public response changed: %d %s", response.Code, response.Body.String())
+			}
+			// slog-gin returns generated IDs in the response and preserves an
+			// incoming ID in the log without requiring a response-header echo.
+			wantID := incomingID
+			if wantID == "" {
+				wantID = response.Header().Get("X-Request-Id")
+			}
+			records := readLogRecords(t, logs.Bytes())
+			if wantID == "" || len(records) != 1 || records[0]["id"] != wantID {
+				t.Fatalf("request correlation lost or duplicate failure logs: %s", logs.String())
+			}
+			for _, field := range []string{"operation=search", "category=proxy_http", "proxy_status=407"} {
+				if !strings.Contains(logs.String(), field) || strings.Contains(response.Body.String(), field) {
+					t.Fatalf("diagnostic missing from logs or exposed to API: %s", field)
+				}
+			}
+			assertPrivateLogValuesAbsent(t, logs.String(), "diagnostic-user", "diagnostic-password", "ABP-123")
+		})
 	}
-	records := readLogRecords(t, logs.Bytes())
-	if len(records) != 1 || records[0]["id"] != response.Header().Get("X-Request-Id") || records[0]["id"] != "javlibrary-diagnostic-test" {
-		t.Fatalf("request correlation lost or duplicate failure logs: %s", logs.String())
-	}
-	for _, field := range []string{"operation=search", "category=proxy_http", "proxy_status=407"} {
-		if !strings.Contains(logs.String(), field) || strings.Contains(response.Body.String(), field) {
-			t.Fatalf("diagnostic missing from logs or exposed to API: %s", field)
-		}
-	}
-	assertPrivateLogValuesAbsent(t, logs.String(), "diagnostic-user", "diagnostic-password", "ABP-123")
 }
