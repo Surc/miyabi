@@ -18,6 +18,7 @@ import { NetworkClient } from "@mdcz/runtime/network/NetworkClient";
 import { runWithCrawlerSource } from "@mdcz/runtime/network/networkExecution";
 import { FetchGateway } from "@mdcz/runtime/crawler/FetchGateway";
 import { CrawlerProvider } from "@mdcz/runtime/crawler/CrawlerProvider";
+import { listRegisteredCrawlerSites } from "@mdcz/runtime/crawler/registry";
 import { AggregationService } from "@mdcz/runtime/scrape/aggregation";
 import { TranslateService } from "@mdcz/runtime/scrape/TranslateService";
 import { prepareOnlineMetadata } from "@mdcz/runtime/scrape/prepareOnlineMetadata";
@@ -37,6 +38,63 @@ const imageURL = (value: string | undefined) => {
     return false;
   }
 };
+
+// Every mapping to an upstream configuration field is confined to this file.
+const managedFields = {
+  sites: ["scrape", "sites"],
+  direct_sites: ["network", "directSites"],
+  use_proxy: ["network", "useProxy"],
+  timeout: ["network", "timeout"],
+  retries: ["network", "retryCount"],
+  javdb_url: ["network", "javdbUrl"],
+  javbus_url: ["network", "javbusUrl"],
+  javdb_cookie: ["network", "javdbCookie"],
+  javbus_cookie: ["network", "javbusCookie"],
+  fantia_cookie: ["network", "fantiaCookie"],
+  translation_engine: ["translate", "engine"],
+  target_language: ["translate", "targetLanguage"],
+  deepl_key: ["translate", "deeplApiKey"],
+  baidu_service: ["translate", "baiduService"],
+  baidu_app_id: ["translate", "baiduAppId"],
+  baidu_secret: ["translate", "baiduSecretKey"],
+  baidu_key: ["translate", "baiduApiKey"],
+  llm_base_url: ["translate", "llmBaseUrl"],
+  llm_model: ["translate", "llmModelName"],
+  llm_key: ["translate", "llmApiKey"],
+  llm_api_format: ["translate", "llmApiFormat"],
+  llm_service_type: ["translate", "llmServiceType"],
+} as const;
+
+export function configurationBoundary(directory: string, configuration: unknown) {
+  const base = configurationSchema.parse(configuration);
+  const defaults: Record<string, unknown> = {};
+  for (const [key, [section, field]] of Object.entries(managedFields))
+    defaults[key] = (base[section] as unknown as Record<string, unknown>)[field];
+  const rawProxy = base.network.proxy.trim();
+  // MDCz treats proxyType=none as disabled even when an old address remains.
+  defaults.use_proxy = base.network.useProxy && base.network.proxyType !== "none" && !!rawProxy;
+  defaults.proxy_url =
+    base.network.proxyType === "none"
+      ? ""
+      : rawProxy && !rawProxy.includes("://")
+        ? `${base.network.proxyType}://${rawProxy}`
+        : rawProxy;
+  return {
+    defaults,
+    sites: listRegisteredCrawlerSites(),
+    baseDigest: hash(JSON.stringify(base)),
+    create(values: Record<string, unknown>) {
+      const next = structuredClone(base);
+      for (const [key, [section, field]] of Object.entries(managedFields))
+        (next[section] as unknown as Record<string, unknown>)[field] = values[key];
+      next.network.proxy = String(values.proxy_url);
+      next.network.proxyType = (
+        next.network.proxy ? new URL(next.network.proxy).protocol.slice(0, -1) : "none"
+      ) as typeof next.network.proxyType;
+      return createAdapter(directory, configurationSchema.parse(next));
+    },
+  };
+}
 
 export async function createAdapter(directory: string, configuration: unknown) {
   const config = configurationSchema.parse(configuration);

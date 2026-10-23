@@ -49,8 +49,10 @@ type Update struct {
 }
 
 type Health struct {
-	Protocol int    `json:"protocol"`
-	Revision string `json:"revision"`
+	Protocol             int    `json:"protocol"`
+	Revision             string `json:"revision"`
+	ConfigurationVersion int    `json:"configuration_version"`
+	ConfigurationID      string `json:"configuration_id"`
 }
 
 type Service struct {
@@ -151,7 +153,7 @@ func (s *Service) Test(ctx context.Context, change Update) (Health, error) {
 	defer cancel()
 	var health Health
 	err := s.json(ctx, cfg, http.MethodGet, "/v1/health", nil, &health)
-	if err == nil && (health.Protocol != Protocol || health.Revision != EngineRevision) {
+	if err == nil && !compatibleConfiguration(health) {
 		err = domain.E(domain.KindUpstream, "桥接版本不匹配，请使用文档中的固定版本", nil)
 	}
 	return health, err
@@ -223,7 +225,7 @@ func (s *Service) resolve(ctx context.Context, cfg Settings, ref domain.MovieRef
 		result.Detail.Sources = append(result.Detail.Sources, domain.SourceID{Provider: "javdb", ID: ref.JavDBID})
 	}
 	if result.Detail.Plot != "" {
-		body, err := json.Marshal(Synopsis{Enabled: true, Plot: result.Detail.Plot})
+		body, err := json.Marshal(Synopsis{Enabled: true, Plot: result.Detail.Plot, ConfigurationID: result.ConfigurationID})
 		if err != nil {
 			return domain.MovieMetadata{}, err
 		}
@@ -272,7 +274,7 @@ func (s *Service) request(ctx context.Context, cfg Settings, method, path string
 	if cfg.ServerURL == "" || cfg.APIKey == "" {
 		return nil, domain.E(domain.KindInvalid, "请先配置 MDCz 桥接服务", nil)
 	}
-	if path != "/v1/health" {
+	if path != "/v1/health" && !(path == "/v1/configuration" && method == http.MethodGet) {
 		select {
 		case s.slots <- struct{}{}:
 		case <-ctx.Done():
@@ -295,6 +297,18 @@ func (s *Service) request(ctx context.Context, cfg Settings, method, path string
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if path == "/v1/configuration" {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return nil, domain.E(domain.KindInvalid, "MDCz 配置无效，请检查来源、代理地址和翻译参数", nil)
+			case http.StatusConflict:
+				return nil, domain.E(domain.KindConflict, "配置已被修改，请重新读取后再保存", nil)
+			case http.StatusNotFound:
+				return nil, domain.E(domain.KindUpstream, "桥接不支持网页配置，请更新配套版本", nil)
+			case http.StatusServiceUnavailable:
+				return nil, domain.E(domain.KindConflict, "桥接正在刮削，请等待当前任务完成后重试", nil)
+			}
+		}
 		// Do not relay upstream response bodies: site errors can contain credentials.
 		return nil, domain.E(domain.KindUpstream, fmt.Sprintf("MDCz 桥接请求失败（HTTP %d），请检查配置后重试", response.StatusCode), nil)
 	}
@@ -309,8 +323,9 @@ func (s *Service) request(ctx context.Context, cfg Settings, method, path string
 }
 
 type Synopsis struct {
-	Enabled bool   `json:"enabled"`
-	Plot    string `json:"plot"`
+	Enabled         bool   `json:"enabled"`
+	Plot            string `json:"plot"`
+	ConfigurationID string `json:"configuration_id,omitempty"`
 }
 
 func (s *Service) synopsisPath(cfg Settings, code string) string {
@@ -320,15 +335,27 @@ func (s *Service) synopsisPath(cfg Settings, code string) string {
 
 func (s *Service) Synopsis(ctx context.Context, code string) (Synopsis, error) {
 	cfg := s.config()
+	var health Health
+	if cfg.Enabled {
+		// A lightweight health read prevents a changed source/translation profile
+		// from reusing an introduction produced by the previous configuration.
+		if err := s.json(ctx, cfg, http.MethodGet, "/v1/health", nil, &health); err != nil {
+			return Synopsis{}, err
+		}
+		if !compatibleConfiguration(health) {
+			return Synopsis{}, domain.E(domain.KindUpstream, "桥接配置版本不匹配，请更新配套版本", nil)
+		}
+	}
 	result := Synopsis{Enabled: cfg.Enabled}
 	body, err := os.ReadFile(s.synopsisPath(cfg, code))
-	if err == nil && json.Unmarshal(body, &result) == nil && result.Plot != "" {
+	if err == nil && json.Unmarshal(body, &result) == nil && result.Plot != "" && (!cfg.Enabled || result.ConfigurationID == health.ConfigurationID) {
 		result.Enabled = cfg.Enabled
 		return result, nil
 	}
 	if !cfg.Enabled {
 		return Synopsis{}, nil
 	}
+	result = Synopsis{Enabled: true}
 	metadata, err := s.resolve(ctx, cfg, domain.MovieRef{Code: code})
 	if err != nil {
 		return result, err

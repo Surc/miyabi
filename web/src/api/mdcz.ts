@@ -26,6 +26,9 @@ export function useUpdateMDCz() {
   return useMutation({
     mutationFn: (value: MDCzUpdate) => apiPut<MDCzSettings>('/api/extensions/mdcz/settings', value),
     onSuccess: async value => {
+      // A different bridge must not inherit the previous bridge's editable form.
+      await client.cancelQueries({ queryKey: ['extensions', 'mdcz', 'configuration'] })
+      client.removeQueries({ queryKey: ['extensions', 'mdcz', 'configuration'] })
       client.setQueryData(mdczKeys.settings, value)
       await client.cancelQueries({ queryKey: mdczKeys.synopsis })
       // Refresh open details without holding the settings form for a scrape.

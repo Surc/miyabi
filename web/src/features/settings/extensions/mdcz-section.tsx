@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { InlineError } from '@/components/error-state'
 import { SettingRow, SettingsSection } from '../shared'
+import { MDCzConfigurationSection } from './mdcz-configuration'
 
 export function MDCzSection() {
   const query = useMDCzSettings()
@@ -14,6 +15,8 @@ export function MDCzSection() {
   const test = useTestMDCz()
   const [draft, setDraft] = useState<MDCzUpdate | null>(null)
   const [saved, setSaved] = useState(false)
+  const [configurationDirty, setConfigurationDirty] = useState(false)
+  const [connectionGeneration, setConnectionGeneration] = useState(0)
   const current: MDCzUpdate | undefined = draft ?? query.data
   const busy = save.isPending || test.isPending
   const update = (change: Partial<MDCzUpdate>) => {
@@ -26,7 +29,8 @@ export function MDCzSection() {
   return (
     <SettingsSection icon={<SparklesIcon className="size-4" />} title="MDCz 增强刮削">
       <p className="text-xs leading-5 text-muted-foreground">
-        补充影片资料与介绍，为已入库资源生成封面角标。任务进度和重试沿用媒体库中的刮削任务。
+        启用并保存后，主资料来源切换为
+        MDCz，生成影片介绍与资源封面角标。任务进度和重试沿用媒体库中的刮削任务。
       </p>
       {query.isPending ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -121,28 +125,34 @@ export function MDCzSection() {
               {test.isPending ? <LoaderCircleIcon className="animate-spin" /> : null}测试连接
             </Button>
             <Button
-              disabled={!draft}
+              disabled={!draft || configurationDirty}
               onClick={() =>
                 save.mutate(current, {
                   onSuccess: () => {
                     setDraft(null)
                     setSaved(true)
+                    setConnectionGeneration(value => value + 1)
                   }
                 })
               }
             >
-              {save.isPending ? <LoaderCircleIcon className="animate-spin" /> : null}保存设置
+              {save.isPending ? <LoaderCircleIcon className="animate-spin" /> : null}保存连接与开关
             </Button>
             <span role="status" className="text-xs text-muted-foreground">
               {saved
                 ? '已保存；已有影片可在媒体库中重新刮削。'
                 : test.isSuccess
-                  ? '连接正常，版本匹配。'
+                  ? '连接与版本正常；来源站点需通过单片刮削验证。'
                   : draft
                     ? '有未保存的修改'
                     : ''}
             </span>
           </div>
+          {configurationDirty ? (
+            <p className="text-xs text-muted-foreground">
+              下方来源配置有未保存修改，请先保存或放弃，再更改连接与开关。
+            </p>
+          ) : null}
           {test.isError || save.isError ? (
             <p role="alert" className="text-sm text-destructive">
               {describeApiError(test.error ?? save.error)}
@@ -152,7 +162,7 @@ export function MDCzSection() {
             <summary className="cursor-pointer font-medium text-foreground">使用说明</summary>
             <p className="mt-2">
               填写与 Miyabi
-              配套的桥接服务地址。首次部署及站点、代理、翻译来源配置见安装文档。连接失败可关闭增强刮削，继续使用原有来源。
+              配套的桥接服务地址，保存后可展开下方配置来源、代理和翻译服务。首次部署见安装文档。连接失败可关闭增强刮削，继续使用原有来源。
             </p>
             <a
               className="underline underline-offset-4"
@@ -169,6 +179,12 @@ export function MDCzSection() {
           </details>
         </fieldset>
       ) : null}
+      <MDCzConfigurationSection
+        key={connectionGeneration}
+        connected={!!query.data?.server_url && !!query.data?.has_api_key}
+        disabled={busy}
+        onDirtyChange={setConfigurationDirty}
+      />
     </SettingsSection>
   )
 }

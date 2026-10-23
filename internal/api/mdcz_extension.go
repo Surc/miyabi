@@ -21,6 +21,7 @@ func registerMDCz(protected *gin.RouterGroup, service MDCzManager) {
 		return
 	}
 	group := protected.Group("/extensions/mdcz", noStore())
+	registerMDCzConfiguration(group, service)
 	group.GET("/synopsis", func(c *gin.Context) {
 		query, ok := bindQuery[struct {
 			Code string `form:"code" binding:"required,max=128"`

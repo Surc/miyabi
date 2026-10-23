@@ -77,7 +77,11 @@ func TestMetadataChecksProtocolIdentityAndPreservesKnownCatalogueID(t *testing.T
 			if r.Header.Get("Authorization") != "Bearer secret" || r.URL.RawQuery != "" {
 				t.Error("credential contract changed")
 			}
-			json.NewEncoder(w).Encode(map[string]any{"protocol": Protocol, "revision": scenario.revision, "detail": map[string]string{"code": scenario.code, "title": "Fixture", "plot": "Saved synopsis"}, "images": []any{}})
+			if r.URL.Path == "/v1/health" {
+				json.NewEncoder(w).Encode(Health{Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: "fixture-profile"})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"protocol": Protocol, "revision": scenario.revision, "configuration_id": "fixture-profile", "detail": map[string]string{"code": scenario.code, "title": "Fixture", "plot": "Saved synopsis"}, "images": []any{}})
 		})
 		value, err := s.Resolve(t.Context(), domain.MovieRef{Code: "TEST-001", JavDBID: "known"})
 		if !scenario.valid {
