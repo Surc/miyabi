@@ -1,6 +1,6 @@
 # Miyabi 与 MDCz 原生 FPK
 
-状态：2026-10-23 已按用户“继续完善”完成原生打包层源码，仍暂停编译、打包、合并和发布。没有可安装 FPK，也没有完成飞牛/J4125 实机验证。当前代码是草稿 PR #7 的独立提交；MDCz 功能和限制见 [mdcz-extension.md](mdcz-extension.md)。
+状态：2026-10-23 已按用户“继续完善”完成原生打包层源码，随后“测试一下”恢复测试及必要的测试编译；正式构建、打包、合并和发布仍暂停。没有可安装 FPK，也没有完成飞牛/J4125 实机验证。当前代码是草稿 PR #7 的独立提交；MDCz 功能和限制见 [mdcz-extension.md](mdcz-extension.md)，最新测试见 [回归验证记录](validation-2026-10-23.md)。
 
 ## 安装后的使用方式
 
@@ -101,6 +101,6 @@ PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s packaging/fnos/tests -p
 
 本轮纯 Node 配置/进程管理测试 11 项和 Python 产物格式/图标/包声明测试 3 项通过；另完成 shell 语法、Oxlint/Oxfmt、gofmt 与 diff 检查。进程管理测试启动真实 Node 子进程和 TCP 健康检查，但业务服务/原生库使用模拟实现；本运行器的 PID 与 `/proc` 命名空间不一致，测试临时包使用专门的身份适配器，生产包始终使用 Linux boot ID/start ticks，后者另有单测。在普通 Linux 上测试会自动使用真实 procfs 身份检查。
 
-新增 Go bootstrap 测试未执行；先前 Go/Vitest、真实 MDCz runtime 验证也仍未执行。没有运行 prepare 完整准备、fnpack、Go/前端编译、镜像构建或 NAS 安装。不得将本轮脚本测试记为“FPK 已可用”。
+用户随后恢复测试，Go bootstrap、前端 Vitest、真实 MDCz runtime 及当前 Linux x64 上的原生库预检已执行，结果与复现步骤见 [回归验证记录](validation-2026-10-23.md)。没有运行 prepare 完整准备、fnpack、Go/前端/桥接生产构建、镜像构建或 NAS 安装。不得将脚本测试或当前机器的原生依赖检查记为“FPK 已可用”。
 
 官方规范核对：2026-10-23 读取 [原生应用](https://developer.fnnas.com/docs/examples/native)、[框架与生命周期](https://developer.fnnas.com/docs/core-concepts/framework)、[Manifest](https://developer.fnnas.com/docs/core-concepts/manifest)、[权限](https://developer.fnnas.com/docs/core-concepts/privilege)、[资源](https://developer.fnnas.com/docs/core-concepts/resource)、[入口](https://developer.fnnas.com/docs/core-concepts/app-entry)、[向导](https://developer.fnnas.com/docs/core-concepts/wizard)。后续升级先复核这些契约，再分别提升业务组件和 Node/原生依赖版本。

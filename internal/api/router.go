@@ -80,6 +80,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerBrowseExtension(protected, deps.BrowseExtension)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)
 	registerMDCz(protected, deps.MDCz)
+	registerLibraryVersions(protected, deps.Library)
 
 	settingsAPI := protected.Group("/settings", noStore())
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))

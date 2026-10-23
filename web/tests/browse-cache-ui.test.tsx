@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, test, vi } from 'vitest'
-import { BrowseProgress, CurrentBrowsePage } from '@/features/discover/extensions/cached-results'
+import {
+  PreloadActions,
+  ResourceLoadingBadge,
+  CurrentBrowsePage
+} from '@/features/discover/extensions/cached-results'
 import { MovieDetailDialogContext } from '@/features/movie-detail/dialog-context'
 import type { PreloadRow, PreloadState } from '@/features/discover/extensions/preloader'
 import type { DiscoverMovieDetail } from '@/api/discover'
@@ -9,6 +13,7 @@ vi.mock('@/components/overflow-tooltip', () => ({
   OverflowTooltip: ({ children }: { children: React.ReactNode }) => children
 }))
 vi.mock('@/components/movie/movie-badges', () => ({ MovieStateBadge: () => null }))
+vi.mock('@/components/movie/library-version-badge', () => ({ OwnedVersionBadge: () => null }))
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: { nsfwMode: boolean }) => boolean) =>
     select({ nsfwMode: false })
@@ -29,7 +34,7 @@ vi.mock('@/api/browse-cache', async importOriginal => ({
   })
 }))
 
-test('completed fills disappear while paused, failed and running states retain controls', () => {
+test('preloading has compact controls and no separate progress panel', () => {
   const state: PreloadState = {
     rows: [],
     ready: 120,
@@ -38,11 +43,34 @@ test('completed fills disappear while paused, failed and running states retain c
     exhausted: false
   }
   const render = (state: PreloadState) =>
-    renderToStaticMarkup(<BrowseProgress state={state} pause={() => {}} resume={() => {}} />)
+    renderToStaticMarkup(<PreloadActions state={state} pause={() => {}} resume={() => {}} />)
   expect(render(state)).toBe('')
   expect(render({ ...state, phase: 'paused' })).toContain('继续')
   expect(render({ ...state, phase: 'error' })).toContain('重试')
   expect(render({ ...state, phase: 'loading', ready: 20 })).toContain('暂停')
+  expect(render({ ...state, phase: 'loading', ready: 20 }).replace(/<[^>]*>/g, '')).toBe(
+    '暂停预加载'
+  )
+})
+
+test('pending cards show loading locally and do not download images', () => {
+  const html = renderToStaticMarkup(<CurrentBrowsePage rows={[]} page={1} phase="loading" fill />)
+  expect(html.match(/aria-busy="true"/g)).toHaveLength(20)
+  expect(html.match(/role="status"/g)).toHaveLength(20)
+  expect(html).toContain('加载中')
+  expect(html).not.toContain('<img')
+  for (const [phase, text] of [
+    ['paused', '已暂停'],
+    ['error', '待重试'],
+    ['complete', '待更新']
+  ] as const) {
+    const badge = renderToStaticMarkup(<ResourceLoadingBadge phase={phase} />)
+    expect(badge).toContain(text)
+    expect(badge).not.toContain('animate-spin')
+  }
+  expect(
+    renderToStaticMarkup(<CurrentBrowsePage rows={[]} page={1} phase="complete" fill />)
+  ).not.toContain('加载中')
 })
 test('six cached pages mount images and rating UI only for the current twenty works', () => {
   const rows = Array.from({ length: 120 }, (_, index) => {
