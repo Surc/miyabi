@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query'
 
 import { apiGet, apiPost, apiPut } from '@/api/client'
+import { embyPlaybackKeys } from './emby-playback'
 
 export type EmbyConfig = {
   enabled: boolean
@@ -52,6 +53,7 @@ export function updateEmbyConfigOptions(queryClient: QueryClient) {
     onSuccess: next => {
       queryClient.setQueryData(embyKeys.config, next)
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: embyPlaybackKeys.all }),
     onError: (_error, _next, context) => {
       if (context?.previous) queryClient.setQueryData(embyKeys.config, context.previous)
       // The backend can save settings before reporting a scan enqueue failure.
