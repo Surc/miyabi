@@ -1,6 +1,6 @@
 # Miyabi 与 MDCz 原生 FPK
 
-状态：2026-10-23 已按用户“继续完善”完成原生打包层源码，随后“测试一下”恢复测试及必要的测试编译；正式构建、打包、合并和发布仍暂停。没有可安装 FPK，也没有完成飞牛/J4125 实机验证。当前代码是草稿 PR #7 的独立提交；MDCz 功能和限制见 [mdcz-extension.md](mdcz-extension.md)，最新测试见 [回归验证记录](validation-2026-10-23.md)。
+状态：2026-10-23 已按用户“继续完善”完成原生打包层源码，随后“测试一下”恢复测试及必要的测试编译；随后“合并发布”已恢复本版构建与发布，原生 FPK 按预览包交付；飞牛/J4125 实机验证仍未完成。发布流程见 [v0.4.0 发布维护](release-v0.4.0.md)。当前代码是草稿 PR #7 的独立提交；MDCz 功能和限制见 [mdcz-extension.md](mdcz-extension.md)，最新测试见 [回归验证记录](validation-2026-10-23.md)。
 
 ## 安装后的使用方式
 
@@ -59,7 +59,7 @@
 
 ## 构建恢复授权后的准备流程
 
-当前不要运行本节构建/打包命令。源码检查和纯脚本测试不生成 FPK。
+本版已获构建/发布授权，可执行独立 `build-release.sh`；源码检查和纯脚本测试本身不生成 FPK。
 
 1. 在干净的固定 Miyabi 提交上完成 Go、前端及桥接 runtime 回归。Miyabi 原生编译固定 `GOOS=linux GOARCH=amd64 GOAMD64=v1 CGO_ENABLED=0`，先生成内嵌前端；在完整 Git checkout 编译，使 Go 产物保留可核验的 VCS 信息。
 2. 按 `extensions/mdcz-bridge` 的固定 MDCz SHA 和 lock 生成 bridge.js 与完整生产 node_modules，保持 pnpm 相对链接。包含 `NOTICE` 和 `MDCz-LICENSE`。原生包不需要 Electron 桌面程序。当前 stage 脚本仍保留上游服务器生产依赖集合，尚未进一步裁剪包体。
@@ -78,7 +78,7 @@ python packaging/fnos/prepare.py \
   --output /build/miyabi-fpk-stage
 ```
 
-5. 在输出目录用官方 `fnpack build` 制作候选 FPK。只有完成下列验收才可发布：干净安装、双服务启动、端口冲突、修改密码、MDCz 单片资料/翻译/中文角标、实际库与 Emby 播放、重启 NAS、升级保留数据、备份失败、卸载保留与恢复。J4125 上必须实际加载全部原生模块，并测试中文字体与 TLS，x64 文件头本身不能证明 CPU/GLIBC 兼容。
+5. 在输出目录用官方 `fnpack build` 制作候选 FPK。升级为正式原生包前应完成下列验收；本轮以明确标注的预览附件交付：干净安装、双服务启动、端口冲突、修改密码、MDCz 单片资料/翻译/中文角标、实际库与 Emby 播放、重启 NAS、升级保留数据、备份失败、卸载保留与恢复。J4125 上必须实际加载全部原生模块，并测试中文字体与 TLS，x64 文件头本身不能证明 CPU/GLIBC 兼容。
 
 依赖代码的许可证、Miyabi/MDCz 版本与源码位置保留在包中，公开分发时需同时提供对应源码和构建说明。本轮没有新增发布触发器。
 

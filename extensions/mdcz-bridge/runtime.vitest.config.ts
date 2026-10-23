@@ -11,5 +11,7 @@ export default defineConfig({
     include: ["runtime.test.ts"],
     restoreMocks: true,
     fileParallelism: false,
+    // Native image/config work can exceed Vitest's 5s default on busy runners.
+    testTimeout: 30_000,
   },
 });

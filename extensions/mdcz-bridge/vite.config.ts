@@ -22,7 +22,12 @@ export default defineConfig({
     emptyOutDir: true,
     target: "node24",
     ssr: true,
-    rollupOptions: { external: [/^node:/, ...external] },
+    // SSR builds use Rollup's entry naming, not build.lib.fileName.
+    // Docker and the native package share this stable launch path.
+    rollupOptions: {
+      external: [/^node:/, ...external],
+      output: { entryFileNames: "bridge.js" },
+    },
   },
   resolve: {
     alias: [
