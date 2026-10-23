@@ -12,6 +12,14 @@ spec.loader.exec_module(prepare)
 
 
 class ArtifactChecks(unittest.TestCase):
+    def test_package_checksums_cover_empty_and_multi_chunk_files(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "payload"
+            for body in [b"", b"abc", b"native-package\x00" * 180000]:
+                file.write_bytes(body)
+                self.assertEqual(prepare.sha256_file(file), hashlib.sha256(body).hexdigest())
+
     def test_rejects_wrong_architecture_or_non_elf(self):
         with tempfile.TemporaryDirectory() as folder:
             file = Path(folder) / "binary"

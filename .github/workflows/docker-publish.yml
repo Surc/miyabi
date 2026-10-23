@@ -78,7 +78,9 @@ jobs:
 
           if state=$(gh release view "$tag" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null); then
             if [[ "$state" == true ]]; then
-              echo "Keeping existing draft $tag."
+              # A repaired build must not publish the failed attempt's target.
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"
+              echo "Updated existing draft $tag to $GITHUB_SHA."
               exit 0
             fi
             echo "::error::Refusing to overwrite published release $tag" >&2
@@ -139,7 +141,7 @@ jobs:
   # registry 中只会出现最终的正式 tag。
   publish:
     name: Build and push amd64 image
-    needs: [version, build, create-draft-release]
+    needs: [version, build, create-draft-release, native-package]
     runs-on: ubuntu-latest
     permissions:
       contents: read

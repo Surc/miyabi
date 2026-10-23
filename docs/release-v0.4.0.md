@@ -8,7 +8,8 @@
 2. 新的正式构建发现 Vite SSR 不使用 `build.lib.fileName`，导致生成 main.js 而启动入口要求 bridge.js。已在自有 Vite 配置显式指定 Rollup entryFileNames；实际 bridge.js 已启动通过。运行源码级 runtime 测试无法代替此项检查。
 3. `packaging/fnos/build-release.sh VERSION OUTPUT` 必须在干净 Git checkout 执行，输出在仓库外；固定 Node 24.19.0、fnpack 1.2.3、Noto Sans CJK Sans2.004 官方来源和 SHA-256，MDCz SHA 从 contract 读取。生产依赖安装在 MDCz workspace 外，防止 pnpm 误剪裁开发 workspace。
 4. 构建器保留前端、Go CGO=0/AMD64=v1/VCS 信息、独立桥接、原生依赖、许可证、字体和 CA；prepare 验证身份和包内链接。`smoke.mjs` 使用临时数据、随机测试凭据及回环端口启动真实 Miyabi/桥接，检查鉴权、配置、静态 UI 和 sharp/impit/SQLite，再由官方 fnpack 打包。
-5. GitHub 工作流支持 master 上手动输入 `0.4.0` 发布，也保留版本标签触发。先创建草稿 Release，构建 amd64 主镜像、桥接镜像和 FPK；三者成功、附件上传后才公开 Release。已公开版本不覆盖；失败保留草稿，检查日志后只重跑失败任务。
+5. GitHub 工作流支持 master 上手动输入 `0.4.0` 发布，也保留版本标签触发。先创建草稿 Release，FPK 构建及附件上传成功后才推送 amd64 主镜像和桥接镜像；全部成功后公开 Release。已公开版本不覆盖；失败保留草稿。同一提交的临时失败可重跑失败任务；修复源码后重新从 master 发起发布，并同步草稿目标提交，不能重跑旧提交冒充已修复产物。
+6. 首次 CI 在 Ubuntu 22.04 的 Python 3.10 上发现 `hashlib.file_digest` 不存在；改为固定内存的分块 SHA-256，并增加空文件及多块文件校验。保留 Python 3.10 兼容，不为打包额外安装新版 Python。
 
 主镜像为 `ghcr.io/surc/miyabi:v0.4.0`，桥接为 `ghcr.io/surc/miyabi-mdcz:v0.4.0`。不再构建 ARM64。原生附件为 `miyabi-native_0.4.0_linux-amd64_preview.fpk`、bundle.json 和 SHA256SUMS。
 

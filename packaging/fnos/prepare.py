@@ -15,6 +15,15 @@ import subprocess
 import zlib
 
 
+def sha256_file(path):
+    # Ubuntu 22.04 ships Python 3.10; file_digest requires Python 3.11.
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def elf_x64(path):
     with open(path, "rb") as source:
         header = source.read(20)
@@ -109,8 +118,7 @@ def main():
         if file.is_symlink() and not file.resolve().is_relative_to(destination):
             raise ValueError("Dependency symlink escapes the package: " + str(file))
         if file.is_file():
-            with file.open("rb") as source:
-                checksums[str(file.relative_to(args.output))] = hashlib.file_digest(source, "sha256").hexdigest()
+            checksums[str(file.relative_to(args.output))] = sha256_file(file)
     (app / "bundle.json").write_text(json.dumps({"version": args.version, "source_revision": revision, "mdcz_revision": engine, "node": node_version, "platform": "linux/amd64", "goamd64": "v1", "sha256": checksums}, indent=2) + "\n")
     for file in [* (args.output / "cmd").iterdir(), app / "service/control", app / "runtime/bin/node", app / "bin/miyabi"]:
         file.chmod(0o755)
