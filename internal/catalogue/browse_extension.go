@@ -146,6 +146,16 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 			return nil, err
 		}
 		result := BrowseCached[T]{Data: value, UpdatedAt: s.now(), Stale: !complete}
+		// A partial refresh is not a new successful snapshot. Preserve the last
+		// complete value and its age while leaving the refresh retryable.
+		if !complete && ok {
+			cached.Stale, cached.RefreshFailed = true, true
+			encoded, err := json.Marshal(cached)
+			if err != nil {
+				return nil, err
+			}
+			return encoded, ErrDoNotCache
+		}
 		body, err := json.Marshal(value)
 		if err != nil {
 			return nil, err

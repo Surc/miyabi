@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { onTestFinished, test, vi } from 'vitest'
 
 import { embyKeys, updateEmbyConfigOptions, type EmbyConfig } from '@/api/emby'
+import { embyPlaybackKeys } from '@/api/emby-playback'
 
 const previous: EmbyConfig = {
   enabled: true,
@@ -25,6 +26,8 @@ function fixture() {
 
 test('Emby saves optimistically preserve the output directory and apply the server response', async () => {
   const { client, mutation } = fixture()
+  const playbackKey = [...embyPlaybackKeys.all, 'TEST-001']
+  client.setQueryData(playbackKey, { status: 'ready', url: 'emby://play/old-server/item' })
   const response = Promise.withResolvers<Response>()
   vi.stubGlobal(
     'fetch',
@@ -40,6 +43,7 @@ test('Emby saves optimistically preserve the output directory and apply the serv
   await pending
   assert.deepEqual(client.getQueryData(embyKeys.config), saved)
   assert.equal(client.getQueryState(embyKeys.config)?.isInvalidated, false)
+  assert.equal(client.getQueryData(playbackKey), undefined)
 })
 
 test('failed Emby saves restore cached settings and invalidate for partially saved responses', async () => {

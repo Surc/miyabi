@@ -173,6 +173,13 @@ func TestPartialBrowseResourcesStayRetryableAndCrackedDoesNotMeanUncensored(t *t
 	if err != nil || r.Stale {
 		t.Fatalf("%+v %v", r, err)
 	}
+	s.now = func() time.Time { return r.UpdatedAt.Add(time.Hour) }
+	s.loads.reset()
+	f.partial, f.tags = true, []string{}
+	retained, err := s.Resources(t.Context(), "film", true)
+	if err != nil || !retained.Stale || !retained.RefreshFailed || !retained.Data.HasSubtitle || !retained.Data.Complete || !retained.UpdatedAt.Equal(r.UpdatedAt) {
+		t.Fatalf("partial refresh replaced a complete snapshot: %+v %v", retained, err)
+	}
 }
 func TestBrowseCacheSettingsAndScopedClearPreserveLibraryData(t *testing.T) {
 	f := &browseFake{}

@@ -53,7 +53,12 @@ export function updateEmbyConfigOptions(queryClient: QueryClient) {
     onSuccess: next => {
       queryClient.setQueryData(embyKeys.config, next)
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: embyPlaybackKeys.all }),
+    onSettled: async () => {
+      // Invalidation retains ready data. A changed server must immediately
+      // remove the previous launch target, including inactive detail queries.
+      await queryClient.cancelQueries({ queryKey: embyPlaybackKeys.all })
+      await queryClient.resetQueries({ queryKey: embyPlaybackKeys.all })
+    },
     onError: (_error, _next, context) => {
       if (context?.previous) queryClient.setQueryData(embyKeys.config, context.previous)
       // The backend can save settings before reporting a scan enqueue failure.

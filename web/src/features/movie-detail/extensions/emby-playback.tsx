@@ -21,7 +21,8 @@ export function MovieEmbyPlayback({ code }: { code: string }) {
 function AndroidEmbyPlayback({ code }: { code: string }) {
   const query = useEmbyPlayback(code)
   const target = query.data
-  const ready = !query.isError && target?.status === 'ready' && isEmbyPlayURL(target.url)
+  const ready =
+    !query.isError && !query.isFetching && target?.status === 'ready' && isEmbyPlayURL(target.url)
   let message = '需先在安卓 Emby App 登录同一服务器；点击后直接播放，默认从首个视频文件开始。'
   if (!code.trim()) message = '缺少影片番号，无法定位 Emby 播放资源。'
   else if (query.isError) message = describeApiError(query.error)
