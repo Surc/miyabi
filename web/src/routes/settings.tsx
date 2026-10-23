@@ -13,6 +13,7 @@ import { PanSection } from '@/features/settings/pan-section'
 import { PrivacySection } from '@/features/settings/privacy-section'
 import { SubscriptionSection } from '@/features/settings/subscription-section'
 import { ScrapingSection } from '@/features/settings/scraping-section'
+import { MDCzSection } from '@/features/settings/extensions/mdcz-section'
 import { TasksSection } from '@/features/settings/tasks-section'
 
 export const Route = createFileRoute('/settings')({
@@ -33,6 +34,8 @@ function SettingsPage() {
           <NetworkSection />
           <Separator />
           <ScrapingSection />
+          <Separator />
+          <MDCzSection />
           <Separator />
           <EmbySection />
           <Separator />

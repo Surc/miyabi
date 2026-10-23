@@ -10,6 +10,7 @@ import { JavLibraryRating, MovieComments } from './extensions/social'
 import { MovieRecommendations } from './recommendations'
 import { MovieDetailSkeleton } from './skeleton'
 import { MovieEmbyPlayback } from './extensions/emby-playback'
+import { MovieSynopsis } from './extensions/synopsis'
 
 export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
   if ('libraryId' in movie) return <LibraryMovieDetail movieId={movie.libraryId} />
@@ -45,6 +46,7 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
+      <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
       <MovieMediaPreviews
         key={`library:${movieId}`}
         images={detail.data.preview_images}
@@ -119,6 +121,7 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
+      <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
       <MovieMediaPreviews
         key={movieId}
         images={detail.data.preview_images}

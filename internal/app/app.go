@@ -25,6 +25,7 @@ import (
 	"github.com/ppxb/miyabi/internal/library"
 	"github.com/ppxb/miyabi/internal/library/scrape"
 	"github.com/ppxb/miyabi/internal/maintenance"
+	"github.com/ppxb/miyabi/internal/mdcz"
 	"github.com/ppxb/miyabi/internal/metadata"
 	"github.com/ppxb/miyabi/internal/metadata/providers"
 	"github.com/ppxb/miyabi/internal/monitor"
@@ -123,6 +124,14 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	mdczSvc, err := mdcz.New(ctx, store.Client, cfg.DataDir, metadataSvc)
+	if err != nil {
+		metadataSvc.Close()
+		catalogueSvc.Close()
+		driveSvc.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("initialize MDCz extension: %w", err)
+	}
 	offlineSvc := offline.New(store.Client, catalogueSvc, driveSvc, taskSvc, libSvc, offlineSubmitTimeout)
 	monitorSvc := monitor.New(store.Client, catalogueSvc, offlineSvc, taskSvc)
 	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()))
@@ -141,7 +150,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		PublicURL:  cfg.PublicURL,
 	}, emby.Dependencies{
 		GFriends:          gfriendsClient,
-		Media:             metadataSvc,
+		Media:             mdczSvc,
 		ExportManager:     exportMgr,
 		ScheduleLocalScan: libSvc.ScheduleLocalScan,
 	})
@@ -155,8 +164,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	// This is the only cycle: library -> Emby -> catalogue -> library.
 	// Bind it before starting task pools or accepting requests.
 	libSvc.SetMediaNotifier(embySvc)
-	scrapeSvc := scrape.New(store.Client, driveSvc, metadataSvc, images, taskSvc, scrape.Dependencies{
-		ExportManager: exportMgr, MediaNotifier: embySvc, Subtitles: subtitleSvc,
+	scrapeSvc := scrape.New(store.Client, driveSvc, mdczSvc, images, taskSvc, scrape.Dependencies{
+		ArtworkDecorator: mdczSvc,
+		ExportManager:    exportMgr, MediaNotifier: embySvc, Subtitles: subtitleSvc,
 	})
 	maintenanceSvc, err := maintenance.New(cfg.DataDir, store.Client, images, scrapeSvc)
 	if err != nil {
@@ -200,7 +210,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Catalogue:       catalogueSvc,
 		MovieExtras:     extras,
 		BrowseExtension: browseExtension,
-		Metadata:        metadataSvc,
+		Metadata:        mdczSvc,
+		MDCz:            mdczSvc,
 		Drive:           driveSvc,
 		Offline:         offlineSvc,
 		Monitor:         monitorSvc,

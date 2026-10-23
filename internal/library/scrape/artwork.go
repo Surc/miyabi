@@ -85,6 +85,7 @@ func (service *Service) checkpointArtwork(ctx context.Context, taskID int, input
 		}
 	} else {
 		artwork, err = service.images.RecropPoster(*input.Artwork, coverLayout(input.Document.SelectedImage, input.Document.Zone))
+		input.Document.ArtworkExtension = nil // A new crop needs a new unmarked origin.
 	}
 	if err != nil {
 		return err

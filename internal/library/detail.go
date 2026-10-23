@@ -28,7 +28,8 @@ func (s *Service) Movie(ctx context.Context, id int) (MovieDetail, error) {
 	detail.MovieDetail = domain.MovieDetail{
 		Zone: doc.Zone,
 		Movie: domain.Movie{
-			ID: doc.JavDBID(), Code: record.Code, Title: doc.Title,
+			Plot: doc.Plot,
+			ID:   doc.JavDBID(), Code: record.Code, Title: doc.Title,
 			ReleaseDate: doc.Premiered, Duration: doc.Runtime, Rating: doc.Rating,
 			RatingSource: doc.RatingSource, RatingMax: doc.RatingMax, FieldSources: doc.FieldSources,
 			Thumbnail: domain.ValueOrZero(record.Cover), Cover: domain.ValueOrZero(record.Poster),

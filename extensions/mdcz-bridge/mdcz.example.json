@@ -1,0 +1,6 @@
+{
+  "network": { "useProxy": false, "timeout": 15, "retryCount": 1 },
+  "scrape": { "threadNumber": 1 },
+  "aggregation": { "maxParallelCrawlers": 2, "globalTimeoutMs": 90000 },
+  "translate": { "engine": "google", "fields": ["title", "plot"], "targetLanguage": "zh-CN" }
+}

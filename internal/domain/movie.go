@@ -138,6 +138,7 @@ type Director struct {
 
 // Movie is the core domain movie model.
 type Movie struct {
+	Plot          string            `json:"plot,omitempty"`
 	Sources       []SourceID        `json:"sources,omitempty"`
 	FieldSources  map[string]string `json:"field_sources,omitempty"`
 	RatingSource  string            `json:"rating_source,omitempty"`

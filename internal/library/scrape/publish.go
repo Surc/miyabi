@@ -65,6 +65,11 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 	}
 	videos = uniqueVideos
 	snapshot.Videos = VideoFingerprint(videos)
+	poster, err = service.decorateArtwork(ctx, job.ID, &input, videos, poster)
+	if err != nil {
+		return nil, err
+	}
+	artwork = *input.Artwork
 
 	input.Completed = true
 	encoded, err := tasks.EncodePayload(input)
@@ -110,6 +115,13 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 				return err
 			}
 			return ent.WithTx(ctx, service.db, func(tx *ent.Tx) error {
+				// Decoration adds resource tags after the metadata checkpoint.
+				// Publish their relational index and final document atomically.
+				if input.Document.ArtworkExtension != nil {
+					if err := SaveMovieMetadata(ctx, tx, input.MovieID, input.Document); err != nil {
+						return err
+					}
+				}
 				update := tx.Movie.UpdateOneID(input.MovieID).SetCode(input.Code).SetMetadata(&input.Document).
 					SetCover(artwork.Thumbnail).SetPoster(artwork.Poster).SetFanarts([]string{artwork.Fanart}).
 					SetScrapeStatus(movie.ScrapeStatusDone).SetMetadataSnapshot(snapshot)
