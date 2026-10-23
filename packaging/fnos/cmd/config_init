@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec "${TRIM_APPDEST:?}/service/control" validate-configuration

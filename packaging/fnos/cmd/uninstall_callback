@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+# fnOS removes package files. Do not delete export shares or successful backups.
+exit 0

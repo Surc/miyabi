@@ -72,6 +72,8 @@ Miyabi 扩展文件位于 `<data>/extensions/mdcz-v1/`：
 
 ## J4125 部署配方（尚未构建）
 
+原生 FPK 的统一安装、双服务管理、初始连接和升级/卸载备份已另行实现为源码，见 [fnos-native-package.md](fnos-native-package.md)。同样未构建或实机验收；本节 Docker 配方继续保留，两种部署方式复用同一业务/桥接接口。
+
 `extensions/mdcz-bridge/Dockerfile` 固定拉取上述 MDCz SHA，按上游 frozen lock 安装/打包，再只保留运行依赖与字体。服务端使用 Node 24、sharp/impit，无 Electron 运行时；配方仅允许 amd64。它是自有桥接镜像，不能用普通 MDCz 服务地址代替。
 
 恢复构建授权并通过回归后：

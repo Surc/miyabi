@@ -75,6 +75,11 @@ func New(ctx context.Context, db *ent.Client, dataDir string, base *metadata.Ser
 	}
 	if found {
 		s.settings = value
+	} else {
+		s.settings, err = bootstrapConnection(s.settings, os.Getenv("MIYABI_MDCZ_BOOTSTRAP"))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := os.MkdirAll(s.directory, 0o700); err != nil {
 		return nil, err

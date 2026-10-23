@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+# The payload/runtime is not installed yet, so this hook uses only host tools.
+if [[ "$(uname -m)" != x86_64 ]]; then
+  printf '%s\n' '此安装包仅支持 x86-64 设备' > "${TRIM_TEMP_LOGFILE:?}"
+  exit 1
+fi

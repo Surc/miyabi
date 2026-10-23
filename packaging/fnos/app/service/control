@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+: "${TRIM_APPDEST:?Missing application directory}"
+: "${TRIM_PKGVAR:?Missing application data directory}"
+: "${TRIM_PKGETC:?Missing application configuration directory}"
+fail() {
+  if [[ -n "${TRIM_TEMP_LOGFILE:-}" ]]; then printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; fi
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+[[ "$(uname -m)" == x86_64 ]] || fail '此安装包仅支持 x86-64 设备'
+[[ -x "$TRIM_APPDEST/runtime/bin/node" ]] || fail '缺少配套 Node 运行时，安装包不完整'
+command -v flock >/dev/null || fail '缺少系统 flock 工具'
+mkdir -p "$TRIM_PKGVAR/run"
+# A child spawn only inherits standard descriptors, so the detached supervisor
+# does not retain this lock after the management command exits.
+exec 9> "$TRIM_PKGVAR/run/control.lock"
+flock -w 45 9 || fail '另一项应用管理操作仍在执行，请稍后重试'
+exec "$TRIM_APPDEST/runtime/bin/node" "$TRIM_APPDEST/service/lifecycle.mjs" "$@"

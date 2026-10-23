@@ -1,0 +1,8 @@
+[
+  {
+    "stepTitle": "更新 Miyabi",
+    "items": [
+      { "type": "tips", "helpText": "更新前停止服务，并将配置、数据库、缓存和原图备份到 miyabi-native/backups；请留出足够空间。两项服务及 Node 依赖使用配套版本更新，现有影片不会自动重新刮削。" }
+    ]
+  }
+]
