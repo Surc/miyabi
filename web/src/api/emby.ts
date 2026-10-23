@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query'
 
 import { apiGet, apiPost, apiPut } from '@/api/client'
+import { embyPlaybackKeys } from './emby-playback'
 
 export type EmbyConfig = {
   enabled: boolean
@@ -51,6 +52,12 @@ export function updateEmbyConfigOptions(queryClient: QueryClient) {
     },
     onSuccess: next => {
       queryClient.setQueryData(embyKeys.config, next)
+    },
+    onSettled: async () => {
+      // Invalidation retains ready data. A changed server must immediately
+      // remove the previous launch target, including inactive detail queries.
+      await queryClient.cancelQueries({ queryKey: embyPlaybackKeys.all })
+      await queryClient.resetQueries({ queryKey: embyPlaybackKeys.all })
     },
     onError: (_error, _next, context) => {
       if (context?.previous) queryClient.setQueryData(embyKeys.config, context.previous)

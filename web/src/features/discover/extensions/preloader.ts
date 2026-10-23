@@ -191,7 +191,8 @@ export class BrowsePreloader {
         if (signal.aborted) return
         if (this.entries.some(entry => entry.failed))
           throw new Error(this.error ?? '部分磁力来源未完成，请重试；已有数据已保留')
-        if (this.subtitlesOnly) this.entries = this.entries.filter(entry => this.matches(entry))
+        // Keep lightweight negative summaries in source order so TTL expiry
+        // can discover newly added subtitles, including after reaching EOF.
       }
       const count = this.entries.filter(entry => this.ready(entry) && this.matches(entry)).length
       if (count >= this.target || this.ended) {

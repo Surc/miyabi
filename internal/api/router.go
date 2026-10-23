@@ -31,6 +31,7 @@ type Dependencies struct {
 	Maintenance     MaintenanceManager
 	Network         NetworkManager
 	Emby            EmbyManager
+	EmbyPlayback    EmbyPlaybackManager
 	Frontend        fs.FS
 	STRMToken       string
 	TrustedProxies  []string
@@ -76,6 +77,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected := api.Group("", authMiddleware(deps.Access))
 	registerMovieExtras(protected, deps.MovieExtras)
 	registerBrowseExtension(protected, deps.BrowseExtension)
+	registerEmbyPlayback(protected, deps.EmbyPlayback)
 
 	settingsAPI := protected.Group("/settings", noStore())
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))

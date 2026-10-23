@@ -2,6 +2,8 @@
 
 作品列表的筛选后分页预加载、资源标签、评分与持久缓存见 [作品列表缓存维护说明](discover-preload-cache.md)。两套扩展独立挂载，保留原 API 与自动下载选源。
 
+Emby 直接开播、作品名称番号前缀及后续 amd64 发布要求见 [Emby 播放扩展维护说明](emby-playback-extension.md)。
+
 本扩展基于 `ppxb/miyabi` 的 `f1903459b45dece1498c05c7b309773776c756e9`（2026-10-15），开发分支为 `Surc/miyabi:feat/movie-detail-extras`。实现采用新增适配器、服务、接口和组件，原发现/媒体库 API、元数据评分、磁力聚合与自动下载选源逻辑保持原约定。此文档随实现提交，供后续同步上游时使用。
 
 ## 功能与边界

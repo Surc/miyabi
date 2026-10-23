@@ -4,6 +4,7 @@ import { MovieCover } from '@/components/movie/movie-cover'
 import { OverflowTooltip } from '@/components/overflow-tooltip'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { movieDisplayTitle } from './display-title'
 
 export function MovieCard({
   movie,
@@ -24,7 +25,7 @@ export function MovieCard({
   state?: ReactNode
   children?: ReactNode
 }) {
-  const title = movie.title || movie.code
+  const title = movieDisplayTitle(movie.code, movie.title)
   const heading = <h3 className="truncate text-sm leading-5 font-semibold">{title}</h3>
   return (
     <Card size="sm" className="h-full gap-0 overflow-hidden py-0">
