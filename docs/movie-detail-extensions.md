@@ -74,7 +74,7 @@ GET /api/extensions/movie/comments?source=javlibrary&code=ABP-123&page=1
 
 JavDB 使用 `/api/v1/movies/{id}/reviews?page=N&limit=20`。分页按原始记录数判断，纯打分而无正文的记录不会提前结束后续页。缺少 `reviews` 字段视为响应结构变化；明确的 `null` 或空数组才视为空结果。用户评分保留 5 分制。
 
-JavLibrary 固定访问 `https://www.javlibrary.com/cn/`，使用已有代理管理器，每次请求 15 秒超时、最多 2 MiB，最多三次同源重定向。先通过 `vl_searchbyid.php` 精确匹配完整标准化番号，再读取影片；多个不同匹配 ID、身份不一致、无法识别的页面均报错。
+JavLibrary 固定访问 `https://www.javlibrary.com/cn/`，使用已有代理管理器，每次请求 15 秒超时、最多 2 MiB，最多跟随两次同源重定向（第三次被 `len(via) >= 3` 拒绝）。先通过 `vl_searchbyid.php` 精确匹配完整标准化番号，再读取影片；多个不同匹配 ID、身份不一致、无法识别的页面均报错。独立错误分类、脱敏请求诊断、页面证据边界及飞牛验证步骤见 [JavLibrary 请求诊断](javlibrary-diagnostics.md)。
 
 主要选择器为 `.videos a .id`、`#video_id .text`、`#video_review .score`、`#video_comments table.comment` 下的 `.info`、`.t`、`.date`。只接受同影片的下一页链接。缺少站点评论 ID 时以作者、日期和正文的摘要生成稳定 ID，避免重复展示。站点页面变化优先只调整此适配器和其夹具。
 

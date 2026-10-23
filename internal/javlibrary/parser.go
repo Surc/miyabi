@@ -88,7 +88,7 @@ func plain(n *html.Node) string {
 func searchFilm(doc *html.Node, code string) (string, error) {
 	list := byClass(doc, "videos")
 	if list == nil {
-		return "", fmt.Errorf("unrecognized JavLibrary search/challenge page")
+		return "", failure("unexpected_page", "search_container_missing")
 	}
 	ids := map[string]bool{}
 	walk(list, func(n *html.Node) {
@@ -104,7 +104,7 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 		}
 	})
 	if len(ids) > 1 {
-		return "", fmt.Errorf("ambiguous JavLibrary film")
+		return "", failure("identity", "ambiguous_film")
 	}
 	for id := range ids {
 		return id, nil
@@ -116,8 +116,11 @@ var ratingNumber = regexp.MustCompile(`^\(?\s*(\d+(?:\.\d+)?)\s*\)?$`)
 
 func parseFilm(doc *html.Node, id, code string) (Film, error) {
 	film := Film{ID: id, Rating: domain.ExternalRating{Source: "javlibrary", Max: 10, Found: true}}
-	if !filmID.MatchString(id) || codeid.Normalize(plain(byClass(byID(doc, "video_id"), "text"))) != code || byID(doc, "video_review") == nil {
-		return Film{}, fmt.Errorf("unrecognized or mismatched JavLibrary film")
+	if !filmID.MatchString(id) || codeid.Normalize(plain(byClass(byID(doc, "video_id"), "text"))) != code {
+		return Film{}, failure("identity", "film_identity_mismatch")
+	}
+	if byID(doc, "video_review") == nil {
+		return Film{}, failure("unexpected_page", "review_container_missing")
 	}
 	score := plain(byClass(byID(doc, "video_review"), "score"))
 	if score == "" {
@@ -125,11 +128,11 @@ func parseFilm(doc *html.Node, id, code string) (Film, error) {
 	}
 	match := ratingNumber.FindStringSubmatch(score)
 	if match == nil {
-		return Film{}, fmt.Errorf("invalid JavLibrary score")
+		return Film{}, failure("parse_score", "invalid_score")
 	}
 	value, err := strconv.ParseFloat(match[1], 64)
 	if err != nil || value < 0 || value > 10 {
-		return Film{}, fmt.Errorf("invalid JavLibrary score")
+		return Film{}, failure("parse_score", "invalid_score")
 	}
 	film.Rating.Score = &value
 	return film, nil
@@ -141,7 +144,7 @@ func parseComments(doc *html.Node, id string, page int) (domain.MovieComments, e
 	result := domain.MovieComments{Source: "javlibrary", Page: page, Items: []domain.MovieComment{}}
 	container := byID(doc, "video_comments")
 	if container == nil {
-		return result, fmt.Errorf("unrecognized JavLibrary comments/challenge page")
+		return result, failure("unexpected_page", "comments_container_missing")
 	}
 	walk(container, func(n *html.Node) {
 		if n.Data != "table" || !hasClass(n, "comment") {
