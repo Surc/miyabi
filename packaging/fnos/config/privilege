@@ -1,0 +1,5 @@
+{
+  "defaults": { "run-as": "package" },
+  "username": "miyabi_native",
+  "groupname": "miyabi_native"
+}

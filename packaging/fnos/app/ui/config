@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "miyabi-native.main": {
+      "title": "Miyabi",
+      "icon": "images/icon_{0}.png",
+      "type": "url",
+      "protocol": "http",
+      "port": "${wizard_port}",
+      "url": "/",
+      "allUsers": false,
+      "control": { "accessPerm": "readonly" }
+    }
+  }
+}

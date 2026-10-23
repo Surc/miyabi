@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { LoaderCircleIcon, PauseIcon, PlayIcon, StarIcon } from 'lucide-react'
 import type { BrowseMoviesParams, DiscoverMovie } from '@/api/discover'
 import { browseImage, useBrowseRating, resetBrowseSessions } from '@/api/browse-cache'
-import { MovieCard, MovieGridLayout, MovieGridSkeleton } from '@/components/movie'
+import { MovieCard, MovieGridLayout } from '@/components/movie'
+import { MovieCardSkeleton } from '@/components/movie/movie-grid-skeleton'
+import { OwnedVersionBadge } from '@/components/movie/library-version-badge'
 import { MovieStateBadge } from '@/components/movie/movie-badges'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,9 +17,8 @@ import { useBrowsePreloader } from './use-preloader'
 import { BrowseCacheSettingsButton } from './cache-settings'
 import type { PreloadRow, PreloadState } from './preloader'
 
-// This panel deliberately remains in the original list layout. Completed fills
-// disappear; paused/failed fills retain their controls and the next batch shows it again.
-export function BrowseProgress({
+// Keep pause/retry available without a separate loading panel or progress area.
+export function PreloadActions({
   state,
   pause,
   resume
@@ -28,37 +29,42 @@ export function BrowseProgress({
 }) {
   if (state.phase === 'complete') return null
   return (
-    <div role="status" className="space-y-3 rounded-xl border bg-muted/30 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="font-semibold">
-            {state.phase === 'paused'
-              ? '预加载已暂停'
-              : state.phase === 'error'
-                ? '部分数据待确认'
-                : '正在准备作品资料与磁力'}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            已准备 {state.ready} / {state.target} 部 · {Math.floor(state.ready / 20)} /{' '}
-            {state.target / 20} 页
-          </p>
-        </div>
-        <Button size="sm" variant="outline" onClick={state.phase === 'loading' ? pause : resume}>
-          {state.phase === 'loading' ? <PauseIcon /> : <PlayIcon />}
-          {state.phase === 'loading' ? '暂停' : state.phase === 'error' ? '重试' : '继续'}
-        </Button>
+    <Button
+      size="sm"
+      variant="outline"
+      title={state.error}
+      onClick={state.phase === 'loading' ? pause : resume}
+    >
+      {state.phase === 'loading' ? <PauseIcon /> : <PlayIcon />}
+      {state.phase === 'loading'
+        ? '暂停预加载'
+        : state.phase === 'error'
+          ? '重试预加载'
+          : '继续预加载'}
+    </Button>
+  )
+}
+export function ResourceLoadingBadge({ phase }: { phase: PreloadState['phase'] }) {
+  return (
+    <Badge variant="frosted" role="status">
+      {phase === 'loading' ? <LoaderCircleIcon className="animate-spin" /> : null}
+      {phase === 'loading'
+        ? '加载中'
+        : phase === 'error'
+          ? '待重试'
+          : phase === 'paused'
+            ? '已暂停'
+            : '待更新'}
+    </Badge>
+  )
+}
+function PendingMovieCard() {
+  return (
+    <div className="relative" aria-busy="true">
+      <MovieCardSkeleton />
+      <div className="absolute top-2 right-2">
+        <ResourceLoadingBadge phase="loading" />
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full bg-foreground transition-[width]"
-          style={{ width: `${Math.min(100, (state.ready / state.target) * 100)}%` }}
-        />
-      </div>
-      {state.error ? (
-        <p className="text-sm text-destructive">{state.error}</p>
-      ) : (
-        <p className="text-xs text-muted-foreground">可先浏览，后台继续补齐；图片仅当前页加载。</p>
-      )}
     </div>
   )
 }
@@ -107,28 +113,30 @@ export function CachedBrowseResults({
           <Button size="sm" variant="outline" onClick={resetBrowseSessions}>
             刷新列表
           </Button>
+          {settings.data ? (
+            <PreloadActions
+              state={state}
+              pause={() => controller.pause()}
+              resume={() => {
+                void controller.resume()
+              }}
+            />
+          ) : null}
           <BrowseCacheSettingsButton />
         </div>
       </div>
       {settings.isError ? (
         <InlineError onRetry={() => void settings.refetch()}>预加载设置读取失败</InlineError>
-      ) : settings.data ? (
-        <BrowseProgress
-          state={state}
-          pause={() => controller.pause()}
-          resume={() => {
-            void controller.resume()
-          }}
-        />
-      ) : (
-        <p role="status" className="text-sm text-muted-foreground">
-          正在读取预加载设置…
-        </p>
-      )}
+      ) : null}
       {rows.length ? (
-        <CurrentBrowsePage rows={state.rows} page={page} />
+        <CurrentBrowsePage
+          rows={state.rows}
+          page={page}
+          phase={state.phase}
+          fill={!state.exhausted}
+        />
       ) : state.phase === 'loading' || settings.isPending ? (
-        <MovieGridSkeleton count={20} />
+        <CurrentBrowsePage rows={[]} page={1} phase="loading" fill />
       ) : (
         <EmptyState
           title={
@@ -161,16 +169,32 @@ export function CachedBrowseResults({
     </div>
   )
 }
-export function CurrentBrowsePage({ rows, page }: { rows: PreloadRow[]; page: number }) {
+export function CurrentBrowsePage({
+  rows,
+  page,
+  phase = 'complete',
+  fill = false
+}: {
+  rows: PreloadRow[]
+  page: number
+  phase?: PreloadState['phase']
+  fill?: boolean
+}) {
+  const visible = rows.slice((page - 1) * 20, page * 20)
   return (
     <MovieGridLayout>
-      {rows.slice((page - 1) * 20, page * 20).map(row => (
-        <CachedMovieCard key={row.movie.id} row={row} />
+      {visible.map(row => (
+        <CachedMovieCard key={row.movie.id} row={row} phase={phase} />
       ))}
+      {fill && phase === 'loading'
+        ? Array.from({ length: 20 - visible.length }, (_, index) => (
+            <PendingMovieCard key={`pending-${index}`} />
+          ))
+        : null}
     </MovieGridLayout>
   )
 }
-function CachedMovieCard({ row }: { row: PreloadRow }) {
+function CachedMovieCard({ row, phase }: { row: PreloadRow; phase: PreloadState['phase'] }) {
   const resource = row.resources
   const movie: DiscoverMovie = row.movie
   const count = resource?.data.magnet_count
@@ -183,11 +207,18 @@ function CachedMovieCard({ row }: { row: PreloadRow }) {
         description={movie.release_date}
         state={<MovieStateBadge movie={movie} />}
         coverOverlay={
-          subscribable ? (
-            <div className="absolute top-2 right-2">
-              <MovieSubscribeButton movie={movie} />
-            </div>
-          ) : undefined
+          <>
+            <OwnedVersionBadge movie={movie} />
+            {!ready ? (
+              <div className="absolute top-2 right-2">
+                <ResourceLoadingBadge phase={phase} />
+              </div>
+            ) : subscribable ? (
+              <div className="absolute top-2 right-2">
+                <MovieSubscribeButton movie={movie} />
+              </div>
+            ) : null}
+          </>
         }
       >
         {resource?.data.has_subtitle ? (
@@ -200,14 +231,7 @@ function CachedMovieCard({ row }: { row: PreloadRow }) {
             破解
           </Badge>
         ) : null}
-        {!ready ? (
-          <Badge variant="outline">
-            <LoaderCircleIcon className="size-3" />
-            资源待确认
-          </Badge>
-        ) : (
-          <Badge variant="outline">{count ?? 0} 条磁力</Badge>
-        )}
+        {ready ? <Badge variant="outline">{count ?? 0} 条磁力</Badge> : null}
         <div className="flex w-full flex-wrap gap-x-3 gap-y-1">
           <CardRating id={movie.id} source="javdb" />
           <CardRating id={movie.id} source="javlibrary" />
@@ -234,7 +258,13 @@ function CardRating({ id, source }: { id: string; source: 'javdb' | 'javlibrary'
       <StarIcon className="size-3 text-amber-500" />
       {label}
       <strong className="font-medium text-foreground">
-        {rating?.found && rating.score !== null ? `${rating.score.toFixed(1)}/${rating.max}` : '—'}
+        {query.isPending ? (
+          <LoaderCircleIcon className="size-3 animate-spin" aria-label={`${label} 加载中`} />
+        ) : rating?.found && rating.score !== null ? (
+          `${rating.score.toFixed(1)}/${rating.max}`
+        ) : (
+          '—'
+        )}
       </strong>
     </span>
   )

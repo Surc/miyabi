@@ -1,6 +1,12 @@
 name: Publish Miyabi image
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without v (master only)'
+        required: true
+        type: string
   push:
     tags:
       - "v*.*.*"
@@ -17,8 +23,14 @@ jobs:
       - name: Resolve and validate version
         id: version
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" != refs/heads/master ]]; then
+            echo '::error::Manual releases must use master' >&2
+            exit 1
+          fi
+          version="${REQUESTED_VERSION:-${GITHUB_REF_NAME#v}}"
 
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Invalid version format: '$version' (expected e.g. 1.2.3)" >&2
@@ -44,7 +56,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: .github/cliff.toml
-          args: -vv --current
+          args: ${{ github.event_name == 'workflow_dispatch' && '-vv --unreleased' || '-vv --current' }}
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
@@ -64,15 +76,22 @@ jobs:
         run: |
           tag="v${VERSION}"
 
-          if gh release view "$tag" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "GitHub release '$tag' already exists; keeping the existing release body."
-            exit 0
+          if state=$(gh release view "$tag" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$state" == true ]]; then
+              echo "Keeping existing draft $tag."
+              exit 0
+            fi
+            echo "::error::Refusing to overwrite published release $tag" >&2
+            exit 1
           fi
 
           printf '%s\n' "$RELEASE_BODY" > "$RUNNER_TEMP/release-notes.md"
+          if [[ -f "docs/releases/${tag}.md" ]]; then
+            cp "docs/releases/${tag}.md" "$RUNNER_TEMP/release-notes.md"
+          fi
           gh release create "$tag" \
             --repo "${GITHUB_REPOSITORY}" \
-            --verify-tag \
+            --target "$GITHUB_SHA" \
             --title "Release $tag" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --draft
@@ -120,7 +139,7 @@ jobs:
   # registry 中只会出现最终的正式 tag。
   publish:
     name: Build and push amd64 image
-    needs: [version, build]
+    needs: [version, build, create-draft-release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -153,6 +172,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=v${{ needs.version.outputs.version }}
             type=semver,pattern={{raw}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -175,9 +195,51 @@ jobs:
           provenance: false
           sbom: false
 
+      - name: Build and push MDCz bridge (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: extensions/mdcz-bridge/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}-mdcz:v${{ needs.version.outputs.version }}
+            ${{ env.IMAGE_NAME }}-mdcz:latest
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=miyabi-mdcz-amd64
+          cache-to: type=gha,scope=miyabi-mdcz-amd64,mode=max
+          provenance: false
+          sbom: false
+
+  native-package:
+    name: Build native amd64 FPK preview
+    needs: [version, create-draft-release]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+      - name: Build and smoke-test native package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash packaging/fnos/build-release.sh "$VERSION" "$RUNNER_TEMP/native-release"
+      - name: Attach native preview and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh release upload "v${VERSION}" "$RUNNER_TEMP/native-release/"* --repo "$GITHUB_REPOSITORY" --clobber
+
   publish-release:
     name: Publish release
-    needs: [version, create-draft-release, publish]
+    needs: [version, create-draft-release, publish, native-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write

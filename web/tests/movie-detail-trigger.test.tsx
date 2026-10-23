@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import type { ComponentProps, KeyboardEvent, MouseEvent } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { test, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
 import { MovieDetailDialogContext } from '@/features/movie-detail/dialog-context'
@@ -20,9 +21,11 @@ function renderTrigger(overrides: Partial<ComponentProps<typeof MovieDetailTrigg
     return element
   }
   const html = renderToStaticMarkup(
-    <MovieDetailDialogContext value={openMovie}>
-      <CaptureTrigger />
-    </MovieDetailDialogContext>
+    <QueryClientProvider client={new QueryClient()}>
+      <MovieDetailDialogContext value={openMovie}>
+        <CaptureTrigger />
+      </MovieDetailDialogContext>
+    </QueryClientProvider>
   )
   return { openMovie, props, html }
 }

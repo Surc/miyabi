@@ -21,6 +21,7 @@ type Dependencies struct {
 	MovieExtras     MovieExtrasManager
 	BrowseExtension BrowseExtensionManager
 	Metadata        MetadataManager
+	MDCz            MDCzManager
 	Drive           DriveManager
 	Offline         OfflineManager
 	Monitor         SubscriptionManager
@@ -78,6 +79,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerMovieExtras(protected, deps.MovieExtras)
 	registerBrowseExtension(protected, deps.BrowseExtension)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)
+	registerMDCz(protected, deps.MDCz)
+	registerLibraryVersions(protected, deps.Library)
 
 	settingsAPI := protected.Group("/settings", noStore())
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))

@@ -46,7 +46,9 @@ func TestExportLocalMovie_ScrapedRecordExportsMissingSidecars(t *testing.T) {
 		SetCode("ALDN-613").
 		SetTitle("Index title").
 		SetMetadata(&nfo.Movie{
-			Code: "ALDN-613", Title: "兄嫁と中出ししまくった数日間 水野優香",
+			Plot:             "Saved synopsis survives an offline export",
+			ArtworkExtension: &nfo.ArtworkExtension{Original: "origin", Profile: "style", Labels: []string{"中字"}},
+			Code:             "ALDN-613", Title: "兄嫁と中出ししまくった数日間 水野優香",
 			Premiered: "2026-09-22", Runtime: 130, Rating: 4.69,
 			Actors: []nfo.Actor{{Provider: "javdb", ID: "8VXx", Name: "水野優香", Gender: "female"}},
 		}).
@@ -109,6 +111,9 @@ func TestExportLocalMovie_ScrapedRecordExportsMissingSidecars(t *testing.T) {
 	doc, err := nfo.Decode(nfoContent)
 	if err != nil {
 		t.Fatalf("decode nfo failed: %v", err)
+	}
+	if doc.Plot != loadedMovie.Metadata.Plot || doc.ArtworkExtension == nil || doc.ArtworkExtension.Profile != "style" {
+		t.Fatal("offline export lost extension data")
 	}
 	if doc.Title != "兄嫁と中出ししまくった数日間 水野優香" || doc.Code != "ALDN-613" {
 		t.Fatalf("nfo title or code mismatch: %+v", doc)

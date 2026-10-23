@@ -77,7 +77,8 @@ func TestRoundTripPreservesSourceIDs(t *testing.T) {
   <actor provider="javdb"><name>Actor</name><sourceid>actor-1</sourceid><name_zht>演員</name_zht><gender>female</gender></actor>
   <tag provider="javdb" sourceid="tag-1" category="category-1" name_zht="標籤">Tag</tag>
   <thumb aspect="poster">ABP-001-poster.jpg</thumb><fanart><thumb>ABP-001-fanart.jpg</thumb></fanart>
-  <plot>Source synopsis</plot>
+  <plot>Source &amp; translated synopsis</plot>
+  <miyabi_artwork_extension><original>original-hash</original><profile>style-hash</profile><label>中字</label></miyabi_artwork_extension>
 </movie>`)
 	doc, err := Decode(input)
 	if err != nil {
@@ -87,12 +88,15 @@ func TestRoundTripPreservesSourceIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "<plot>") {
-		t.Fatal("NFO retained an unused plot")
+	if !strings.Contains(string(body), "<plot>Source &amp; translated synopsis</plot>") {
+		t.Fatal("NFO lost the saved synopsis")
 	}
 	got, err := Decode(body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.Plot != doc.Plot || got.ArtworkExtension == nil || got.ArtworkExtension.Original != "original-hash" || got.ArtworkExtension.Profile != "style-hash" || len(got.ArtworkExtension.Labels) != 1 {
+		t.Fatal("NFO lost extension provenance during rescan")
 	}
 	if got.Code != "ABP-001" || got.JavDBID() != "fixture-movie" || got.Title != "Fixture & title" ||
 		got.Director.ID != "director-1" || got.Studio.ID != "maker-1" || got.Set.ID != "series-1" ||
