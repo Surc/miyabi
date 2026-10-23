@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import { Children, isValidElement, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { isEmbyPlayURL, useEmbyPlayback } from '@/api/emby-playback'
 import { MovieEmbyPlayback } from '@/features/movie-detail/extensions/emby-playback'
@@ -15,6 +16,8 @@ function mockTarget(
     isPending: boolean
     isFetching: boolean
     isError: boolean
+    isStale: boolean
+    dataUpdatedAt: number
     error: Error
   }>
 ) {
@@ -23,6 +26,8 @@ function mockTarget(
     isPending: false,
     isFetching: false,
     isError: false,
+    isStale: false,
+    dataUpdatedAt: Date.now(),
     refetch: vi.fn(),
     ...state
   } as unknown as ReturnType<typeof useEmbyPlayback>)
@@ -39,6 +44,38 @@ test('the ready button launches the play intent synchronously as an anchor', () 
   expect(html).not.toContain('emby://items/')
   expect(html).not.toContain('target="_blank"')
   expect(html).toContain('在 Emby App 中播放')
+})
+
+function findAnchor(
+  node: ReactNode
+): ReactElement<{ onClick: (event: MouseEvent) => void }> | undefined {
+  if (!isValidElement<{ children?: ReactNode }>(node)) return
+  if (node.type === 'a') return node as ReactElement<{ onClick: (event: MouseEvent) => void }>
+  for (const child of Children.toArray(node.props.children)) {
+    const found = findAnchor(child)
+    if (found) return found
+  }
+}
+
+test.each([29_999, 30_000])('the click checks freshness after a delayed render (%d ms)', age => {
+  vi.useFakeTimers()
+  mockTarget({})
+  const query = vi.mocked(useEmbyPlayback).getMockImplementation()!('ABC-123')
+  const android = MovieEmbyPlayback({ code: 'ABC-123' })
+  // Render the Android child with the mocked hook, then call its real handler.
+  const tree = (android.type as (props: { code: string }) => ReactNode)(android.props)
+  const anchor = findAnchor(tree)!
+  expect(anchor).toBeDefined()
+  const preventDefault = vi.fn()
+  vi.setSystemTime(Date.now() + age)
+  anchor.props.onClick({ preventDefault } as unknown as MouseEvent)
+  if (age === 30_000) {
+    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(query.refetch).toHaveBeenCalledOnce()
+  } else {
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(query.refetch).not.toHaveBeenCalled()
+  }
 })
 test.each(['disabled', 'not_exported', 'not_found'] as const)(
   'unavailable target %s has no launch link and can be rechecked',
@@ -62,6 +99,10 @@ test('loading, failure and unsafe target states never become a playable link', (
   for (const state of [
     { isPending: true, isFetching: true, data: undefined },
     { isPending: false, isError: true, error: new Error('offline'), data: undefined },
+    { isFetching: true },
+    { isError: true, error: new Error('offline') },
+    { isStale: true },
+    { dataUpdatedAt: Date.now() - 30_000 },
     { isPending: false, data: { status: 'ready' as const, url: 'javascript:alert(1)' } }
   ]) {
     mockTarget(state)
