@@ -76,7 +76,7 @@ JavDB 使用 `/api/v1/movies/{id}/reviews?page=N&limit=20`。分页按原始记�
 
 JavLibrary 固定访问 `https://www.javlibrary.com/cn/`，使用已有代理管理器，每次请求 15 秒超时、最多 2 MiB，最多跟随两次同源重定向（第三次被 `len(via) >= 3` 拒绝）。先通过 `vl_searchbyid.php` 精确匹配完整标准化番号，再读取影片；多个不同匹配 ID、身份不一致、无法识别的页面均报错。独立错误分类、脱敏请求诊断、页面证据边界及飞牛验证步骤见 [JavLibrary 请求诊断](javlibrary-diagnostics.md)。
 
-主要选择器为 `.videos a .id`、`#video_id .text`、`#video_review .score`、`#video_comments table.comment` 下的 `.info`、`.t`、`.date`。只接受同影片的下一页链接。缺少站点评论 ID 时以作者、日期和正文的摘要生成稳定 ID，避免重复展示。站点页面变化优先只调整此适配器和其夹具。
+主要选择器为 `.videos a .id`、`#video_id .text`、`#video_review .score`、`#video_comments table.comment` 下的 `.info`、`.t`、`.date`。只接受同影片且具有唯一有效页码的下一页链接；评论最终响应必须与请求页码一致。可识别搜索候选的身份缺失、已识别评论行的正文节点缺失作为来源异常，保留真正空结果。缺少站点评论 ID 时以作者、日期和正文的摘要生成稳定 ID，避免重复展示。后续响应校验的具体行为及未发布状态见 [诊断文档](javlibrary-diagnostics.md#后续响应校验修复2026-10-24未发布)。站点页面变化优先只调整此适配器和其夹具。
 
 使用上游现有取消感知的 `responseCache`，最后一个等待者离开时取消请求：影片查找 256 项/10 分钟，由评分与评论共享；评论按来源、影片和页码隔离，512 项/2 分钟。失败不缓存，JavDB 仍保留原活动路由持久化。
 

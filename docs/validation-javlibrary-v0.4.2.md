@@ -36,3 +36,29 @@ git diff --check
 [PR #2](https://github.com/Surc/miyabi/pull/2) 只包含历史问题文档，不需要单独合并。其 JL-01–JL-04、后续顺序和完成条件已逐项对照 PR #10；已实现诊断与仍待完成的真实来源验证统一保存在 [诊断文档](javlibrary-diagnostics.md#pr-2-逐项对照)，后续只更新其中的 [真实来源与 NAS 验收清单](javlibrary-diagnostics.md#真实来源与-nas-验收)。本回归记录不另建问题清单。
 
 本次归并仅修改文档，核对了 PR diff、master、Release 和发布运行；执行文档差异、引用与范围检查。没有重新运行业务测试或真实在线验收，没有修改业务代码、标签或重新发布 v0.4.2。上文 Go/race 数字仍是诊断实现当时的回归证据。
+
+## 后续响应校验修复（2026-10-24，未发布）
+
+用户随后要求“修复”，基线为 master `a5ed66c36b7e134ad9c73ef421d49ac994b68a76`。本节记录后续代码回归，不改写 v0.4.2 的发布证据，也不表示新修复已发布或部署。
+
+先以本地 HTTP 夹具复现旧实现接受评论页码回退/缺失、搜索候选身份缺失误报未收录、评论行缺少正文误报空成功，以及单侧括号评分被接受的问题；新增专项测试在旧实现上失败。修复只调整 `internal/javlibrary/client.go`、`parser.go`，保持原始 10 分制、旧 API、公共 netx、缓存生产逻辑及前端。另补充纯查询下一页、数字等值页码、重复参数、错误端点和海报/标题共用影片 ID 的正反例。
+
+| 检查 | 本次结果 |
+| --- | --- |
+| Go 1.27.3：JavLibrary、netx、catalogue、API 四包 | 全部通过，440 个测试/子测试通过事件，无失败或跳过 |
+| 同四包 race 检测 | 全部通过，440 个测试/子测试通过事件，无失败、跳过或竞态报告 |
+| Node 独立逻辑 | 14 项通过，无失败或跳过 |
+| 修改 Go 文件 gofmt、`git diff --check`、文档引用/锚点及范围检查 | 通过 |
+
+新增 catalogue 回归确认：第 2 页来源失败不缓存，重复调用仍请求来源；第 1 页成功缓存保留；来源恢复后可重试并缓存成功的第 2 页，共享影片查找不重复。已有前端回归中的评论去重、失败保留已加载内容继续由四包之外的原验证记录说明；本次没有重跑 Vitest、类型检查、前端生产构建、大语料 codeid 或 MDCz runtime，不把历史结果计入本轮。
+
+复现命令：
+
+```sh
+go test ./internal/javlibrary ./internal/netx ./internal/catalogue ./internal/api
+go test -race ./internal/javlibrary ./internal/netx ./internal/catalogue ./internal/api
+node --test web/tests/*.node.mjs
+git diff --check
+```
+
+运行器当天的一次 urllib 来源探测仍为 HTTP 200、195 字节 `Site Unavailable`，无正常列表/详情/评论标记；没有使用用户 NAS 实际应用内代理，不能作为正常在线来源或 NAS 验收。真实评分、评论分页和部署路径仍未完成，继续只维护 [诊断文档的 A1–A5](javlibrary-diagnostics.md#真实来源与-nas-验收)。本轮未合并、打标签、重新发布 v0.4.2 或部署 NAS。
