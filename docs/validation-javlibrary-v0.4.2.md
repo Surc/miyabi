@@ -27,6 +27,12 @@ git diff --check
 
 本轮生产改动仅位于独立 JavLibrary 适配器。前端、公共 netx、JavDB/FANZA、缓存与下载逻辑未修改；不重复运行未变化的前端功能、大语料 codeid 或 MDCz runtime 回归，也不将历史结果记作本轮重跑。
 
-发布工作流基于合并后的 master 执行前端与 Go 生产构建、真实程序/鉴权/网页/原生依赖 smoke、FPK preview 打包和 linux/amd64 两镜像推送，全部成功后公开 Release。FPK 仍未完成 J4125/fnOS 安装、升级、ACL、字体/TLS 和 Emby 实机验收。
+[PR #10](https://github.com/Surc/miyabi/pull/10) 已合入 `9570c514a36458c71ca00a036d3214778d22a405`。[发布运行 40028000713](https://github.com/Surc/miyabi/actions/runs/40028000713) 基于该提交执行前端与 Go 生产构建、真实程序/鉴权/网页/原生依赖 smoke、FPK preview 打包和 linux/amd64 两镜像推送，已完成且结论为 success；[v0.4.2 Release](https://github.com/Surc/miyabi/releases/tag/v0.4.2) 于北京时间 2026-10-24 05:38:55 公开。FPK 仍未完成 J4125/fnOS 安装、升级、ACL、字体/TLS 和 Emby 实机验收。
 
 真实 JavLibrary 评分、评论和分页的在线响应尚未验收。本版只改善失败可诊断性，未修改来源路径、评分选择器、分制、合法空结果或缓存策略，不宣称解决第三方来源可用性。
+
+## 2026-10-24 文档归并
+
+[PR #2](https://github.com/Surc/miyabi/pull/2) 只包含历史问题文档，不需要单独合并。其 JL-01–JL-04、后续顺序和完成条件已逐项对照 PR #10；已实现诊断与仍待完成的真实来源验证统一保存在 [诊断文档](javlibrary-diagnostics.md#pr-2-逐项对照)，后续只更新其中的 [真实来源与 NAS 验收清单](javlibrary-diagnostics.md#真实来源与-nas-验收)。本回归记录不另建问题清单。
+
+本次归并仅修改文档，核对了 PR diff、master、Release 和发布运行；执行文档差异、引用与范围检查。没有重新运行业务测试或真实在线验收，没有修改业务代码、标签或重新发布 v0.4.2。上文 Go/race 数字仍是诊断实现当时的回归证据。

@@ -107,7 +107,7 @@ Go SDK 可通过命令完整路径或临时 PATH 使用，不把运行器临时�
 
 全量 Go 首次运行暴露上游已有的 `TestProxiedFingerprintClientSwitchesProxyAndCloses` 夹具不匹配：tls-client 通过 CONNECT 访问代理，而旧测试服务器只返回普通 HTTP 响应。独立新增 `internal/netx/fingerprint_proxy_test.go` 模拟 CONNECT 隧道，原测试仅替换两个代理服务器的构造，保留全部切换和关闭断言；生产网络代码未改。上游修复相同夹具后可移除这个测试专用补丁。
 
-本轮 JavLibrary 实际 HTTP 探测返回 195 字节的 `Site Unavailable` 页面，无法在此环境验证真实评分或评论页面；不代表站点全局不可用。JavDB 在线评论与浏览器实际播放仍未验收，应在对应网络与浏览器上确认。为此 PR 保持 draft，不自动合并或发布。
+2026-10-21 的 JavLibrary 实际 HTTP 探测返回 195 字节的 `Site Unavailable` 页面，无法在该环境验证真实评分或评论页面；不代表站点全局不可用。当时的草稿状态为历史记录；后续诊断实现已通过 PR #10 合并并发布 v0.4.2，但真实来源仍未验收。当前 JavLibrary 状态与唯一验收清单见 [JavLibrary 请求诊断](javlibrary-diagnostics.md)。JavDB 在线评论与浏览器实际播放仍未验收，应在对应网络与浏览器上确认。
 
 浏览器验收仍由用户完成：查看默认/双向日期排序及未知日期、两站评分并列、切换评论与加载更多/失败重试、无 JavDB 关联的媒体库详情、MP4/HLS 播放、关闭/切换影片/隐私模式释放媒体及无预告回退。离线夹具测试不能证明第三方在线可用性或实际浏览器解码能力。
 
