@@ -12,6 +12,7 @@ import (
 type socialLibraryStub struct {
 	lookups, comments int
 	fail              bool
+	failComments      bool
 }
 
 func (s *socialLibraryStub) Lookup(ctx context.Context, code string) (javlibrary.Film, error) {
@@ -27,6 +28,9 @@ func (s *socialLibraryStub) Lookup(ctx context.Context, code string) (javlibrary
 }
 func (s *socialLibraryStub) Comments(_ context.Context, id string, page int) (domain.MovieComments, error) {
 	s.comments++
+	if s.failComments {
+		return domain.MovieComments{}, fmt.Errorf("invalid source comments page")
+	}
 	return domain.MovieComments{Source: "javlibrary", Page: page, Items: []domain.MovieComment{{ID: id, Content: "comment"}}}, nil
 }
 func (*socialLibraryStub) Close() {}
@@ -80,5 +84,41 @@ func TestExtrasNeverCachesFailureAndPropagatesCancellation(t *testing.T) {
 	cancel()
 	if _, err := e.JavLibraryRating(ctx, "ABP-123"); err != context.Canceled {
 		t.Fatal(err)
+	}
+}
+
+func TestExtrasCommentFailureRetriesWithoutLosingEarlierPage(t *testing.T) {
+	e := NewMovieExtras(&Service{})
+	defer e.Close()
+	stub := &socialLibraryStub{}
+	e.library = stub
+	load := func(page int) (domain.MovieComments, error) {
+		return e.MovieComments(t.Context(), "javlibrary", "", "ABP-123", page)
+	}
+	if _, err := load(1); err != nil {
+		t.Fatal(err)
+	}
+	stub.failComments = true
+	for range 2 {
+		if _, err := load(2); !domain.IsKind(err, domain.KindUpstream) {
+			t.Fatalf("source failure became empty success: %v", err)
+		}
+	}
+	if stub.comments != 3 {
+		t.Fatal("failed second page was cached")
+	}
+	first, err := load(1)
+	if err != nil || first.Page != 1 || len(first.Items) != 1 || stub.comments != 3 {
+		t.Fatalf("successful first page lost: %+v %v", first, err)
+	}
+	stub.failComments = false
+	for range 2 {
+		second, err := load(2)
+		if err != nil || second.Page != 2 || len(second.Items) != 1 {
+			t.Fatalf("second page retry failed: %+v %v", second, err)
+		}
+	}
+	if stub.lookups != 1 || stub.comments != 4 {
+		t.Fatalf("lookup not shared or successful retry not cached: lookups=%d comments=%d", stub.lookups, stub.comments)
 	}
 }

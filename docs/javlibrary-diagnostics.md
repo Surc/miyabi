@@ -93,10 +93,22 @@ PR #2 还提到 JavDB 在线评论与浏览器实际预告播放。这两项仍�
 ## 保留的证据边界
 
 - 分制：参考 [JAVMovieScraper 的 JavLibrary 适配器](https://github.com/DoctorD1501/JAVMovieScraper/blob/2099948d716a61166bd4a4ae0bfffc43b4e77f18/src/main/java/moviescraper/doctord/controller/siteparsingprofile/specific/JavLibraryParsingProfile.java#L161) 明确按 `Rating(10, ratingText)` 读取原始 `.score`。本轮无法取得真实站点页面，不能宣称重新完成当前线上分制或选择器验收；不进行五分换算。
-- `.videos` 内部变化、已有 `#video_review` 中缺少 `.score`、已有评论容器中的字段变化，仍可能与合法空结果无法区分。新增 shape 供比对，未擅自改变这些语义。
-- 评论重定向仍只校验影片 v；最终页码回退待真实响应确认。没有修改分页、去重或选择器。
+- PR #10 / v0.4.2 没有解决 `.videos` 内部字段变化、评论行正文节点缺失与合法空结果的区分，也没有校验评论重定向的最终页码。后续响应校验修复见下节，不将这些新增行为倒记为 v0.4.2 已包含。
+- 即使补充响应校验，已有 `#video_review` 中缺少 `.score`、非预期评论行类型或语义变化仍可能与合法空结果无法区分；保留已有无评分、空评论和完整番号匹配约定。URL 页码正确也不能证明正文实际来自该页，仍需 A3、A4 的真实页面。
 - 重定向策略未放宽：`len(via) >= 3` 在第三跳拒绝，即最多跟随两跳。原详情文档的“三次”已按实现纠正。
 - 运行器旧 DNS 错误和 195 字节 Site Unavailable 页面不能证明 NAS、源站或 Cloudflare 的状态。没有在线评分、评论分页、NAS 或浏览器验收结果。
+
+## 后续响应校验修复（2026-10-24，未发布）
+
+基于 master 的文档归并提交 `a5ed66c`，用户要求“修复”后，仅在 `internal/javlibrary/client.go`、`parser.go` 内调整响应校验；没有修改公共 netx、缓存生产代码、旧 API 或前端。独立评分仍为原始 10 分制，代理、来源路径、跨源限制、超时、正文上限与脱敏诊断继续沿用。
+
+- 评论最终 URL 的 `v` 必须唯一且与目标影片一致，页码必须唯一、有效并等于请求页。允许第 1 页规范化时省略 page，后续页不能省略或回退；失败使用 `identity/comments_redirect_changed_page`，不会以请求页码缓存其他页的内容。
+- 下一页识别支持当前评论路径的纯查询链接及等值数字页码，拒绝重复 v/page 和仅以后缀伪装的其他 PHP 端点；仍不跟随外站链接，也不改变稳定评论 ID 去重。
+- 搜索中存在可识别影片目标却缺少番号节点，或目标番号的链接缺少唯一有效影片 ID 时，返回 `unexpected_page/search_identity_missing` 或 `search_link_invalid`，不当作未收录。同一影片的海报链接可由另一条含番号的链接补足身份；真正空列表及正常的其他番号结果仍有效。
+- 已识别的 `table.comment` 缺少 `.t` 正文节点时，返回 `unexpected_page/comment_body_missing`，不静默跳过而报告空评论或部分成功。空评论容器、存在但内容为空的正文仍保留原行为。
+- 有值评分只接受普通数字或完整成对括号包裹的数字；单侧括号不再被当作有效评分。合法原始分数、范围和无评分状态保持。
+
+以上是本地可复现缺陷的修复，不是实际来源验收。当天运行器的一次 urllib 探测仍得到 HTTP 200、195 字节 `Site Unavailable`，没有正常列表/详情/评论标记；这是运行器请求路径的结果，未使用 NAS 的实际应用内代理，不能替代 A1–A5 或确定故障根因。代码回归结果见 [回归记录](validation-javlibrary-v0.4.2.md#后续响应校验修复2026-10-24未发布)，唯一待验收清单仍为上文 A1–A5。
 
 ## 验证状态
 
