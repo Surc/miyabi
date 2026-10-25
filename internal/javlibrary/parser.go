@@ -109,7 +109,7 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 		if u.IsAbs() || u.Host != "" {
 			return
 		}
-		id := filmIDFromQuery(u.Query())
+		id := filmIDFromQuery(sourceQuery(u))
 		if id != "" {
 			// A poster link may omit the code when another link for the same
 			// film supplies it; only genuinely unidentified candidates fail.
@@ -139,6 +139,16 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 		return id, nil
 	}
 	return "", nil
+}
+
+// URL.Query silently drops malformed parameters. Never infer film identity or
+// pagination from a partially decoded source query.
+func sourceQuery(u *url.URL) url.Values {
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return nil
+	}
+	return query
 }
 
 // Repeated v parameters cannot establish a unique film identity.
@@ -234,7 +244,7 @@ func parseComments(doc *html.Node, id string, page int) (domain.MovieComments, e
 		if err != nil || u.IsAbs() || u.Host != "" {
 			return
 		}
-		query := u.Query()
+		query := sourceQuery(u)
 		next, valid := commentPageFromQuery(query)
 		if filmIDFromQuery(query) == id && valid && next == page+1 && (u.Path == "" || path.Base(u.Path) == "videocomments.php") && page < 1000 {
 			result.HasMore = true

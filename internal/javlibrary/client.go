@@ -134,7 +134,7 @@ func (c *Client) Lookup(ctx context.Context, code string) (Film, error) {
 		return empty, err
 	}
 	if byID(page.doc, "video_id") != nil {
-		film, err := parseFilm(page.doc, filmIDFromQuery(page.location.Query()), code)
+		film, err := parseFilm(page.doc, filmIDFromQuery(sourceQuery(page.location)), code)
 		return film, page.trace.wrap(err)
 	}
 	id, err := searchFilm(page.doc, code)
@@ -145,7 +145,7 @@ func (c *Client) Lookup(ctx context.Context, code string) (Film, error) {
 	if err != nil {
 		return empty, err
 	}
-	if filmIDFromQuery(page.location.Query()) != id {
+	if filmIDFromQuery(sourceQuery(page.location)) != id {
 		return empty, page.trace.wrap(failure("identity", "film_redirect_changed_identity"))
 	}
 	film, err := parseFilm(page.doc, id, code)
@@ -161,7 +161,7 @@ func (c *Client) Comments(ctx context.Context, id string, page int) (domain.Movi
 	if err != nil {
 		return result, err
 	}
-	query := response.location.Query()
+	query := sourceQuery(response.location)
 	if filmIDFromQuery(query) != id {
 		return result, response.trace.wrap(failure("identity", "comments_redirect_changed_identity"))
 	}

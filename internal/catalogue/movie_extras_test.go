@@ -29,7 +29,8 @@ func (s *socialLibraryStub) Lookup(ctx context.Context, code string) (javlibrary
 func (s *socialLibraryStub) Comments(_ context.Context, id string, page int) (domain.MovieComments, error) {
 	s.comments++
 	if s.failComments {
-		return domain.MovieComments{}, fmt.Errorf("invalid source comments page")
+		// Parsing can produce some rows before encountering a malformed one.
+		return domain.MovieComments{Source: "javlibrary", Page: page, Items: []domain.MovieComment{{ID: "partial", Content: "incomplete"}}}, fmt.Errorf("invalid source comments page")
 	}
 	return domain.MovieComments{Source: "javlibrary", Page: page, Items: []domain.MovieComment{{ID: id, Content: "comment"}}}, nil
 }
