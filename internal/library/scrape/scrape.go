@@ -87,6 +87,8 @@ type Service struct {
 
 	exportMgr     *export.Manager
 	mediaNotifier export.MediaNotifier
+
+	artworkDecorator ArtworkDecorator
 }
 
 func (service *Service) exportConfig() export.Config {
@@ -97,6 +99,8 @@ func (service *Service) exportConfig() export.Config {
 }
 
 type Dependencies struct {
+	ArtworkDecorator ArtworkDecorator
+
 	ExportManager *export.Manager
 	MediaNotifier export.MediaNotifier
 	Subtitles     SubtitleExporter
@@ -105,6 +109,8 @@ type Dependencies struct {
 // New installs dependencies before starting subtitle workers.
 func New(db *ent.Client, d *drive.Drive, metadata MetadataSource, images *mediaimage.Cache, notifier Notifier, deps Dependencies) *Service {
 	service := &Service{
+		artworkDecorator: deps.ArtworkDecorator,
+
 		db:            db,
 		drive:         d,
 		metadata:      metadata,
@@ -220,6 +226,7 @@ func (service *Service) prepareMetadata(ctx context.Context, sess drive.Session,
 		if err := service.resolveMetadata(ctx, input); err != nil {
 			return err
 		}
+		preserveExtensionMetadata(&input.Document, record.Metadata)
 	}
 	input.Code = codeid.Normalize(input.Document.Code)
 	input.Document.Code = input.Code

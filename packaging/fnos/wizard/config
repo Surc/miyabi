@@ -1,0 +1,10 @@
+[
+  {
+    "stepTitle": "访问设置",
+    "items": [
+      { "type": "tips", "helpText": "留空保留原设置。保存会重启正在运行的应用。来源、代理、翻译和角标在 Miyabi 网页设置中调整。" },
+      { "type": "text", "field": "wizard_public_url", "label": "新的 Emby 可访问地址" },
+      { "type": "password", "field": "wizard_password", "label": "新的访问密码", "rules": [ { "min": 8, "max": 256, "message": "新密码长度为 8–256 个字符" } ] }
+    ]
+  }
+]

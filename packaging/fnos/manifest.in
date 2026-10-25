@@ -1,0 +1,14 @@
+appname=miyabi-native
+version=@VERSION@
+display_name=Miyabi
+desc=Miyabi 与 MDCz 独立刮削服务，统一管理影片资料、介绍和封面角标。
+source=thirdparty
+platform=x86
+maintainer=Surc
+maintainer_url=https://github.com/Surc/miyabi
+os_min_version=@MIN_OS@
+desktop_uidir=ui
+desktop_applaunchname=miyabi-native.main
+ctl_stop=true
+checkport=false
+disable_authorization_path=false

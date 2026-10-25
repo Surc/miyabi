@@ -136,6 +136,28 @@ test('a repeated upstream page reports pagination failure rather than looping fo
   expect(loader.getSnapshot()).toMatchObject({ phase: 'error', exhausted: false, ready: 1 })
   expect(loader.getSnapshot().error).toContain('重复页')
 })
+test('negative subtitle results are rechecked after TTL even when the source is exhausted', async () => {
+  let subtitled = false
+  let reads = 0
+  const loader = new BrowsePreloader(
+    {
+      page: async page => (page === 1 ? [movie(1), movie(2)] : []),
+      resources: async id => {
+        reads++
+        return resources(id, subtitled)
+      }
+    },
+    true
+  )
+  await loader.start()
+  expect(loader.getSnapshot()).toMatchObject({ exhausted: true, ready: 0, rows: [] })
+  subtitled = true
+  expect(loader.expireResources(1000, Date.parse('2026-10-21T00:00:02Z'))).toBe(true)
+  await loader.start()
+  expect(reads).toBe(4)
+  expect(loader.getSnapshot().rows.map(row => row.movie.id)).toEqual(['1', '2'])
+  expect(loader.getSnapshot().ready).toBe(2)
+})
 test('pause cancels active work and changing the target does not silently resume it', async () => {
   let waiting = true
   const loader = new BrowsePreloader(

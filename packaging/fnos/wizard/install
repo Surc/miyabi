@@ -1,0 +1,12 @@
+[
+  {
+    "stepTitle": "Miyabi 访问设置",
+    "items": [
+      { "type": "tips", "helpText": "安装 Miyabi 和内置刮削服务。已有 Docker 数据不会自动导入；首次安装先使用新的应用数据目录。" },
+      { "type": "text", "field": "wizard_port", "label": "网页端口", "initValue": "18080", "rules": [ { "required": true, "message": "请输入网页端口" }, { "pattern": "^[0-9]+$", "message": "端口需为整数" } ] },
+      { "type": "text", "field": "wizard_public_url", "label": "Emby 可访问的 Miyabi 地址", "rules": [ { "required": true, "message": "例如 http://192.168.1.10:18080" } ] },
+      { "type": "password", "field": "wizard_password", "label": "Miyabi 访问密码", "rules": [ { "required": true, "message": "请输入至少 8 个字符的密码" }, { "min": 8, "max": 256, "message": "密码长度为 8–256 个字符" } ] },
+      { "type": "tips", "helpText": "内置刮削连接自动配置；增强刮削默认关闭，可在 Miyabi 设置中启用。Emby 导出目录位于共享文件夹 miyabi-native/emby，需给 Emby 配置读取权限和对应挂载。" }
+    ]
+  }
+]

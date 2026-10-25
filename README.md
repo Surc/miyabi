@@ -21,12 +21,14 @@ Miyabi 支持直接对接 115 进行刮削、订阅，也可由 Miyabi 作为底
 推荐固定版本，避免 `latest` 随后续发布变化：
 
 ```text
-ghcr.io/surc/miyabi:v0.3.0
+ghcr.io/surc/miyabi:v0.4.2
 ```
 
-[v0.3.0 发布说明](https://github.com/Surc/miyabi/releases/tag/v0.3.0)对应的镜像已构建推送。飞牛 NAS 的 Intel J4125 使用 `linux/amd64`，下列示例固定该平台；无需选 arm64。`ghcr.io/ppxb/miyabi` 属于上游项目，不包含本仓库的增强功能。
+[v0.4.2 发布说明](https://github.com/Surc/miyabi/releases/tag/v0.4.2)对应的镜像已构建推送。飞牛 NAS 的 Intel J4125 使用 `linux/amd64`，下列示例固定该平台；无需选 arm64。`ghcr.io/ppxb/miyabi` 属于上游项目，不包含本仓库的增强功能。
 
-构建发布成功仅证明发布流程完成，不代表飞牛 NAS 实机、Emby 播放或第三方来源已验收。文档修改不改变已有镜像或版本标签；当前发布工作流仅由推送版本标签触发。
+v0.4.2 已发布 JavLibrary 请求诊断功能；[PR #11](https://github.com/Surc/miyabi/pull/11) 的评论分页及异常响应校验修复已合并至 master，但尚未发布，不包含在本页固定的 v0.4.2 镜像中。该版本的诊断与验证记录见 [v0.4.2 发布说明](https://github.com/Surc/miyabi/blob/v0.4.2/docs/releases/v0.4.2.md)；后续修复状态见[诊断维护文档](docs/javlibrary-diagnostics.md#后续响应校验修复2026-10-24未发布)。
+
+构建发布成功仅证明发布流程完成，不代表飞牛 NAS 实机、Emby 播放或第三方来源已验收。文档修改不改变已有镜像或版本标签；当前发布工作流由推送版本标签或手动运行触发，普通分支提交和合并不会自动发布。
 
 ### 1. 首次安装：Docker CLI
 
@@ -44,7 +46,7 @@ docker run -d \
   --mount 'type=bind,src=/path/to/data,dst=/app/data' \
   -e MIYABI_ACCESS_PASSWORD='change-this-password' \
   -e MIYABI_PUBLIC_URL='http://<宿主机IP>:8080' \
-  ghcr.io/surc/miyabi:v0.3.0
+  ghcr.io/surc/miyabi:v0.4.2
 ```
 
 > [!NOTE]
@@ -57,7 +59,7 @@ docker run -d \
 ```yaml
 services:
   miyabi:
-    image: ghcr.io/surc/miyabi:v0.3.0
+    image: ghcr.io/surc/miyabi:v0.4.2
     platform: linux/amd64
     container_name: miyabi
     restart: unless-stopped
@@ -117,25 +119,25 @@ SQLite 使用 WAL，先停止 Miyabi 再完整复制，不能运行中只拷贝�
 先把 `MIYABI_BACKUP` 改为**数据目录之外、已有备份父目录下的全新绝对路径**，确认空间足够。以下命令在同一个终端依次执行，括号内任一步失败就停止；只有全部成功才继续升级：
 
 ```bash
-MIYABI_BACKUP='/path/to/backups/miyabi-before-v030'
+MIYABI_BACKUP='/path/to/backups/miyabi-before-v042'
 (
   set -eu
   umask 077
   mkdir -m 700 "$MIYABI_BACKUP"
   docker inspect miyabi > "$MIYABI_BACKUP/container.json"
   docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' miyabi > "$MIYABI_BACKUP/container.env"
-  docker image tag "$(docker inspect --format '{{.Image}}' miyabi)" miyabi-local:before-v030
+  docker image tag "$(docker inspect --format '{{.Image}}' miyabi)" miyabi-local:before-v042
   docker stop -t 60 miyabi
   docker cp -a miyabi:/app/data "$MIYABI_BACKUP/data"
   test -s "$MIYABI_BACKUP/data/miyabi.db"
 )
 ```
 
-备份成功后容器保持停止。若尚未升级且备份失败，可用 `docker start miyabi` 恢复原服务，解决问题后重新备份。配置文件含密码和令牌，应私下保存；Compose 用户还需备份原 Compose 文件、`.env` 及引用的配置文件。额外的 Emby 导出目录也应在停止期间复制。不要在验收前清理本地回滚镜像；重复升级时为备份目录、回滚标签和保留容器选择新的名称。
+备份成功后容器保持停止。`miyabi-local:before-v042` 取自备份时实际运行的旧镜像 ID；备份目录、标签与容器名称中的 `v042` 仅表示本次升级目标。若尚未升级且备份失败，可用 `docker start miyabi` 恢复原服务，解决问题后重新备份。配置文件含密码和令牌，应私下保存；Compose 用户还需备份原 Compose 文件、`.env` 及引用的配置文件。额外的 Emby 导出目录也应在停止期间复制。不要在验收前清理本地回滚镜像；重复升级时为备份目录、回滚标签和保留容器选择新的名称。
 
-### 升级到 v0.3.0（选择原部署方式）
+### 升级到 v0.4.2（选择原部署方式）
 
-**原来用 Compose：** 在原飞牛 Compose 项目或原文件中，只将 `image` 改为 `ghcr.io/surc/miyabi:v0.3.0`，J4125 设置 `platform: linux/amd64`。保留其余配置，不用首次安装模板覆盖原文件。在原项目目录执行；原来指定过 `-f` / `-p` 的，继续使用相同参数：
+**原来用 Compose：** 在原飞牛 Compose 项目或原文件中，只将 `image` 改为 `ghcr.io/surc/miyabi:v0.4.2`，J4125 设置 `platform: linux/amd64`。保留其余配置，不用首次安装模板覆盖原文件。在原项目目录执行；原来指定过 `-f` / `-p` 的，继续使用相同参数：
 
 ```bash
 docker compose config -q && \
@@ -153,17 +155,17 @@ docker compose config -q && \
   test -s "$MIYABI_BACKUP/data/miyabi.db"
   test -s "$MIYABI_BACKUP/container.env"
   test "$(docker inspect --format '{{.State.Running}}' miyabi)" = false
-  docker pull --platform linux/amd64 ghcr.io/surc/miyabi:v0.3.0
-  docker rename miyabi miyabi-before-v030
+  docker pull --platform linux/amd64 ghcr.io/surc/miyabi:v0.4.2
+  docker rename miyabi miyabi-before-v042
   docker run -d \
     --platform linux/amd64 \
     --name miyabi \
     --restart unless-stopped \
     --security-opt no-new-privileges:true \
     -p 8080:8080 \
-    --volumes-from miyabi-before-v030 \
+    --volumes-from miyabi-before-v042 \
     --env-file "$MIYABI_BACKUP/container.env" \
-    ghcr.io/surc/miyabi:v0.3.0
+    ghcr.io/surc/miyabi:v0.4.2
 )
 ```
 
@@ -190,8 +192,8 @@ docker compose config -q && \
   test "$MIYABI_DATA" != /
   test -d "$MIYABI_DATA"
   test ! -L "$MIYABI_DATA"
-  test ! -e "${MIYABI_DATA}.after-v030"
-  mv -- "$MIYABI_DATA" "${MIYABI_DATA}.after-v030"
+  test ! -e "${MIYABI_DATA}.after-v042"
+  mv -- "$MIYABI_DATA" "${MIYABI_DATA}.after-v042"
   cp -a -- "$MIYABI_BACKUP/data" "$MIYABI_DATA"
 )
 ```
@@ -200,16 +202,16 @@ docker compose config -q && \
 
 数据恢复成功后，按原部署方式启动旧版本：
 
-- **Compose：** 恢复原 Compose、`.env` 等配置，把 Miyabi 的 `image` 改为已保存的本地标签 `miyabi-local:before-v030`，在原项目执行 `docker compose up -d --no-deps --pull never miyabi`。不要再次拉取可能已经变化的旧 `latest`。
-- **上述 CLI 升级：** 执行下列命令，保留失败容器便于排查，原容器的环境变量、网络和端口随之恢复。若自定义重建时没有保留旧容器，则使用原启动参数与 `miyabi-local:before-v030` 重建。
+- **Compose：** 恢复原 Compose、`.env` 等配置，把 Miyabi 的 `image` 改为已保存的本地标签 `miyabi-local:before-v042`，在原项目执行 `docker compose up -d --no-deps --pull never miyabi`。不要再次拉取可能已经变化的旧 `latest`。
+- **上述 CLI 升级：** 执行下列命令，保留失败容器便于排查，原容器的环境变量、网络和端口随之恢复。若自定义重建时没有保留旧容器，则使用原启动参数与 `miyabi-local:before-v042` 重建。
 
 ```bash
-docker rename miyabi miyabi-failed-v030 && \
-  docker rename miyabi-before-v030 miyabi && \
+docker rename miyabi miyabi-failed-v042 && \
+  docker rename miyabi-before-v042 miyabi && \
   docker start miyabi
 ```
 
-如果升级在新容器创建前就失败、只留下了 `miyabi-before-v030`，数据尚未被新版本打开，可直接将它改回 `miyabi` 并启动。恢复后再次核对账号、媒体库及 Emby 播放；本地数据回滚不会撤销已发给 115 或 Emby 的外部操作。
+如果升级在新容器创建前就失败、只留下了 `miyabi-before-v042`，数据尚未被新版本打开，可直接将它改回 `miyabi` 并启动。恢复后再次核对账号、媒体库及 Emby 播放；本地数据回滚不会撤销已发给 115 或 Emby 的外部操作。
 
 ## 启动配置
 

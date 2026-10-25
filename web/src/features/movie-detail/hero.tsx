@@ -7,15 +7,18 @@ import { MovieResourceBadges, MovieStateBadge } from '@/components/movie/movie-b
 import { MovieCover } from '@/components/movie/movie-cover'
 import { Badge } from '@/components/ui/badge'
 import { MovieMetadata } from './metadata'
+import { movieDisplayTitle } from '@/components/movie/display-title'
 
 export function MovieHero({
   movie,
   libraryStatus,
-  extraStats
+  extraStats,
+  actions
 }: {
   movie: DiscoverMovieDetail | LibraryMovieDetail
   libraryStatus?: LibraryMovieDetail['scrape_status']
   extraStats?: ReactNode
+  actions?: ReactNode
 }) {
   return (
     <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-8">
@@ -38,13 +41,14 @@ export function MovieHero({
             )}
           </div>
           <h1 className="text-xl leading-snug font-bold tracking-normal sm:text-2xl">
-            {movie.title || movie.code}
+            {movieDisplayTitle(movie.code, movie.title)}
           </h1>
           {movie.origin_title && movie.origin_title !== movie.title ? (
             <p className="text-sm leading-6 text-muted-foreground">{movie.origin_title}</p>
           ) : null}
         </div>
 
+        {actions}
         <MovieStats movie={movie} extraStats={extraStats} />
 
         {!libraryStatus && 'release_status' in movie ? (

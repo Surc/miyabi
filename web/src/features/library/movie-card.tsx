@@ -1,5 +1,6 @@
 import type { LibraryMovie } from '@/api/library'
 import { MovieCard } from '@/components/movie'
+import { LibraryVersionBadge } from '@/components/movie/library-version-badge'
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
 import { LibraryMovieStatus } from './movie-status'
 import { LibraryMovieActions } from './movie-actions'
@@ -11,7 +12,11 @@ export function LibraryMovieCard({ movie, busy = false }: { movie: LibraryMovie;
         movie={{ libraryId: movie.id }}
         className="block h-full min-w-0 rounded-2xl outline-ring"
       >
-        <MovieCard movie={movie} titleTooltip={false}>
+        <MovieCard
+          movie={movie}
+          titleTooltip={false}
+          coverOverlay={<LibraryVersionBadge id={movie.id} />}
+        >
           <div className="flex min-h-7 items-center pr-9">
             <LibraryMovieStatus movie={movie} />
           </div>
