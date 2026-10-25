@@ -134,7 +134,7 @@ func (c *Client) Lookup(ctx context.Context, code string) (Film, error) {
 		return empty, err
 	}
 	if byID(page.doc, "video_id") != nil {
-		film, err := parseFilm(page.doc, page.location.Query().Get("v"), code)
+		film, err := parseFilm(page.doc, filmIDFromQuery(sourceQuery(page.location)), code)
 		return film, page.trace.wrap(err)
 	}
 	id, err := searchFilm(page.doc, code)
@@ -145,7 +145,7 @@ func (c *Client) Lookup(ctx context.Context, code string) (Film, error) {
 	if err != nil {
 		return empty, err
 	}
-	if page.location.Query().Get("v") != id {
+	if filmIDFromQuery(sourceQuery(page.location)) != id {
 		return empty, page.trace.wrap(failure("identity", "film_redirect_changed_identity"))
 	}
 	film, err := parseFilm(page.doc, id, code)
@@ -161,8 +161,15 @@ func (c *Client) Comments(ctx context.Context, id string, page int) (domain.Movi
 	if err != nil {
 		return result, err
 	}
-	if response.location.Query().Get("v") != id {
+	query := sourceQuery(response.location)
+	if filmIDFromQuery(query) != id {
 		return result, response.trace.wrap(failure("identity", "comments_redirect_changed_identity"))
+	}
+	// A canonical first-page URL may omit page. Later pages must not silently
+	// redirect to the first/last page and enter the cache under the requested key.
+	actualPage, valid := commentPageFromQuery(query)
+	if !valid || actualPage != page {
+		return result, response.trace.wrap(failure("identity", "comments_redirect_changed_page"))
 	}
 	result, err = parseComments(response.doc, id, page)
 	return result, response.trace.wrap(err)

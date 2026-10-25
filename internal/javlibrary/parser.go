@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -91,18 +92,46 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 		return "", failure("unexpected_page", "search_container_missing")
 	}
 	ids := map[string]bool{}
+	identified := map[string]bool{}
+	var invalid error
 	walk(list, func(n *html.Node) {
-		if n.Data != "a" || codeid.Normalize(plain(byClass(n, "id"))) != code {
+		if n.Data != "a" {
 			return
 		}
+		candidate := codeid.Normalize(plain(byClass(n, "id")))
 		u, err := url.Parse(attr(n, "href"))
-		if err != nil || u.IsAbs() || u.Host != "" {
+		if err != nil {
+			if candidate == code {
+				invalid = failure("unexpected_page", "search_link_invalid")
+			}
 			return
 		}
-		if id := u.Query().Get("v"); filmID.MatchString(id) {
-			ids[id] = true
+		if u.IsAbs() || u.Host != "" {
+			return
 		}
+		id := filmIDFromQuery(sourceQuery(u))
+		if id != "" {
+			// A poster link may omit the code when another link for the same
+			// film supplies it; only genuinely unidentified candidates fail.
+			identified[id] = identified[id] || candidate != ""
+		}
+		if candidate != code {
+			return
+		}
+		if id == "" {
+			invalid = failure("unexpected_page", "search_link_invalid")
+			return
+		}
+		ids[id] = true
 	})
+	if invalid != nil {
+		return "", invalid
+	}
+	for _, known := range identified {
+		if !known {
+			return "", failure("unexpected_page", "search_identity_missing")
+		}
+	}
 	if len(ids) > 1 {
 		return "", failure("identity", "ambiguous_film")
 	}
@@ -112,7 +141,38 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 	return "", nil
 }
 
-var ratingNumber = regexp.MustCompile(`^\(?\s*(\d+(?:\.\d+)?)\s*\)?$`)
+// URL.Query silently drops malformed parameters. Never infer film identity or
+// pagination from a partially decoded source query.
+func sourceQuery(u *url.URL) url.Values {
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return nil
+	}
+	return query
+}
+
+// Repeated v parameters cannot establish a unique film identity.
+func filmIDFromQuery(query url.Values) string {
+	ids := query["v"]
+	if len(ids) != 1 || !filmID.MatchString(ids[0]) {
+		return ""
+	}
+	return ids[0]
+}
+
+func commentPageFromQuery(query url.Values) (int, bool) {
+	pages, present := query["page"]
+	if !present {
+		return 1, true
+	}
+	if len(pages) != 1 {
+		return 0, false
+	}
+	page, err := strconv.Atoi(pages[0])
+	return page, err == nil && page >= 1 && page <= 1000
+}
+
+var ratingNumber = regexp.MustCompile(`^(\d+(?:\.\d+)?)$`)
 
 func parseFilm(doc *html.Node, id, code string) (Film, error) {
 	film := Film{ID: id, Rating: domain.ExternalRating{Source: "javlibrary", Max: 10, Found: true}}
@@ -125,6 +185,9 @@ func parseFilm(doc *html.Node, id, code string) (Film, error) {
 	score := plain(byClass(byID(doc, "video_review"), "score"))
 	if score == "" {
 		return film, nil
+	}
+	if strings.HasPrefix(score, "(") && strings.HasSuffix(score, ")") {
+		score = strings.TrimSpace(score[1 : len(score)-1])
 	}
 	match := ratingNumber.FindStringSubmatch(score)
 	if match == nil {
@@ -146,11 +209,17 @@ func parseComments(doc *html.Node, id string, page int) (domain.MovieComments, e
 	if container == nil {
 		return result, failure("unexpected_page", "comments_container_missing")
 	}
+	var invalid error
 	walk(container, func(n *html.Node) {
-		if n.Data != "table" || !hasClass(n, "comment") {
+		if invalid != nil || n.Data != "table" || !hasClass(n, "comment") {
 			return
 		}
-		content := plain(byClass(n, "t"))
+		body := byClass(n, "t")
+		if body == nil {
+			invalid = failure("unexpected_page", "comment_body_missing")
+			return
+		}
+		content := plain(body)
 		if content == "" {
 			return
 		}
@@ -164,6 +233,9 @@ func parseComments(doc *html.Node, id string, page int) (domain.MovieComments, e
 		// Helpful votes on JavLibrary are not per-user film ratings.
 		result.Items = append(result.Items, domain.MovieComment{ID: key, Author: author, Content: content, CreatedAt: date})
 	})
+	if invalid != nil {
+		return result, invalid
+	}
 	walk(doc, func(n *html.Node) {
 		if n.Data != "a" {
 			return
@@ -172,7 +244,9 @@ func parseComments(doc *html.Node, id string, page int) (domain.MovieComments, e
 		if err != nil || u.IsAbs() || u.Host != "" {
 			return
 		}
-		if u.Query().Get("v") == id && u.Query().Get("page") == strconv.Itoa(page+1) && strings.HasSuffix(u.Path, "videocomments.php") && page < 1000 {
+		query := sourceQuery(u)
+		next, valid := commentPageFromQuery(query)
+		if filmIDFromQuery(query) == id && valid && next == page+1 && (u.Path == "" || path.Base(u.Path) == "videocomments.php") && page < 1000 {
 			result.HasMore = true
 		}
 	})
