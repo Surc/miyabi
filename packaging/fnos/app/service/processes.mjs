@@ -28,11 +28,14 @@ export async function terminate(records, grace = 10_000) {
   };
   await signal("SIGTERM");
   const deadline = Date.now() + grace;
-  while (Date.now() < deadline && (await Promise.all(records.map(alive))).some(Boolean))
+  while (
+    Date.now() < deadline &&
+    (await Promise.all(records.map((record) => alive(record)))).some(Boolean)
+  )
     await delay(100);
   await signal("SIGKILL");
   for (let attempt = 0; attempt < 20; attempt++) {
-    if (!(await Promise.all(records.map(alive))).some(Boolean)) return;
+    if (!(await Promise.all(records.map((record) => alive(record)))).some(Boolean)) return;
     await delay(100);
   }
   throw new Error("进程尚未退出，暂不能升级或备份");
@@ -76,7 +79,9 @@ export async function status(paths, config) {
     !!saved &&
     saved.phase === "running" &&
     saved.children?.length === 2 &&
-    (await Promise.all([saved.supervisor, ...saved.children].map(alive))).every(Boolean) &&
+    (await Promise.all([saved.supervisor, ...saved.children].map((record) => alive(record)))).every(
+      Boolean,
+    ) &&
     (await healthy(config))
   );
 }
