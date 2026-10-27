@@ -152,11 +152,7 @@ export function CachedBrowseResults({
       )}
       <ListPagination
         page={page}
-        totalPages={
-          state.exhausted && state.phase === 'complete'
-            ? Math.max(1, Math.ceil(state.rows.length / 20))
-            : undefined
-        }
+        totalPages={Math.max(page, Math.ceil(state.rows.length / 20))}
         hasMore={state.rows.length > page * 20 || !state.exhausted}
         disabled={!settings.data || (rows.length === 0 && state.phase === 'loading')}
         onPageChange={onPageChange}

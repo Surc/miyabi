@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Children, isValidElement, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
-import { isEmbyPlayURL, useEmbyPlayback } from '@/api/emby-playback'
+import { isEmbyPlayURL, isEmbyWebURL, useEmbyPlayback } from '@/api/emby-playback'
 import { MovieEmbyPlayback } from '@/features/movie-detail/extensions/emby-playback'
 
 vi.mock('@/api/emby-playback', async importOriginal => ({
@@ -22,7 +22,11 @@ function mockTarget(
   }>
 ) {
   vi.mocked(useEmbyPlayback).mockReturnValue({
-    data: { status: 'ready', url: 'emby://play/server-1/movie-2' },
+    data: {
+      status: 'ready',
+      url: 'emby://play/server-1/movie-2',
+      web_url: 'https://emby.example/emby/web/index.html#!/item?id=movie-2&serverId=server-1'
+    },
     isPending: false,
     isFetching: false,
     isError: false,
@@ -87,13 +91,38 @@ test.each(['disabled', 'not_exported', 'not_found'] as const)(
     expect(html).toContain('重新检查')
   }
 )
-test('unsupported platforms never request a playback target', () => {
+test.each([
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+  'Mozilla/5.0 (X11; Linux x86_64)'
+])('desktop opens the matching Emby web item (%s)', userAgent => {
   vi.mocked(useEmbyPlayback).mockClear()
-  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+  vi.stubGlobal('navigator', { userAgent })
   const html = renderToStaticMarkup(<MovieEmbyPlayback code="ABC-123" />)
-  expect(useEmbyPlayback).not.toHaveBeenCalled()
-  expect(html).toContain('安卓 Emby App 3.4.26')
-  expect(html).not.toContain('href=')
+  expect(useEmbyPlayback).toHaveBeenCalledWith('ABC-123')
+  expect(html).toContain(
+    'href="https://emby.example/emby/web/index.html#!/item?id=movie-2&amp;serverId=server-1"'
+  )
+  expect(html).toContain('target="_blank"')
+  expect(html).toContain('rel="noopener noreferrer"')
+  expect(html).toContain('在 Emby 网页中播放')
+  expect(html).not.toContain('emby://play/')
+  expect(html).not.toContain('安卓')
+})
+
+test('desktop does not fall back to an Android intent when its web target is missing or unsafe', () => {
+  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+  for (const web_url of [
+    undefined,
+    'javascript:alert(1)',
+    'https://emby.example/?api_key=secret'
+  ]) {
+    mockTarget({ data: { status: 'ready', url: 'emby://play/server-1/movie-2', web_url } })
+    const html = renderToStaticMarkup(<MovieEmbyPlayback code="ABC-123" />)
+    expect(html).not.toContain('href=')
+    expect(html).toContain('disabled')
+    expect(html).toContain('重新检查')
+  }
 })
 test('loading, failure and unsafe target states never become a playable link', () => {
   for (const state of [
@@ -121,4 +150,23 @@ test('only the official play URI shape is accepted', () => {
     'emby://play/server/../movie'
   ])
     expect(isEmbyPlayURL(value)).toBe(false)
+})
+
+test('web targets require an HTTP(S) Emby item page without credentials', () => {
+  expect(isEmbyWebURL('http://emby:8096/web/index.html#!/item?id=movie-1&serverId=server')).toBe(
+    true
+  )
+  expect(
+    isEmbyWebURL('https://emby.example/prefix/web/index.html#!/item?id=movie-1&serverId=server')
+  ).toBe(true)
+  for (const value of [
+    undefined,
+    'javascript:alert(1)',
+    'emby://play/server/movie',
+    'https://user:secret@emby.example/web/index.html#!/item?id=movie&serverId=server',
+    'https://emby.example/web/index.html?api_key=secret#!/item?id=movie&serverId=server',
+    'https://emby.example/web/index.html#!/item?id=movie',
+    'https://emby.example/web/index.html#!/item?id=movie&serverId=server&api_key=secret'
+  ])
+    expect(isEmbyWebURL(value)).toBe(false)
 })

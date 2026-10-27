@@ -123,8 +123,36 @@ export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
   const client = useQueryClient()
   const settings = useBrowseSettings()
   const key = [...browseKeys.all, 'rating', source, id]
+  const detail = useQuery<DiscoverMovieDetail>({
+    queryKey: discoverKeys.movie(id),
+    enabled: false
+  })
+  const movie = detail.data
+  const knownRating: Cached<ExternalRating> | undefined =
+    source === 'javdb' && movie && movie.rating > 0
+      ? {
+          data: {
+            source: movie.rating_source || 'javdb',
+            found: true,
+            score: movie.rating,
+            max: movie.rating_max || 5
+          },
+          updated_at: new Date(detail.dataUpdatedAt).toISOString(),
+          stale: false
+        }
+      : undefined
   return useQuery({
     queryKey: key,
+    initialData: knownRating,
+    // Keep the detail timestamp so older scores still refresh on mount.
+    initialDataUpdatedAt: knownRating ? detail.dataUpdatedAt : undefined,
+    select: result =>
+      knownRating &&
+      (!result.data.found ||
+        result.data.score === null ||
+        detail.dataUpdatedAt > new Date(result.updated_at).getTime())
+        ? knownRating
+        : result,
     queryFn: async ({ signal }) => {
       const request = async () => {
         if (signal.aborted) throw new DOMException('Canceled', 'AbortError')

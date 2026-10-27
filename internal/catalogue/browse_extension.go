@@ -214,6 +214,15 @@ func (s *BrowseExtension) SearchPage(ctx context.Context, query string, options 
 		return items, true, err
 	})
 }
+
+func browseRatingKey(source, id string) string {
+	// Old JavDB entries could cache an omitted list score as a confirmed absence.
+	if source == "javdb" {
+		return source + ":v2:" + id
+	}
+	return source + ":" + id
+}
+
 func (s *BrowseExtension) seedRatings(items []Movie, generation uint64) {
 	for _, item := range items {
 		reference := browseReference{Code: item.Code, Cover: item.Cover}
@@ -232,19 +241,20 @@ func (s *BrowseExtension) seedRatings(items []Movie, generation uint64) {
 		if err := s.store.write("references", item.ID, browseRecord{s.now(), ref}, generation); err != nil {
 			slog.Warn("persist browse reference", "error", err)
 		}
+		// A list may omit a score that is already available in the full detail.
+		if item.Rating <= 0 {
+			continue
+		}
 		value, max := item.Rating, int(item.RatingMax)
 		if max == 0 {
 			max = 5
 		}
 		rating := domain.ExternalRating{Source: item.RatingSource, Score: &value, Max: max, Found: true}
-		if value <= 0 {
-			rating.Score = nil
-		}
 		if rating.Source == "" {
 			rating.Source = "javdb"
 		}
 		data, _ := json.Marshal(rating)
-		if err := s.store.write("ratings", "javdb:"+item.ID, browseRecord{s.now(), data}, generation); err != nil {
+		if err := s.store.write("ratings", browseRatingKey("javdb", item.ID), browseRecord{s.now(), data}, generation); err != nil {
 			slog.Warn("persist browse rating", "error", err)
 		}
 	}
@@ -282,7 +292,7 @@ func (s *BrowseExtension) Resources(ctx context.Context, id string, refresh bool
 	})
 }
 func (s *BrowseExtension) Rating(ctx context.Context, source, id string, refresh bool) (BrowseCached[domain.ExternalRating], error) {
-	return browseLoad(ctx, s, "ratings", source+":"+id, time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
+	return browseLoad(ctx, s, "ratings", browseRatingKey(source, id), time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
 		if source == "javlibrary" {
 			ref, err := s.reference(ctx, id)
 			if err != nil {

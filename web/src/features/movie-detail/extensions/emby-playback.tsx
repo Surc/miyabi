@@ -1,34 +1,33 @@
 import { LoaderCircleIcon, PlayIcon } from 'lucide-react'
-import { useEmbyPlayback, isEmbyPlayURL, isEmbyPlaybackFresh } from '@/api/emby-playback'
+import {
+  useEmbyPlayback,
+  isEmbyPlayURL,
+  isEmbyWebURL,
+  isEmbyPlaybackFresh
+} from '@/api/emby-playback'
 import { Button } from '@/components/ui/button'
 import { describeApiError } from '@/api/client'
 
 export function MovieEmbyPlayback({ code }: { code: string }) {
-  // Other clients have different intents; do not send them an Android play URL
-  // or silently substitute an item-details page for direct playback.
-  if (typeof navigator === 'undefined' || !/Android/i.test(navigator.userAgent))
-    return (
-      <div className="space-y-2">
-        <Button disabled>
-          <PlayIcon />在 Emby App 中播放
-        </Button>
-        <p className="text-xs text-muted-foreground">直接开播需安卓 Emby App 3.4.26 或更新版本。</p>
-      </div>
-    )
-  return <AndroidEmbyPlayback code={code} />
+  const android = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+  return <EmbyPlayback code={code} android={android} />
 }
 
-function AndroidEmbyPlayback({ code }: { code: string }) {
+function EmbyPlayback({ code, android }: { code: string; android: boolean }) {
   const query = useEmbyPlayback(code)
   const target = query.data
+  const url = android ? target?.url : target?.web_url
+  const label = android ? '在 Emby App 中播放' : '在 Emby 网页中播放'
   const ready =
     !query.isError &&
     !query.isFetching &&
     !query.isStale &&
     isEmbyPlaybackFresh(query.dataUpdatedAt) &&
     target?.status === 'ready' &&
-    isEmbyPlayURL(target.url)
-  let message = '需先在安卓 Emby App 登录同一服务器；点击后直接播放，默认从首个视频文件开始。'
+    (android ? isEmbyPlayURL(url) : isEmbyWebURL(url))
+  let message = android
+    ? '需先在安卓 Emby App 登录同一服务器；点击后直接播放，默认从首个视频文件开始。'
+    : '打开 Emby 网页中的对应影片，登录后点击播放。'
   if (!code.trim()) message = '缺少影片番号，无法定位 Emby 播放资源。'
   else if (query.isError) message = describeApiError(query.error)
   else if (query.isPending || query.isFetching) message = '正在确认 Emby 中的播放资源…'
@@ -38,7 +37,7 @@ function AndroidEmbyPlayback({ code }: { code: string }) {
   else if (target?.status === 'not_exported') message = '影片尚未导出播放文件，请先完成入库与同步。'
   else if (target?.status === 'not_found')
     message = 'Emby 尚未收录该播放文件，请扫描 Emby 媒体库后重试。'
-  else if (!ready) message = '未能取得有效的 Emby 直接播放地址，请重试。'
+  else if (!ready) message = '未能取得有效的 Emby 播放地址，请重试。'
 
   return (
     <div className="space-y-2">
@@ -46,7 +45,9 @@ function AndroidEmbyPlayback({ code }: { code: string }) {
         {ready ? (
           <Button asChild>
             <a
-              href={target.url}
+              href={url}
+              target={android ? undefined : '_blank'}
+              rel={android ? undefined : 'noopener noreferrer'}
               onClick={event => {
                 if (!isEmbyPlaybackFresh(query.dataUpdatedAt)) {
                   event.preventDefault()
@@ -54,13 +55,14 @@ function AndroidEmbyPlayback({ code }: { code: string }) {
                 }
               }}
             >
-              <PlayIcon />在 Emby App 中播放
+              <PlayIcon />
+              {label}
             </a>
           </Button>
         ) : (
           <Button disabled>
             {query.isFetching ? <LoaderCircleIcon className="animate-spin" /> : <PlayIcon />}
-            在 Emby App 中播放
+            {label}
           </Button>
         )}
         {!query.isPending || query.isError ? (

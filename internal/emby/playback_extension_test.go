@@ -54,12 +54,35 @@ func TestPlaybackResolvesExactExportPathAndUsesDirectPlayIntent(t *testing.T) {
 	if err != nil || target.Status != "ready" || target.URL != "emby://play/server-1/movie-12" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
+	if target.WebURL != s.cfg.ServerURL+"/web/index.html#!/item?id=movie-12&serverId=server-1" {
+		t.Fatalf("web target=%q", target.WebURL)
+	}
 	encoded, _ := json.Marshal(target)
-	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "private") || strings.Contains(string(encoded), "http") {
+	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "private") || strings.Contains(string(encoded), "api_key") {
 		t.Fatalf("credentials or stream leaked: %s", encoded)
 	}
 	if len(paths) != 2 {
 		t.Fatalf("requests=%v", paths)
+	}
+}
+
+func TestPlaybackWebTargetPreservesServerBasePath(t *testing.T) {
+	for _, prefix := range []string{"", "/emby", "/proxy/emby/"} {
+		t.Run(prefix, func(t *testing.T) {
+			s, _ := playbackTestService(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/System/Info") {
+					w.Write([]byte(`{"Id":"server-1"}`))
+					return
+				}
+				w.Write([]byte(`{"Items":[{"Id":"movie-12","Path":"/media/ABC/ABC-123/ABC-123.strm"}]}`))
+			})
+			s.cfg.ServerURL = strings.TrimSuffix(s.cfg.ServerURL, "/emby") + prefix
+			target, err := s.PlaybackTarget(t.Context(), "ABC-123")
+			want := strings.TrimRight(s.cfg.ServerURL, "/") + "/web/index.html#!/item?id=movie-12&serverId=server-1"
+			if err != nil || target.WebURL != want {
+				t.Fatalf("web target=%q want=%q err=%v", target.WebURL, want, err)
+			}
+		})
 	}
 }
 
@@ -84,7 +107,7 @@ func TestPlaybackDoesNotGuessFromMismatchedOrAmbiguousItems(t *testing.T) {
 				w.Write([]byte(scenario.body))
 			})
 			target, err := s.PlaybackTarget(t.Context(), "ABC-123")
-			if target.URL != "" || !domain.IsKind(err, scenario.kind) {
+			if target.URL != "" || target.WebURL != "" || !domain.IsKind(err, scenario.kind) {
 				t.Fatalf("target=%+v err=%v", target, err)
 			}
 		})
@@ -140,7 +163,7 @@ func TestPlaybackServerFailuresDoNotBecomeNotFoundOrLaunchLinks(t *testing.T) {
 				w.Write([]byte(`{"Items":[{"Id":"1","Path":"/media/ABC/ABC-123/ABC-123.strm"}]}`))
 			})
 			target, err := s.PlaybackTarget(t.Context(), "ABC-123")
-			if target.Status != "" || target.URL != "" || !domain.IsKind(err, scenario.kind) {
+			if target.Status != "" || target.URL != "" || target.WebURL != "" || !domain.IsKind(err, scenario.kind) {
 				t.Fatalf("target=%+v err=%v", target, err)
 			}
 		})

@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, test, vi } from 'vitest'
 
 import { useRecordMovieView } from '@/api/browse-history'
@@ -64,7 +65,11 @@ test('saved library metadata renders without a JavDB identity or lookup', () => 
     } satisfies LibraryMovieDetail,
     isPending: false
   })
-  const html = renderToStaticMarkup(<MovieDetailContent movie={{ libraryId: 42 }} />)
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MovieDetailContent movie={{ libraryId: 42 }} />
+    </QueryClientProvider>
+  )
   expect(useLibraryMovie).toHaveBeenCalledWith(42)
   expect(useDiscoverMovie).not.toHaveBeenCalled()
   expect(useResolveDiscoverMovie).not.toHaveBeenCalled()

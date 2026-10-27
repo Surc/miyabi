@@ -19,6 +19,7 @@ type browseFake struct {
 	detailStarted, detailRelease             chan struct{}
 	tags                                     []string
 	unrated                                  bool
+	listUnrated                              bool
 }
 
 func (f *browseFake) Browse(ctx context.Context, options domain.BrowseOptions) ([]Movie, error) {
@@ -30,7 +31,11 @@ func (f *browseFake) Browse(ctx context.Context, options domain.BrowseOptions) (
 	if f.fail {
 		return nil, errors.New("offline")
 	}
-	return []Movie{{Movie: domain.Movie{ID: "film", Code: "ABP-123", Cover: "https://example.com/cover.jpg", Rating: 4.2, RatingMax: 5, RatingSource: "javdb"}}}, nil
+	score := 4.2
+	if f.listUnrated {
+		score = 0
+	}
+	return []Movie{{Movie: domain.Movie{ID: "film", Code: "ABP-123", Cover: "https://example.com/cover.jpg", Rating: score, RatingMax: 5, RatingSource: "javdb"}}}, nil
 }
 func (f *browseFake) Search(ctx context.Context, query string, options domain.SearchOptions) ([]Movie, error) {
 	return f.Browse(ctx, domain.BrowseOptions{Page: options.Page})
@@ -256,7 +261,7 @@ func TestBrowseIndexesAreSeparatedByPageAndFilters(t *testing.T) {
 	if f.pages != 3 {
 		t.Fatalf("page cache calls=%d", f.pages)
 	}
-	r, ok, _ := s.store.read("ratings", "javdb:film")
+	r, ok, _ := s.store.read("ratings", browseRatingKey("javdb", "film"))
 	var rating domain.ExternalRating
 	if !ok || json.Unmarshal(r.Data, &rating) != nil || rating.Max != 5 || rating.Source != "javdb" {
 		t.Fatal("source rating lost")
@@ -295,10 +300,49 @@ func TestUnratedAndCanceledCacheReadsRemainDistinct(t *testing.T) {
 	if err != nil || !r.Data.Found || r.Data.Score != nil {
 		t.Fatalf("unrated=%+v %v", r, err)
 	}
+	if _, err := s.Rating(t.Context(), "javdb", "film", false); err != nil || f.details != 1 {
+		t.Fatalf("confirmed unrated film fetched again: details=%d err=%v", f.details, err)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := s.Rating(ctx, "javdb", "film", false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel=%v", err)
+	}
+}
+
+func TestMissingListScoreDoesNotHideOrEraseDetailRating(t *testing.T) {
+	f := &browseFake{listUnrated: true}
+	s, _ := newBrowseTest(t, f)
+	if _, err := s.BrowsePage(t.Context(), domain.BrowseOptions{Page: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	rating, err := s.Rating(t.Context(), "javdb", "film", false)
+	if err != nil || rating.Data.Score == nil || *rating.Data.Score != 4.2 || f.details != 1 {
+		t.Fatalf("rating=%+v details=%d err=%v", rating, f.details, err)
+	}
+	if _, err := s.SearchPage(t.Context(), "ABP-123", domain.SearchOptions{Page: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := s.Rating(t.Context(), "javdb", "film", false)
+	if err != nil || retained.Data.Score == nil || *retained.Data.Score != 4.2 || !retained.UpdatedAt.Equal(rating.UpdatedAt) || f.details != 1 {
+		t.Fatalf("empty list score replaced detail rating: %+v details=%d err=%v", retained, f.details, err)
+	}
+}
+
+func TestLegacyEmptyJavDBRatingIsRevalidatedWithoutClearingOtherCaches(t *testing.T) {
+	f := &browseFake{}
+	s, _ := newBrowseTest(t, f)
+	legacy, _ := json.Marshal(domain.ExternalRating{Source: "javdb", Found: true, Max: 5})
+	_, _, generation := s.store.read("ratings", "javdb:film")
+	if err := s.store.write("ratings", "javdb:film", browseRecord{s.now(), legacy}, generation); err != nil {
+		t.Fatal(err)
+	}
+	rating, err := s.Rating(t.Context(), "javdb", "film", false)
+	if err != nil || rating.Data.Score == nil || *rating.Data.Score != 4.2 || f.details != 1 {
+		t.Fatalf("legacy missing score reused: %+v details=%d err=%v", rating, f.details, err)
+	}
+	if _, ok, _ := s.store.read("ratings", "javdb:film"); !ok {
+		t.Fatal("legacy cache deleted")
 	}
 }
 func TestCoverAndRatingUseListReferencesWithoutDetailFanout(t *testing.T) {

@@ -16,11 +16,12 @@ import (
 	"github.com/ppxb/miyabi/internal/nfo"
 )
 
-// PlaybackTarget is an app launch intent, never a stream or an API-key URL.
+// PlaybackTarget links to the matched Emby item without exposing streams or API keys.
 // Android Emby 3.4.26+ handles emby://play/serverId/itemId by starting playback.
 type PlaybackTarget struct {
 	Status string `json:"status"`
 	URL    string `json:"url,omitempty"`
+	WebURL string `json:"web_url,omitempty"`
 }
 
 var playbackID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
@@ -98,7 +99,9 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	if !playbackID.MatchString(info.ID) {
 		return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 服务器标识无效", nil)
 	}
-	return PlaybackTarget{Status: "ready", URL: "emby://play/" + info.ID + "/" + itemID}, nil
+	webURL := client.base.JoinPath("web/index.html")
+	webURL.Fragment = "!/item?" + url.Values{"id": {itemID}, "serverId": {info.ID}}.Encode()
+	return PlaybackTarget{Status: "ready", URL: "emby://play/" + info.ID + "/" + itemID, WebURL: webURL.String()}, nil
 }
 
 // Only Miyabi-generated STRM names qualify. Multipart films start with cd1;

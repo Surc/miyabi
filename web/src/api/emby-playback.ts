@@ -4,6 +4,7 @@ import { apiGet } from './client'
 export type EmbyPlaybackTarget = {
   status: 'ready' | 'disabled' | 'not_exported' | 'not_found'
   url?: string
+  web_url?: string
 }
 export const embyPlaybackKeys = {
   all: ['emby-playback'] as const,
@@ -40,4 +41,21 @@ export function isEmbyPlaybackFresh(updatedAt: number): boolean {
 
 export function isEmbyPlayURL(value?: string): value is string {
   return /^emby:\/\/play\/[A-Za-z0-9_-]{1,200}\/[A-Za-z0-9_-]{1,200}$/.test(value ?? '')
+}
+
+export function isEmbyWebURL(value?: string): value is string {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      url.pathname.endsWith('/web/index.html') &&
+      /^#!\/item\?id=[A-Za-z0-9_-]{1,200}&serverId=[A-Za-z0-9_-]{1,200}$/.test(url.hash)
+    )
+  } catch {
+    return false
+  }
 }

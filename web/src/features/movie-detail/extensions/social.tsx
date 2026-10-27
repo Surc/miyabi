@@ -1,4 +1,4 @@
-import { StarIcon } from 'lucide-react'
+import { RotateCwIcon, StarIcon } from 'lucide-react'
 import { useJavLibraryRating, useMovieComments, type CommentSource } from '@/api/movie-extras'
 import { InlineError } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
@@ -16,22 +16,26 @@ export function JavLibraryRating({ code }: { code: string }) {
         : `${query.data.score.toFixed(1)} / ${query.data.max}`
   else if (query.isError) value = '暂不可用'
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center gap-2 p-3 sm:p-4">
-      <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <StarIcon className="size-4" />
+    <div className="flex flex-auto flex-col items-center gap-2 px-2 py-3 sm:px-3 sm:py-4">
+      <dt className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+        <StarIcon className="size-4 shrink-0" />
         JavLibrary 评分
       </dt>
-      <dd className="text-sm font-semibold tabular-nums sm:text-base">{value}</dd>
-      {query.isError ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={query.isFetching}
-          onClick={() => void query.refetch()}
-        >
-          重试评分
-        </Button>
-      ) : null}
+      <dd className="flex items-center gap-1 text-sm font-semibold whitespace-nowrap tabular-nums sm:text-base">
+        {value}
+        {query.isError ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="重试评分"
+            title="重试评分"
+            disabled={query.isFetching}
+            onClick={() => void query.refetch()}
+          >
+            <RotateCwIcon />
+          </Button>
+        ) : null}
+      </dd>
     </div>
   )
 }

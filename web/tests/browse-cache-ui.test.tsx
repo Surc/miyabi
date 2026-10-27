@@ -1,10 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { expect, test, vi } from 'vitest'
 import {
+  CachedBrowseResults,
   PreloadActions,
   ResourceLoadingBadge,
   CurrentBrowsePage
 } from '@/features/discover/extensions/cached-results'
+import { defaultBrowseSettings, browseKeys } from '@/api/browse-cache'
+import { useBrowsePreloader } from '@/features/discover/extensions/use-preloader'
 import { MovieDetailDialogContext } from '@/features/movie-detail/dialog-context'
 import type { PreloadRow, PreloadState } from '@/features/discover/extensions/preloader'
 import type { DiscoverMovieDetail } from '@/api/discover'
@@ -14,6 +18,7 @@ vi.mock('@/components/overflow-tooltip', () => ({
 }))
 vi.mock('@/components/movie/movie-badges', () => ({ MovieStateBadge: () => null }))
 vi.mock('@/components/movie/library-version-badge', () => ({ OwnedVersionBadge: () => null }))
+vi.mock('@/features/discover/extensions/use-preloader', () => ({ useBrowsePreloader: vi.fn() }))
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: { nsfwMode: boolean }) => boolean) =>
     select({ nsfwMode: false })
@@ -72,8 +77,8 @@ test('pending cards show loading locally and do not download images', () => {
     renderToStaticMarkup(<CurrentBrowsePage rows={[]} page={1} phase="complete" fill />)
   ).not.toContain('加载中')
 })
-test('six cached pages mount images and rating UI only for the current twenty works', () => {
-  const rows = Array.from({ length: 120 }, (_, index) => {
+function makeRows(count: number): PreloadRow[] {
+  return Array.from({ length: count }, (_, index) => {
     const movie: DiscoverMovieDetail = {
       id: String(index + 1),
       code: `DEMO-${index + 1}`,
@@ -105,6 +110,10 @@ test('six cached pages mount images and rating UI only for the current twenty wo
       }
     } satisfies PreloadRow
   })
+}
+
+test('six cached pages mount images and rating UI only for the current twenty works', () => {
+  const rows = makeRows(120)
   const html = renderToStaticMarkup(
     <MovieDetailDialogContext.Provider value={() => {}}>
       <CurrentBrowsePage rows={rows} page={2} />
@@ -121,3 +130,44 @@ test('six cached pages mount images and rating UI only for the current twenty wo
   expect(html).toContain('中文字幕')
   expect(html).toContain('破解')
 })
+
+test.each([
+  { count: 120, page: 4, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },
+  { count: 120, page: 6, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },
+  { count: 45, page: 3, exhausted: true, pages: [1, 2, 3], hasMore: false }
+])(
+  'browse pagination exposes loaded pages at page $page (exhausted=$exhausted)',
+  ({ count, page, exhausted, pages, hasMore }) => {
+    const rows = makeRows(count)
+    vi.mocked(useBrowsePreloader).mockReturnValue({
+      state: { rows, phase: 'complete', ready: count, target: 120, exhausted },
+      controller: { pause: vi.fn(), resume: vi.fn() },
+      settings: { data: defaultBrowseSettings }
+    } as unknown as ReturnType<typeof useBrowsePreloader>)
+    const client = new QueryClient()
+    client.setQueryData(browseKeys.settings, defaultBrowseSettings)
+    try {
+      const html = renderToStaticMarkup(
+        <QueryClientProvider client={client}>
+          <MovieDetailDialogContext.Provider value={() => {}}>
+            <CachedBrowseResults page={page} onPageChange={() => {}} />
+          </MovieDetailDialogContext.Provider>
+        </QueryClientProvider>
+      )
+      const nav = html.match(/<nav\b[^>]*data-slot="pagination"[\s\S]*?<\/nav>/)?.[0] ?? ''
+      expect(
+        [...nav.matchAll(/data-slot="pagination-link"[^>]*>(\d+)<\/a>/g)].map(match =>
+          Number(match[1])
+        )
+      ).toEqual(pages)
+      expect(nav).toMatch(new RegExp(`aria-current="page"[^>]*>${page}</a>`))
+      const nextButton = nav
+        .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+        ?.find(button => button.includes('下一页'))
+      expect(nextButton).toBeDefined()
+      expect(nextButton?.includes('disabled=""')).toBe(!hasMore)
+    } finally {
+      client.clear()
+    }
+  }
+)

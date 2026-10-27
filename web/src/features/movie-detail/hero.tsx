@@ -93,17 +93,19 @@ function MovieStats({
   if (stats.length === 0 && !extraStats) return null
 
   return (
-    <dl className="flex flex-wrap divide-x divide-border/60 rounded-2xl bg-muted py-1 ring-1 ring-border dark:bg-card/60 dark:ring-0">
+    <dl className="flex divide-x divide-border/60 overflow-x-auto rounded-2xl bg-muted py-1 ring-1 ring-border dark:bg-card/60 dark:ring-0">
       {stats.map(stat => (
         <div
           key={stat.label}
-          className="flex min-w-0 flex-1 flex-col items-center gap-2 p-3 sm:p-4"
+          className="flex flex-auto flex-col items-center gap-2 px-2 py-3 sm:px-3 sm:py-4"
         >
-          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <stat.icon className="size-4" />
+          <dt className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+            <stat.icon className="size-4 shrink-0" />
             {stat.label}
           </dt>
-          <dd className="text-sm font-semibold tabular-nums sm:text-base">{stat.value}</dd>
+          <dd className="text-sm font-semibold whitespace-nowrap tabular-nums sm:text-base">
+            {stat.value}
+          </dd>
         </div>
       ))}
       {extraStats}
