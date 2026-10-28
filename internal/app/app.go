@@ -64,6 +64,17 @@ type App struct {
 // New initializes all services, database connections, and registers task handlers.
 // cfg must be initialized by config.Load or supplied with explicit configuration.
 func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
+	rating, err := newExternalRating()
+	if err != nil {
+		return nil, fmt.Errorf("initialize movie rating: %w", err)
+	}
+	// Until MovieExtras takes ownership, failed startup closes this pool.
+	ratingOwned := false
+	defer func() {
+		if rating != nil && !ratingOwned {
+			rating.Close()
+		}
+	}()
 	ctx := context.Background()
 	store, err := database.Open(ctx, cfg.DataDir)
 	if err != nil {
@@ -191,7 +202,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	taskRegistry.Register(tasks.NewHandler(tasks.KindSubscriptionBatch, monitorSvc.BatchHandler, monitorSvc.BatchFinished))
 
 	pools := newTaskPools(taskSvc, logger)
-	extras := catalogue.NewMovieExtras(catalogueSvc)
+	extras := catalogue.NewMovieExtrasWithRating(catalogueSvc, rating)
+	ratingOwned = true
 	browseExtension, err := catalogue.NewBrowseExtension(cfg.DataDir, catalogueSvc, extras)
 	if err != nil {
 		extras.Close()

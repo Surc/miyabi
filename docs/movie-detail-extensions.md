@@ -72,6 +72,8 @@ GET /api/extensions/movie/comments?source=javlibrary&code=ABP-123&page=1
 
 ## 来源适配与缓存
 
+可选 Javinizer 评分接入见 [独立评分服务](javinizer-rating-extension.md) 与 [2026-10-28 验证记录](validation-javlibrary-2026-10-28.md)。默认关闭、原接口不变；启用后仅评分使用独立服务和缓存，评论仍按下文原客户端路径执行。列表原有持久评分时效保持不变。
+
 JavDB 使用 `/api/v1/movies/{id}/reviews?page=N&limit=20`。分页按原始记录数判断，纯打分而无正文的记录不会提前结束后续页。缺少 `reviews` 字段视为响应结构变化；明确的 `null` 或空数组才视为空结果。用户评分保留 5 分制。
 
 JavLibrary 固定访问 `https://www.javlibrary.com/cn/`，使用已有代理管理器，每次请求 15 秒超时、最多 2 MiB，最多跟随两次同源重定向（第三次被 `len(via) >= 3` 拒绝）。先通过 `vl_searchbyid.php` 精确匹配完整标准化番号，再读取影片；多个不同匹配 ID、身份不一致、无法识别的页面均报错。独立错误分类、脱敏请求诊断、页面证据边界及飞牛验证步骤见 [JavLibrary 请求诊断](javlibrary-diagnostics.md)。

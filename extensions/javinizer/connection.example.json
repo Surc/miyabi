@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "server_url": "http://127.0.0.1:8765",
+  "api_token": "",
+  "timeout_seconds": 45
+}
