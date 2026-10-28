@@ -1,0 +1,48 @@
+# Dedicated metadata state only. Run with MIYABI_JAVLIBRARY_RATING_ONLY=1.
+# Keep this file and data outside the application/source directories.
+config_version: 3
+server:
+  host: 127.0.0.1
+  port: 8765
+database:
+  type: sqlite
+  dsn: data/javinizer.db
+system:
+  version_check_enabled: false
+api:
+  security:
+    allowed_directories: []
+scrapers:
+  priority: [javlibrary]
+  scrape_actress: false
+  timeout_seconds: 15
+  request_timeout_seconds: 40
+  r18dev:
+    enabled: false
+  javlibrary:
+    enabled: true
+    language: cn
+    base_url: https://www.javlibrary.com
+    rate_limit: 1000
+    use_flaresolverr: false
+metadata:
+  priority:
+    rating: [javlibrary]
+  actress_database:
+    enabled: false
+  r18dev_dump:
+    enabled: false
+  translation:
+    enabled: false
+output:
+  download_cover: false
+  download_poster: false
+  download_extrafanart: false
+  download_trailer: false
+  download_actress: false
+performance:
+  max_workers: 1
+logging:
+  level: info
+  # Keep stdout available for CLI commands such as token create --json.
+  output: stderr

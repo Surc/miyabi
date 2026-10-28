@@ -10,6 +10,8 @@
 
 ## PR #2 逐项对照
 
+2026-10-28 新增默认关闭的 [Javinizer 独立评分接入](javinizer-rating-extension.md)，已完成 [Amane 对比和本地验证](validation-javlibrary-2026-10-28.md)。启用该接入时，评分经过独立引擎，本文的原客户端 operation/shape 日志只适用于评论和默认评分路径；引擎代理与 Miyabi 应用代理分别配置。引擎 404/缺分保留来源异常，不能解释为未收录。A1–A5 仍未完成，真实来源与 NAS 状态没有改变。
+
 | 原记录 | PR #10 / v0.4.2 已确认的变化 | 当前结论 |
 | --- | --- | --- |
 | JL-01：运行器 DNS/网络阻塞 | 已能分类 DNS、网络、TLS、超时等失败，保留原始错误链并输出允许的脱敏 cause 字段 | 诊断能力已实现；2026-10-21 的 `network is unreachable` 只证明当时运行器直连受限，NAS 根因仍待 A1、A2 |

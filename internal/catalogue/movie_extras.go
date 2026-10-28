@@ -26,17 +26,27 @@ type MovieExtras struct {
 	library   librarySocialReader
 	films     *responseCache[javlibrary.Film]
 	comments  *responseCache[domain.MovieComments]
+	rating    *ratingExtension
 }
 
 func NewMovieExtras(service *Service) *MovieExtras {
 	return &MovieExtras{catalogue: service, library: javlibrary.New(service.proxy), films: newResponseCache[javlibrary.Film](256, 10*time.Minute), comments: newResponseCache[domain.MovieComments](512, 2*time.Minute)}
 }
-func (e *MovieExtras) Close() { e.library.Close() }
+func (e *MovieExtras) Close() {
+	e.library.Close()
+	if e.rating != nil {
+		e.rating.reader.Close()
+	}
+}
 func (e *MovieExtras) film(ctx context.Context, code string) (javlibrary.Film, error) {
 	code = codeid.Normalize(code)
 	return e.films.get(ctx, code, func(ctx context.Context) (javlibrary.Film, error) { return e.library.Lookup(ctx, code) })
 }
 func (e *MovieExtras) JavLibraryRating(ctx context.Context, code string) (domain.ExternalRating, error) {
+	if e.rating != nil {
+		rating, err := e.rating.rating(ctx, code)
+		return rating, extrasError(ctx, err)
+	}
 	film, err := e.film(ctx, code)
 	return film.Rating, extrasError(ctx, err)
 }

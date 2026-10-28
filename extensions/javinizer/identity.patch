@@ -1,0 +1,90 @@
+diff --git a/internal/api/movie/scrape.go b/internal/api/movie/scrape.go
+index 02fae3e..f02afd5 100644
+--- a/internal/api/movie/scrape.go
++++ b/internal/api/movie/scrape.go
+@@ -5,6 +5,7 @@ import (
+ 	"errors"
+ 	"net/http"
+ 	"net/url"
++	"os"
+ 	"regexp"
+ 	"strings"
+ 	"time"
+@@ -179,7 +180,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
+ 		// Generate temp poster for the scraped movie.
+ 		// Poster generation was moved out of the scrape orchestrator;
+ 		// API endpoints that call wf.Scrape() directly must do it explicitly.
+-		if deps.PosterGen != nil && result.Movie != nil {
++		if deps.PosterGen != nil && result.Movie != nil && os.Getenv("MIYABI_JAVLIBRARY_RATING_ONLY") != "1" {
+ 			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+ 		}
+ 
+@@ -204,6 +205,11 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
+ 			resp.TranslationWarning = *meta.TranslationWarning
+ 		}
+ 		resp.TranslationWarningCode = meta.TranslationWarningCode
++		// Optional capability for Miyabi's isolated rating adapter. Vanilla
++		// v1.6.5 can synthesize page identity and must not pass this contract.
++		if os.Getenv("MIYABI_JAVLIBRARY_RATING_ONLY") == "1" && req.Force && len(req.SelectedScrapers) == 1 && req.SelectedScrapers[0] == "javlibrary" {
++			c.Header("X-Miyabi-JavLibrary-Identity", "page-v1")
++		}
+ 		c.JSON(http.StatusOK, resp)
+ 	}
+ }
+diff --git a/internal/scraper/javlibrary/javlibrary.go b/internal/scraper/javlibrary/javlibrary.go
+index 41c9248..2bebf38 100644
+--- a/internal/scraper/javlibrary/javlibrary.go
++++ b/internal/scraper/javlibrary/javlibrary.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"fmt"
+ 	"net/url"
++	"os"
+ 	"path/filepath"
+ 	"regexp"
+ 	"strconv"
+@@ -487,12 +488,13 @@ func extractIDFromURL(u *url.URL) string {
+ }
+ 
+ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
+-	// Page-first ID extraction: derive the canonical product code from the
+-	// page's <div id="video_id"> div. The `id` parameter (URL slug or search
+-	// term) is only a fallback when page extraction fails.
++	// Derive identity only from the page, so API consumers can compare it
++	// with the requested code even if search selected a different result.
+ 	canonicalID := s.extractVideoID(html)
+ 	if canonicalID == "" {
+-		canonicalID = id
++		// Never label an unidentified page with the requested code. Consumers
++		// must be able to reject a different first search result by its real ID.
++		return nil, fmt.Errorf("JavLibrary detail page is missing its product code")
+ 	}
+ 
+ 	result := &models.ScraperResult{
+@@ -527,6 +529,11 @@ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, lang
+ 
+ 	// Rating from video_rating div
+ 	result.Rating = s.extractRating(html, doc)
++	// A dedicated rating service must not probe image dimensions or download
++	// artwork while Miyabi preloads off-screen catalogue pages.
++	if os.Getenv("MIYABI_JAVLIBRARY_RATING_ONLY") == "1" {
++		return result, nil
++	}
+ 
+ 	// Media URLs
+ 	result.CoverURL = imageutil.NormalizeDMMScreenshotURL(s.extractCoverURL(html))
+@@ -816,6 +823,14 @@ func (s *scraper) extractRating(html string, doc *goquery.Document) *models.Rati
+ 	}
+ 
+ 	scoreText := strings.TrimSpace(doc.Find("#video_rating span.num").First().Text())
++	// Older pages retain the parenthesized score in video_review. Accept
++	// only paired parentheses; malformed source text must not become a score.
++	if scoreText == "" {
++		scoreText = strings.TrimSpace(doc.Find("#video_review .score").First().Text())
++		if strings.HasPrefix(scoreText, "(") && strings.HasSuffix(scoreText, ")") {
++			scoreText = strings.TrimSpace(scoreText[1 : len(scoreText)-1])
++		}
++	}
+ 	if scoreText == "" {
+ 		return nil
+ 	}

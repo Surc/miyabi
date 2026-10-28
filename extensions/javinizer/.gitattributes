@@ -1,0 +1,2 @@
+# Unified diff context lines intentionally start with a space, including blanks.
+identity.patch -whitespace
