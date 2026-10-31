@@ -14,8 +14,8 @@ export function isPanUnauthorized(error: unknown): boolean {
 }
 
 export function describeApiError(error: unknown): string {
-  if (isPanUnauthorized(error)) return '115 登录已失效，请前往设置重新登录。'
-  return error instanceof ApiError ? error.message : '请检查后端服务和网络后重试。'
+  if (isPanUnauthorized(error)) return '115 ��¼��ʧЧ����ǰ���������µ�¼��'
+  return error instanceof ApiError ? error.message : '�����˷������������ԡ�'
 }
 
 type QueryValue = string | number | readonly string[] | undefined
@@ -53,6 +53,18 @@ export function apiPut<T>(path: string, body: unknown): Promise<T> {
   return requestJSON<T>(path, 'PUT', body)
 }
 
+export function apiUpload<T>(path: string, file: File): Promise<T> {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/zip' },
+    body: file
+  })
+}
+
+export async function apiDownload(path: string): Promise<Blob> {
+  return (await requestResponse(path)).blob()
+}
+
 export function notifyUnauthorized(): void {
   window.dispatchEvent(new CustomEvent('miyabi:unauthorized'))
 }
@@ -75,13 +87,17 @@ function requestJSON<T>(path: string, method: 'POST' | 'PATCH' | 'PUT', body: un
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await requestResponse(path, init)).json() as Promise<T>
+}
+
+async function requestResponse(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(path, {
     ...init,
     credentials: 'same-origin'
   })
 
   if (!response.ok) {
-    let message = response.statusText || `请求失败（HTTP ${response.status}）`
+    let message = response.statusText || `����ʧ�ܣ�HTTP ${response.status}��`
     let code: string | undefined
     try {
       const payload: unknown = await response.json()
@@ -105,5 +121,5 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     throw new ApiError(message, response.status, code)
   }
-  return response.json() as Promise<T>
+  return response
 }

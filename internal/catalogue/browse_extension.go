@@ -94,7 +94,7 @@ func (s *BrowseExtension) Settings() BrowseCacheSettings {
 }
 func (s *BrowseExtension) UpdateSettings(settings BrowseCacheSettings) (BrowseCacheSettings, error) {
 	if !settings.Valid() {
-		return s.Settings(), domain.E(domain.KindInvalid, "预加载或缓存有效期超出允许范围", nil)
+		return s.Settings(), domain.E(domain.KindInvalid, "Ԥ���ػ򻺴���Ч�ڳ���������Χ", nil)
 	}
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
@@ -109,7 +109,7 @@ func (s *BrowseExtension) UpdateSettings(settings BrowseCacheSettings) (BrowseCa
 func (s *BrowseExtension) CacheStats() (BrowseCacheStats, error) { return s.store.stats() }
 func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 	if !slices.Contains([]string{"all", "images", "data"}, scope) {
-		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "不支持的缓存清理范围", nil)
+		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "��֧�ֵĻ���������Χ", nil)
 	}
 	stats, err := s.store.clear(scope)
 	s.loads.reset()
@@ -183,7 +183,7 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 			slog.WarnContext(ctx, "discovery cache refresh failed", "namespace", namespace, "error", err)
 			return cached, nil
 		}
-		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
+		return result, domain.E(domain.KindUpstream, "��Ʒ���ϻ���Դ�ݲ����ã�������", err)
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err
@@ -292,18 +292,16 @@ func (s *BrowseExtension) Resources(ctx context.Context, id string, refresh bool
 	})
 }
 func (s *BrowseExtension) Rating(ctx context.Context, source, id string, refresh bool) (BrowseCached[domain.ExternalRating], error) {
-	return browseLoad(ctx, s, "ratings", browseRatingKey(source, id), time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
-		if source == "javlibrary" {
-			ref, err := s.reference(ctx, id)
-			if err != nil {
-				return domain.ExternalRating{}, false, err
-			}
-			if s.ratings == nil {
-				return domain.ExternalRating{}, false, fmt.Errorf("rating source unavailable")
-			}
-			rating, err := s.ratings.JavLibraryRating(ctx, ref.Code)
-			return rating, true, err
+	if source == "javlibrary" {
+		_, _, generation := s.store.read("references", id)
+		ctx = context.WithValue(ctx, browseGenerationKey{}, browseGeneration(ctx, generation))
+		ref, err := s.reference(ctx, id)
+		if err != nil {
+			return BrowseCached[domain.ExternalRating]{}, err
 		}
+		return s.RatingByCode(ctx, ref.Code, refresh)
+	}
+	return browseLoad(ctx, s, "ratings", browseRatingKey(source, id), time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
 		movie, err := s.source.CatalogueDetail(ctx, id)
 		max := int(movie.RatingMax)
 		if max == 0 {

@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 
 import { apiGet } from './client'
+import type { Cached } from './browse-cache'
 import {
   createMovieDetailLoader,
   discoverKeys,
@@ -218,9 +219,18 @@ export function useSearchMovies(params: SearchMoviesParams) {
 }
 
 export function useDiscoverTags(zone: JavDBZone) {
+  const client = useQueryClient()
   return useQuery({
     queryKey: discoverKeys.tags(zone),
-    queryFn: ({ signal }) => apiGet<TagCategory[]>('/api/discover/tags', { zone }, signal),
+    queryFn: async ({ signal }) => {
+      const path = '/api/extensions/browse/tags'
+      let result = await apiGet<Cached<TagCategory[]>>(path, { zone }, signal)
+      if (result.stale) {
+        client.setQueryData(discoverKeys.tags(zone), result.data)
+        result = await apiGet<Cached<TagCategory[]>>(path, { zone, refresh: 1 }, signal)
+      }
+      return result.data
+    },
     staleTime: 24 * 60 * 60_000
   })
 }

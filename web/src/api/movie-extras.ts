@@ -1,5 +1,6 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, apiGet } from './client'
+import { readCachedRating } from './browse-cache'
 
 export type CommentSource = 'javdb' | 'javlibrary'
 export type ExternalRating = { source: string; found: boolean; score: number | null; max: number }
@@ -24,13 +25,23 @@ const retry = (count: number, error: Error) =>
 
 // Independent keys keep upstream catalogue metadata and saved ratings untouched.
 export function useJavLibraryRating(code: string) {
+  const client = useQueryClient()
+  const normalized = code.trim().toUpperCase()
+  const key = ['movie-extras', 'javlibrary-rating', normalized]
   return useQuery({
-    queryKey: ['movie-extras', 'javlibrary-rating', code],
+    queryKey: key,
     queryFn: ({ signal }) =>
-      apiGet<ExternalRating>('/api/extensions/movie/javlibrary-rating', { code }, signal),
-    enabled: !!code.trim(),
-    staleTime: 10 * 60_000,
-    retry
+      readCachedRating(
+        '/api/extensions/browse/ratings/javlibrary',
+        { code: normalized },
+        signal,
+        result => client.setQueryData(key, result)
+      ),
+    select: result => result.data,
+    enabled: !!normalized,
+    staleTime: 60_000,
+    refetchInterval: 300_000,
+    retry: false
   })
 }
 

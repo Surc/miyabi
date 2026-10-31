@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiDelete, apiGet, apiPut } from './client'
+import { apiDelete, apiDownload, apiGet, apiPut, apiUpload } from './client'
 import type {
   BrowseMoviesParams,
   DiscoverMagnet,
@@ -58,6 +58,8 @@ export const saveBrowseSettings = (settings: BrowseSettings) =>
   apiPut<BrowseSettings>(`${base}/settings`, settings)
 export const clearBrowseCache = (scope: string) =>
   apiDelete<CacheStats>(`${base}/cache?scope=${encodeURIComponent(scope)}`)
+export const exportBrowseCache = () => apiDownload(`${base}/cache/export`)
+export const importBrowseCache = (file: File) => apiUpload<CacheStats>(`${base}/cache/import`, file)
 
 const resetListeners = new Set<() => void>()
 export function onBrowseReset(listener: () => void) {
@@ -99,7 +101,7 @@ export async function readBrowsePage(
     preview(result.data)
     result = await apiGet<Cached<DiscoverMovie[]>>(path, { ...values, refresh: 1 }, signal)
   }
-  if (result.stale) throw new Error('列表更新失败，已有缓存已保留，请重试')
+  if (result.stale) throw new Error('�б�����ʧ�ܣ����л����ѱ�����������')
   return result.data
 }
 export async function readBrowseResources(
@@ -119,6 +121,30 @@ export async function readBrowseResources(
 // Ratings are optional and only requested by mounted cards. JavLibrary gets a
 // separate small queue so an unavailable rating site cannot block resource fill.
 const librarySlots = new RequestSlots(2)
+export async function readCachedRating(
+  path: string,
+  params: Record<string, string>,
+  signal: AbortSignal,
+  cached: (value: Cached<ExternalRating>) => void,
+  queued = true
+) {
+  const previous = await apiGet<Cached<ExternalRating> | null>(
+    path,
+    { ...params, cached_only: 1 },
+    signal
+  )
+  if (previous) {
+    if (!previous.stale) return previous
+    cached(previous)
+  }
+  const refresh = async () => {
+    const result = await apiGet<Cached<ExternalRating>>(path, { ...params, refresh: 1 }, signal)
+    if (result.refresh_failed) throw new Error('���ָ���ʧ�ܣ��ѱ������������������')
+    return result
+  }
+  return queued ? librarySlots.run(signal, refresh) : refresh()
+}
+
 export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
   const client = useQueryClient()
   const settings = useBrowseSettings()
@@ -153,19 +179,14 @@ export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
         detail.dataUpdatedAt > new Date(result.updated_at).getTime())
         ? knownRating
         : result,
-    queryFn: async ({ signal }) => {
-      const request = async () => {
-        if (signal.aborted) throw new DOMException('Canceled', 'AbortError')
-        const path = `${base}/movies/${encodeURIComponent(id)}/ratings/${source}`
-        let result = await apiGet<Cached<ExternalRating>>(path, undefined, signal)
-        if (result.stale) {
-          client.setQueryData(key, result)
-          result = await apiGet<Cached<ExternalRating>>(path, { refresh: 1 }, signal)
-        }
-        return result
-      }
-      return source === 'javlibrary' ? librarySlots.run(signal, request) : request()
-    },
+    queryFn: ({ signal }) =>
+      readCachedRating(
+        `${base}/movies/${encodeURIComponent(id)}/ratings/${source}`,
+        {},
+        signal,
+        result => client.setQueryData(key, result),
+        source === 'javlibrary'
+      ),
     staleTime: 60_000,
     refetchInterval: Math.min((settings.data?.rating_hours ?? 12) * 3_600_000, 300_000),
     retry: false

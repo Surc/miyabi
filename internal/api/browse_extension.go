@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ppxb/miyabi/internal/catalogue"
+	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/domain"
 )
 
@@ -15,6 +17,12 @@ type BrowseExtensionManager interface {
 	SearchPage(context.Context, string, domain.SearchOptions, bool) (catalogue.BrowseCached[[]catalogue.Movie], error)
 	Resources(context.Context, string, bool) (catalogue.BrowseCached[catalogue.BrowseResources], error)
 	Rating(context.Context, string, string, bool) (catalogue.BrowseCached[domain.ExternalRating], error)
+	RatingByCode(context.Context, string, bool) (catalogue.BrowseCached[domain.ExternalRating], error)
+	CachedRating(string, string) *catalogue.BrowseCached[domain.ExternalRating]
+	Tags(context.Context, domain.Zone, bool) (catalogue.BrowseCached[[]domain.TagCategory], error)
+	Media(context.Context, string) (domain.Media, error)
+	ExportCache(context.Context, io.Writer) error
+	ImportCache(context.Context, io.ReaderAt, int64) (catalogue.BrowseCacheStats, error)
 	Image(context.Context, string) (domain.Media, error)
 	Settings() catalogue.BrowseCacheSettings
 	UpdateSettings(catalogue.BrowseCacheSettings) (catalogue.BrowseCacheSettings, error)
@@ -27,6 +35,46 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		return
 	}
 	group := protected.Group("/extensions/browse", noStore())
+	registerBrowseArchive(group, service)
+	group.GET("/tags", func(c *gin.Context) {
+		q, ok := bindQuery[discoverTagsQuery](c)
+		if !ok {
+			return
+		}
+		refresh, ok := browseRefresh(c)
+		if !ok {
+			return
+		}
+		result, err := service.Tags(c.Request.Context(), domain.Zone(q.Zone), refresh)
+		respond(c, result, err)
+	})
+	group.GET("/ratings/javlibrary", func(c *gin.Context) {
+		q, ok := bindQuery[struct {
+			Code string `form:"code" binding:"required,max=200"`
+		}](c)
+		if !ok {
+			return
+		}
+		code := codeid.Normalize(q.Code)
+		if code == "" {
+			respond(c, nil, domain.E(domain.KindInvalid, "ӰƬ���Ų���Ϊ��", nil))
+			return
+		}
+		refresh, ok := browseRefresh(c)
+		if !ok {
+			return
+		}
+		cachedOnly, ok := browseFlag(c, "cached_only")
+		if !ok {
+			return
+		}
+		if cachedOnly {
+			respond(c, service.CachedRating("javlibrary-code", code), nil)
+			return
+		}
+		result, err := service.RatingByCode(c.Request.Context(), code, refresh)
+		respond(c, result, err)
+	})
 	group.GET("/movies", func(c *gin.Context) {
 		q, ok := bindQuery[discoverBrowseQuery](c)
 		if !ok {
@@ -74,7 +122,15 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		}
 		source := c.Param("source")
 		if source != "javdb" && source != "javlibrary" {
-			respond(c, nil, domain.E(domain.KindInvalid, "不支持的评分来源", nil))
+			respond(c, nil, domain.E(domain.KindInvalid, "��֧�ֵ�������Դ", nil))
+			return
+		}
+		cachedOnly, ok := browseFlag(c, "cached_only")
+		if !ok {
+			return
+		}
+		if cachedOnly {
+			respond(c, service.CachedRating(source, id), nil)
 			return
 		}
 		result, err := service.Rating(c.Request.Context(), source, id, refresh)
@@ -112,15 +168,18 @@ func browseID(c *gin.Context) (string, bool) {
 		ID string `uri:"id" binding:"required,max=200"`
 	}
 	if err := c.ShouldBindUri(&uri); err != nil {
-		respond(c, nil, domain.E(domain.KindInvalid, "无效的作品标识", nil))
+		respond(c, nil, domain.E(domain.KindInvalid, "��Ч����Ʒ��ʶ", nil))
 		return "", false
 	}
 	return uri.ID, true
 }
 func browseRefresh(c *gin.Context) (bool, bool) {
-	value := c.Query("refresh")
+	return browseFlag(c, "refresh")
+}
+func browseFlag(c *gin.Context, name string) (bool, bool) {
+	value := c.Query(name)
 	if value != "" && value != "0" && value != "1" {
-		respond(c, nil, domain.E(domain.KindInvalid, "无效的刷新参数", nil))
+		respond(c, nil, domain.E(domain.KindInvalid, "��Ч��ˢ�²���", nil))
 		return false, false
 	}
 	return value == "1", true
