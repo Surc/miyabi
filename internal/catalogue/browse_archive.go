@@ -148,7 +148,7 @@ func validateBrowseRecord(namespace string, data []byte) (browseRecord, error) {
 // survive a move to another server; newer local records always win.
 func (s *BrowseExtension) ImportCache(ctx context.Context, src io.ReaderAt, size int64) (BrowseCacheStats, error) {
 	invalid := func(err error) (BrowseCacheStats, error) {
-		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "��Ч�Ļ����ļ�����ѡ��Ӧ�õ����� ZIP �ļ������ 512 MB��", err)
+		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "无效的缓存文件，请选择本应用导出的 ZIP 文件（最大 512 MB）", err)
 	}
 	if size <= 0 || size > BrowseArchiveMaxBytes {
 		return invalid(fmt.Errorf("archive exceeds size limit"))

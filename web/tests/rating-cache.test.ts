@@ -86,7 +86,7 @@ test('failed background refresh keeps the displayed cached score and remains ret
       readCachedRating('/rating', {}, signal, cached => client.setQueryData(key, cached))
   }
   try {
-    await expect(client.fetchQuery(options)).rejects.toThrow('�ѱ����������')
+    await expect(client.fetchQuery(options)).rejects.toThrow('已保留缓存分数')
     expect(client.getQueryData(key)).toEqual(snapshot())
     expect(client.getQueryState(key)?.status).toBe('error')
     failed = false
@@ -125,10 +125,10 @@ test('cache archives download as binary and upload unchanged with normal authent
 test('archive errors preserve server explanations', async () => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => Response.json({ error: '��Ч�Ļ����ļ�' }, { status: 400 }))
+    vi.fn(async () => Response.json({ error: '无效的缓存文件' }, { status: 400 }))
   )
   await expect(importBrowseCache(new File(['invalid'], 'bad.zip'))).rejects.toThrow(
-    '��Ч�Ļ����ļ�'
+    '无效的缓存文件'
   )
-  await expect(exportBrowseCache()).rejects.toThrow('��Ч�Ļ����ļ�')
+  await expect(exportBrowseCache()).rejects.toThrow('无效的缓存文件')
 })

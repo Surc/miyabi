@@ -94,7 +94,7 @@ func (s *BrowseExtension) Settings() BrowseCacheSettings {
 }
 func (s *BrowseExtension) UpdateSettings(settings BrowseCacheSettings) (BrowseCacheSettings, error) {
 	if !settings.Valid() {
-		return s.Settings(), domain.E(domain.KindInvalid, "Ԥ���ػ򻺴���Ч�ڳ���������Χ", nil)
+		return s.Settings(), domain.E(domain.KindInvalid, "预加载或缓存有效期超出允许范围", nil)
 	}
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
@@ -109,7 +109,7 @@ func (s *BrowseExtension) UpdateSettings(settings BrowseCacheSettings) (BrowseCa
 func (s *BrowseExtension) CacheStats() (BrowseCacheStats, error) { return s.store.stats() }
 func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 	if !slices.Contains([]string{"all", "images", "data"}, scope) {
-		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "��֧�ֵĻ���������Χ", nil)
+		return BrowseCacheStats{}, domain.E(domain.KindInvalid, "不支持的缓存清理范围", nil)
 	}
 	stats, err := s.store.clear(scope)
 	s.loads.reset()
@@ -183,7 +183,7 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 			slog.WarnContext(ctx, "discovery cache refresh failed", "namespace", namespace, "error", err)
 			return cached, nil
 		}
-		return result, domain.E(domain.KindUpstream, "��Ʒ���ϻ���Դ�ݲ����ã�������", err)
+		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err

@@ -57,7 +57,7 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		}
 		code := codeid.Normalize(q.Code)
 		if code == "" {
-			respond(c, nil, domain.E(domain.KindInvalid, "ӰƬ���Ų���Ϊ��", nil))
+			respond(c, nil, domain.E(domain.KindInvalid, "影片番号不能为空", nil))
 			return
 		}
 		refresh, ok := browseRefresh(c)
@@ -122,7 +122,7 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		}
 		source := c.Param("source")
 		if source != "javdb" && source != "javlibrary" {
-			respond(c, nil, domain.E(domain.KindInvalid, "��֧�ֵ�������Դ", nil))
+			respond(c, nil, domain.E(domain.KindInvalid, "不支持的评分来源", nil))
 			return
 		}
 		cachedOnly, ok := browseFlag(c, "cached_only")
@@ -168,7 +168,7 @@ func browseID(c *gin.Context) (string, bool) {
 		ID string `uri:"id" binding:"required,max=200"`
 	}
 	if err := c.ShouldBindUri(&uri); err != nil {
-		respond(c, nil, domain.E(domain.KindInvalid, "��Ч����Ʒ��ʶ", nil))
+		respond(c, nil, domain.E(domain.KindInvalid, "无效的作品标识", nil))
 		return "", false
 	}
 	return uri.ID, true
@@ -179,7 +179,7 @@ func browseRefresh(c *gin.Context) (bool, bool) {
 func browseFlag(c *gin.Context, name string) (bool, bool) {
 	value := c.Query(name)
 	if value != "" && value != "0" && value != "1" {
-		respond(c, nil, domain.E(domain.KindInvalid, "��Ч��ˢ�²���", nil))
+		respond(c, nil, domain.E(domain.KindInvalid, "无效的刷新参数", nil))
 		return false, false
 	}
 	return value == "1", true

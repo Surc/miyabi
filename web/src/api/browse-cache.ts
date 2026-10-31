@@ -101,7 +101,7 @@ export async function readBrowsePage(
     preview(result.data)
     result = await apiGet<Cached<DiscoverMovie[]>>(path, { ...values, refresh: 1 }, signal)
   }
-  if (result.stale) throw new Error('�б�����ʧ�ܣ����л����ѱ�����������')
+  if (result.stale) throw new Error('列表更新失败，已有缓存已保留，请重试')
   return result.data
 }
 export async function readBrowseResources(
@@ -139,7 +139,7 @@ export async function readCachedRating(
   }
   const refresh = async () => {
     const result = await apiGet<Cached<ExternalRating>>(path, { ...params, refresh: 1 }, signal)
-    if (result.refresh_failed) throw new Error('���ָ���ʧ�ܣ��ѱ������������������')
+    if (result.refresh_failed) throw new Error('评分更新失败，已保留缓存分数，请重试')
     return result
   }
   return queued ? librarySlots.run(signal, refresh) : refresh()

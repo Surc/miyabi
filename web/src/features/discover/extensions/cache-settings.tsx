@@ -36,10 +36,10 @@ const fields: Array<{
   max: number
   unit: string
 }> = [
-  { key: 'pages', label: 'Ŀ��ҳ��', min: 1, max: 24, unit: 'ҳ' },
-  { key: 'rating_hours', label: '���ָ���', min: 1, max: 168, unit: 'Сʱ' },
-  { key: 'magnet_minutes', label: '��������Դ��ǩ����', min: 1, max: 1440, unit: '����' },
-  { key: 'list_minutes', label: '�б�˳�����', min: 1, max: 60, unit: '����' }
+  { key: 'pages', label: '目标页数', min: 1, max: 24, unit: '页' },
+  { key: 'rating_hours', label: '评分更新', min: 1, max: 168, unit: '小时' },
+  { key: 'magnet_minutes', label: '磁力与资源标签更新', min: 1, max: 1440, unit: '分钟' },
+  { key: 'list_minutes', label: '列表顺序更新', min: 1, max: 60, unit: '分钟' }
 ]
 export function BrowseCacheSettingsButton() {
   const [open, setOpen] = useState(false)
@@ -48,14 +48,14 @@ export function BrowseCacheSettingsButton() {
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Settings2Icon />
-        Ԥ���� {settings.data?.pages ?? 6} ҳ
+        预加载 {settings.data?.pages ?? 6} 页
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Ԥ�����뻺��</DialogTitle>
+            <DialogTitle>预加载与缓存</DialogTitle>
             <DialogDescription>
-              ��ɸѡ�����Ʒ���㣬ÿҳ 20 ��������Ŀ��ʱ�Զ��������롣�����ڱ�������˱��档
+              按筛选后的作品计算，每页 20 部；不足目标时自动继续补齐。配置在本机服务端保存。
             </DialogDescription>
           </DialogHeader>
           {open ? (
@@ -119,14 +119,14 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
       link.download = `miyabi-cache-${new Date().toISOString().slice(0, 10)}.zip`
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setTransferMessage('�����ѵ�����')
+      setTransferMessage('缓存已导出。')
     }
   })
   const importing = useMutation({
     mutationFn: importBrowseCache,
     onSuccess: async data => {
       await reconcileCache(data)
-      setTransferMessage('�����ѵ��룬�ѱ������ؽ��µ����ݡ�')
+      setTransferMessage('缓存已导入，已保留本地较新的数据。')
     }
   })
   const valid = fields.every(
@@ -142,7 +142,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
         <SettingRow
           key={field.key}
           title={field.label}
-          description={`${field.min}�C${field.max} ${field.unit}`}
+          description={`${field.min}–${field.max} ${field.unit}`}
           inline
         >
           <div className="flex items-center gap-2">
@@ -163,13 +163,13 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
         </SettingRow>
       ))}
       <div className="space-y-1 border-t pt-3 text-sm text-muted-foreground">
-        <p>��Ʒ���ϡ���Ա����ǩ�����ֺ������ͼƬ�����ڷ���ˣ��ɵ���Ǩ�ơ�</p>
-        <p>ͼƬ����ǰҳ���أ��������ݱ�������̨���¡�</p>
+        <p>作品资料、演员、标签、评分和已浏览图片保存在服务端，可导出迁移。</p>
+        <p>图片仅当前页加载；过期数据保留，后台更新。</p>
       </div>
       <p className="text-sm">
         {stats.data
-          ? `�ѻ��� ${stats.data.movies} �� �� ${stats.data.images} ��ͼƬ �� ${formatSize(stats.data.bytes)}`
-          : '����ͳ�ƻ��桭'}
+          ? `已缓存 ${stats.data.movies} 部 · ${stats.data.images} 张图片 · ${formatSize(stats.data.bytes)}`
+          : '正在统计缓存…'}
       </p>
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
@@ -184,7 +184,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
               exporting.mutate()
             }}
           >
-            {exporting.isPending ? '�����С�' : '��������'}
+            {exporting.isPending ? '导出中…' : '导出缓存'}
           </Button>
           <Button
             variant="outline"
@@ -192,13 +192,13 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
             disabled={busy}
             onClick={() => fileInput.current?.click()}
           >
-            {importing.isPending ? '�����С�' : '���뻺��'}
+            {importing.isPending ? '导入中…' : '导入缓存'}
           </Button>
           <input
             ref={fileInput}
             type="file"
             accept=".zip,application/zip"
-            aria-label="ѡ�񻺴� ZIP �ļ�"
+            aria-label="选择缓存 ZIP 文件"
             className="hidden"
             disabled={busy}
             onChange={event => {
@@ -213,7 +213,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          ���뱾Ӧ�õ����� ZIP �ļ������ 512 MB�����ϲ����沢�����������ݡ�
+          导入本应用导出的 ZIP 文件（最大 512 MB），合并缓存并保留较新数据。
         </p>
         {transferMessage ? (
           <p role="status" className="text-sm">
@@ -227,12 +227,12 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
       {scope ? (
         <div className="space-y-2 rounded-lg border p-3">
           <p className="text-sm">
-            ȷ������{scope === 'images' ? 'ͼƬ' : scope === 'data' ? '�����붯̬����' : 'ȫ����չ'}
-            ���棿ý��⡢���ĺ������ļ��ᱣ����
+            确认清理{scope === 'images' ? '图片' : scope === 'data' ? '资料与动态数据' : '全部扩展'}
+            缓存？媒体库、订阅和网盘文件会保留。
           </p>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => setScope(undefined)}>
-              ȡ��
+              取消
             </Button>
             <Button
               variant="destructive"
@@ -240,29 +240,29 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
               disabled={busy}
               onClick={() => clear.mutate(scope)}
             >
-              ȷ������
+              确认清理
             </Button>
           </div>
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={busy} onClick={() => setScope('images')}>
-            ����ͼƬ
+            清理图片
           </Button>
           <Button variant="outline" size="sm" disabled={busy} onClick={() => setScope('data')}>
-            ��������
+            清理资料
           </Button>
           <Button variant="outline" size="sm" disabled={busy} onClick={() => setScope('all')}>
-            ȫ������
+            全部清理
           </Button>
         </div>
       )}
       {save.isError || clear.isError || stats.isError ? (
-        <InlineError>�������ʧ�ܣ������ԡ�</InlineError>
+        <InlineError>缓存操作失败，请重试。</InlineError>
       ) : null}
       <div className="flex justify-end">
         <Button disabled={!valid || busy} onClick={() => save.mutate(values)}>
-          {save.isPending ? '�����С�' : '����'}
+          {save.isPending ? '保存中…' : '保存'}
         </Button>
       </div>
     </div>
@@ -270,10 +270,10 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
 }
 export function BrowseCacheSection() {
   return (
-    <SettingsSection icon={<DatabaseIcon className="size-4" />} title="��Ʒ�б�����">
+    <SettingsSection icon={<DatabaseIcon className="size-4" />} title="作品列表缓存">
       <SettingRow
-        title="Ԥ������־û���"
-        description="����Ԥ��������¼�������롢����������ͼƬ�����ϻ��档"
+        title="预加载与持久缓存"
+        description="配置预加载与更新间隔，导入、导出或清理图片和资料缓存。"
       >
         <BrowseCacheSettingsButton />
       </SettingRow>

@@ -14,8 +14,8 @@ export function isPanUnauthorized(error: unknown): boolean {
 }
 
 export function describeApiError(error: unknown): string {
-  if (isPanUnauthorized(error)) return '115 ��¼��ʧЧ����ǰ���������µ�¼��'
-  return error instanceof ApiError ? error.message : '�����˷������������ԡ�'
+  if (isPanUnauthorized(error)) return '115 登录已失效，请前往设置重新登录。'
+  return error instanceof ApiError ? error.message : '请检查后端服务和网络后重试。'
 }
 
 type QueryValue = string | number | readonly string[] | undefined
@@ -97,7 +97,7 @@ async function requestResponse(path: string, init?: RequestInit): Promise<Respon
   })
 
   if (!response.ok) {
-    let message = response.statusText || `����ʧ�ܣ�HTTP ${response.status}��`
+    let message = response.statusText || `请求失败（HTTP ${response.status}）`
     let code: string | undefined
     try {
       const payload: unknown = await response.json()

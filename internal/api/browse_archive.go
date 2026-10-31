@@ -43,7 +43,7 @@ func registerBrowseArchive(group *gin.RouterGroup, service BrowseExtensionManage
 		body := http.MaxBytesReader(c.Writer, c.Request.Body, catalogue.BrowseArchiveMaxBytes)
 		size, err := io.Copy(file, body)
 		if err != nil {
-			respond(c, nil, domain.E(domain.KindInvalid, "�����ļ���ȡʧ�ܣ��ļ����ܳ��� 512 MB", err))
+			respond(c, nil, domain.E(domain.KindInvalid, "缓存文件读取失败，文件不能超过 512 MB", err))
 			return
 		}
 		stats, err := service.ImportCache(c.Request.Context(), file, size)

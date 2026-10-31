@@ -131,7 +131,7 @@ func discoverResolveMovieHandler(discover CatalogueManager) gin.HandlerFunc {
 		}
 		code := codeid.Normalize(query.Code)
 		if code == "" {
-			respond(c, nil, domain.E(domain.KindInvalid, "ӰƬ���Ų���Ϊ��", nil))
+			respond(c, nil, domain.E(domain.KindInvalid, "影片番号不能为空", nil))
 			return
 		}
 		id, err := discover.ResolveMovieID(c.Request.Context(), code)
