@@ -10,6 +10,9 @@ type Target struct {
 	Dir  string
 	Stem string
 	Code string
+	// Version restricts version-specific exports to subtitles for that cut.
+	// Empty keeps the existing single-video ranking behavior.
+	Version VersionTag
 	// Uncensored selects subtitles timed for uncensored cuts.
 	Uncensored bool
 	// HardSubtitled videos already show Chinese subtitles; no online search is made.

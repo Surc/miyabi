@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -89,8 +89,56 @@ try {
   assert.equal((await auth.json()).enabled, true);
   assert.equal((await fetch(webBase + "/api/library/movies")).status, 401);
   assert.match(await (await fetch(webBase + "/")).text(), /<html/);
+
+  // Check the delivered frontend and backend together, rather than only health.
+  const assets = new URL("../../web/dist/assets/", import.meta.url);
+  const settingsAsset = (await readdir(assets)).find((name) => /^settings-.*\.js$/.test(name));
+  assert.ok(settingsAsset, "Build the settings frontend before packaging");
+  const expectedAsset = await readFile(new URL(settingsAsset, assets));
+  assert.match(expectedAsset.toString(), /字幕下载/);
+  const deliveredAsset = await fetch(`${webBase}/assets/${settingsAsset}`);
+  assert.equal(deliveredAsset.status, 200);
+  assert.deepEqual(Buffer.from(await deliveredAsset.arrayBuffer()), expectedAsset);
+
+  const login = await fetch(webBase + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: webBase },
+    body: JSON.stringify({ password: key }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
+  assert.ok(cookie);
+  const request = (path, method = "GET", value) => fetch(webBase + path, {
+    method,
+    headers: { "Content-Type": "application/json", Cookie: cookie, Origin: webBase },
+    ...(value === undefined ? {} : { body: JSON.stringify(value) }),
+  });
+  const settingsPath = "/api/settings/subtitles";
+  const defaults = await request(settingsPath);
+  assert.equal(defaults.status, 200);
+  assert.equal(defaults.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await defaults.json(), {
+    enabled: true,
+    sources: { xunlei: true, subtitlecat: true, avsubtitles: true },
+    language: "zh-CN",
+  });
+  const saved = {
+    enabled: false,
+    sources: { xunlei: false, subtitlecat: false, avsubtitles: true },
+    language: "zh-TW",
+  };
+  const update = await request(settingsPath, "PUT", saved);
+  assert.equal(update.status, 200);
+  assert.deepEqual(await update.json(), saved);
+  assert.equal((await request(settingsPath, "PUT", null)).status, 400);
+  assert.equal((await request(settingsPath + "/test", "POST", { code: "hello" })).status, 400);
+  assert.equal((await request(settingsPath + "/test", "POST", {
+    code: "SSIS-589",
+    config: { ...saved, sources: { xunlei: false, subtitlecat: false, avsubtitles: false } },
+  })).status, 400);
+  assert.deepEqual(await (await request(settingsPath)).json(), saved);
   console.log(
-    "Packaged Miyabi, embedded UI, bridge configuration/auth and native dependencies passed.",
+    "Packaged Miyabi, current settings UI, subtitle configuration/test API, bridge auth and native dependencies passed.",
   );
 } finally {
   await Promise.all(

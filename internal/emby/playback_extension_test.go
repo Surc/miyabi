@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/export"
 	"github.com/ppxb/miyabi/internal/nfo"
+	"github.com/ppxb/miyabi/internal/pan"
 )
 
 func playbackTestService(t *testing.T, handler http.HandlerFunc) (*Service, string) {
@@ -204,5 +206,43 @@ func TestPlaybackFileSelectionUsesGeneratedNamesAndNumericPartOrder(t *testing.T
 	file, err = firstPlaybackFile(dir, "ABC-123")
 	if err != nil || file != "ABC-123.strm" {
 		t.Fatalf("file=%s err=%v", file, err)
+	}
+}
+
+func TestPlaybackResolvesVersionsAndPrimaryPathFallback(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		t.Run(fmt.Sprint(mixed), func(t *testing.T) {
+			var wanted string
+			var queries []string
+			s, dir := playbackTestService(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/System/Info") {
+					w.Write([]byte(`{"Id":"server-1"}`))
+					return
+				}
+				queries = append(queries, r.URL.Query().Get("Path"))
+				if len(queries) == 1 {
+					w.Write([]byte(`{"Items":[]}`))
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]string{{"Id": "movie-12", "Path": wanted}}})
+			})
+			files := []pan.File{{ID: "1", Name: "ABC-123-1080p.mp4"}, {ID: "2", Name: "ABC-123-4K.mp4"}}
+			if mixed {
+				files = append(files, pan.File{ID: "3", Name: "ABC-123-CD1.mp4"}, pan.File{ID: "4", Name: "ABC-123-CD2.mp4"})
+			}
+			_, err := export.WriteMedia(export.Config{EmbyDir: s.cfg.LocalDir, PublicURL: "http://localhost"}, "ABC-123", nfo.Movie{Code: "ABC-123"}, files, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths, err := playbackFiles(dir, "ABC-123")
+			if err != nil || len(paths) != len(files) {
+				t.Fatalf("paths=%v err=%v", paths, err)
+			}
+			wanted = playbackMediaPath(filepath.Join(dir, paths[len(paths)-1]), s.cfg.LocalDir, s.cfg.MediaPath)
+			target, err := s.PlaybackTarget(t.Context(), "ABC-123")
+			if err != nil || target.Status != "ready" || len(queries) != 2 {
+				t.Fatalf("target=%+v requests=%v err=%v", target, queries, err)
+			}
+		})
 	}
 }

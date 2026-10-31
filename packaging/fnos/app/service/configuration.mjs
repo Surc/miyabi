@@ -34,6 +34,22 @@ export function validate(value) {
     if (!Number.isInteger(value[key]) || value[key] < 1024 || value[key] > 65535)
       throw new Error("端口必须为 1024–65535 的整数");
   if (value.port === value.bridgePort) throw new Error("网页端口与内部刮削端口不能相同");
+  if (value.externalMDCz) {
+    let endpoint;
+    try { endpoint = new URL(value.externalMDCz.serverURL); } catch { throw new Error("外部 MDCz 地址无效"); }
+    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password ||
+        endpoint.search || endpoint.hash || endpoint.pathname !== "/" ||
+        !/^[a-f0-9]{64}$/.test(value.externalMDCz.apiKey))
+      throw new Error("外部 MDCz 连接配置无效");
+  }
+  if (value.javlibraryBrowser) {
+    let endpoint;
+    try { endpoint = new URL(value.javlibraryBrowser.serverURL); } catch { throw new Error("JavLibrary 浏览器地址无效"); }
+    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password ||
+        endpoint.search || endpoint.hash || endpoint.pathname !== "/" ||
+        !/^[a-f0-9]{64}$/.test(value.javlibraryBrowser.apiToken))
+      throw new Error("JavLibrary 浏览器连接配置无效");
+  }
   if (
     typeof value.password !== "string" ||
     value.password.length < 8 ||
@@ -116,11 +132,23 @@ export async function initialize(paths, env = process.env) {
     await cp(join(paths.app, "defaults/mdcz.json"), base, { force: false, errorOnExist: true });
     await chmod(base, 0o600);
   }
-  await writeJSON(join(paths.etc, "mdcz-connection.json"), {
-    server_url: `http://127.0.0.1:${current.bridgePort}`,
-    api_key: current.bridgeKey,
-  });
+  await syncBridgeConnection(paths, current);
   return current;
+}
+
+export function bridgeConnection(config) {
+  return config.externalMDCz
+    ? { server_url: config.externalMDCz.serverURL.replace(/\/$/, ""), api_key: config.externalMDCz.apiKey }
+    : { server_url: `http://127.0.0.1:${config.bridgePort}`, api_key: config.bridgeKey };
+}
+
+export async function syncBridgeConnection(paths, config) {
+  await writeJSON(join(paths.etc, "mdcz-connection.json"), bridgeConnection(config));
+  if (config.javlibraryBrowser)
+    await writeJSON(join(paths.etc, "javlibrary-browser.json"), {
+      enabled: true, server_url: config.javlibraryBrowser.serverURL.replace(/\/$/, ""),
+      api_token: config.javlibraryBrowser.apiToken,
+    });
 }
 
 export function patchConfiguration(current, env) {
@@ -183,6 +211,9 @@ export function childEnvironment(paths, config) {
       MIYABI_JWT_SECRET: config.jwtSecret,
       MIYABI_STRM_TOKEN: config.strmToken,
       MIYABI_MDCZ_BOOTSTRAP: join(paths.etc, "mdcz-connection.json"),
+      ...(config.javlibraryBrowser
+        ? { MIYABI_JAVLIBRARY_BROWSER_CONFIG: join(paths.etc, "javlibrary-browser.json") }
+        : {}),
     },
     bridge: {
       ...common,

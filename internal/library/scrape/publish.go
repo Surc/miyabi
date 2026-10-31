@@ -3,6 +3,7 @@ package scrape
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
@@ -12,7 +13,6 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/export"
-	"github.com/ppxb/miyabi/internal/nfo"
 	"github.com/ppxb/miyabi/internal/pan"
 	"github.com/ppxb/miyabi/internal/tasks"
 )
@@ -157,22 +157,37 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 	return subTask, nil
 }
 
-// subtitleTask targets the .strm exported for a movie's video. Multi-part
-// movies export one .strm per part, and whole-movie subtitles fit none of them.
+// Each complete version has its own subtitle target. Whole-movie subtitles
+// never attach to fragments, including an isolated single remaining disc.
 func (service *Service) subtitleTask(input MetadataPayload, videos []pan.File) *SubtitleTask {
-	if service.subtitles == nil || len(videos) != 1 {
+	if service.subtitles == nil {
 		return nil
 	}
-	return &SubtitleTask{
-		MovieID: input.MovieID,
-		Target: subtitlemeta.Target{
-			Dir:           export.EmbyMovieDir(service.exportConfig().EmbyDir, input.Code),
-			Stem:          nfo.FileStem(input.Code),
-			Code:          input.Code,
-			Uncensored:    subtitlemeta.IsUncensored(videos[0].Name),
-			HardSubtitled: subtitlemeta.HasHardSubtitle(videos[0].Name),
-		},
+	plan, err := export.PlanVideos(input.Code, videos)
+	if err != nil {
+		return nil // Publication already rejects invalid plans before writing.
 	}
+	task := &SubtitleTask{MovieID: input.MovieID}
+	for _, video := range plan {
+		if video.Part != 0 {
+			continue
+		}
+		target := subtitlemeta.Target{
+			Dir:           filepath.Join(export.EmbyMovieDir(service.exportConfig().EmbyDir, input.Code), video.Dir),
+			Stem:          video.Stem,
+			Code:          input.Code,
+			Uncensored:    subtitlemeta.IsUncensored(video.File.Name),
+			HardSubtitled: subtitlemeta.HasHardSubtitle(video.File.Name),
+		}
+		if len(plan) > 1 {
+			target.Version = subtitlemeta.DetectVersion(video.File.Name)
+		}
+		task.Targets = append(task.Targets, target)
+	}
+	if len(task.Targets) == 0 {
+		return nil
+	}
+	return task
 }
 
 func (service *Service) verifyVideoPositions(ctx context.Context, sess drive.Session, directory MovieDirectory) error {

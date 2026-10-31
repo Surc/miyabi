@@ -19,7 +19,7 @@ func ExportLocalMovie(embyDir, publicURL, strmToken string, record *ent.Movie, i
 	}
 	videos := make([]pan.File, 0, len(record.Edges.Files))
 	for _, f := range record.Edges.Files {
-		videos = append(videos, pan.File{ID: f.FileID, Name: f.Name, Size: f.Size, PickCode: f.PickCode})
+		videos = append(videos, pan.File{ID: f.FileID, ParentID: f.ParentID, Name: f.Name, Size: f.Size, PickCode: f.PickCode})
 	}
 	var posterBytes, fanartBytes []byte
 	artwork := MovieArtwork(record)

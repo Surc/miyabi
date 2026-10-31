@@ -107,7 +107,12 @@ export class BrowsePreloader {
   }
   setTarget(page: number, pages: number) {
     this.target = Math.ceil(page / pages) * pages * 20
-    if (!this.userPaused && this.phase !== 'error') void this.start()
+    if (
+      !this.userPaused &&
+      (this.phase !== 'error' ||
+        page * 20 > this.entries.filter(entry => this.matches(entry)).length)
+    )
+      void this.start()
     this.emit()
   }
   expireResources(ttl: number, now = Date.now()) {
@@ -162,7 +167,19 @@ export class BrowsePreloader {
     this.listeners.clear()
   }
   private async pump(signal: AbortSignal) {
+    let pageError: unknown
     while (!signal.aborted) {
+      // Ordinary list pages can render before resource confirmation finishes.
+      // One unavailable movie must not hide every following page.
+      if (!this.subtitlesOnly && !this.ended && this.entries.length < this.target && !pageError) {
+        try {
+          await this.readPage(signal)
+        } catch (error) {
+          if (signal.aborted) return
+          pageError = error
+        }
+        continue
+      }
       const pending = this.entries.filter(entry => !this.ready(entry))
       if (pending.length) {
         let cursor = 0
@@ -194,37 +211,41 @@ export class BrowsePreloader {
         // Keep lightweight negative summaries in source order so TTL expiry
         // can discover newly added subtitles, including after reaching EOF.
       }
+      if (pageError) throw pageError
       const count = this.entries.filter(entry => this.ready(entry) && this.matches(entry)).length
       if (count >= this.target || this.ended) {
         this.phase = 'complete'
         return
       }
-      const movies = await this.fetchers.page(this.sourcePage, signal, items => {
-        if (!this.entries.length) {
-          this.preview = items
-          this.emit()
-        }
-      })
-      if (signal.aborted) return
-      if (!movies.length) {
-        this.ended = true
-        this.preview = []
-        continue
-      }
-      let added = 0
-      for (const movie of movies) {
-        if (this.ids.has(movie.id)) continue
-        this.ids.add(movie.id)
-        this.entries.push({
-          movie: { ...movie, actors: [], tags: [], preview_images: [], preview_video: '' }
-        })
-        added++
-      }
-      // A non-empty repeated page is a pagination failure, not proof of EOF.
-      if (!added) throw new Error('来源返回了重复页，请刷新列表或稍后重试')
-      this.sourcePage++
-      this.preview = []
-      this.emit()
+      await this.readPage(signal)
     }
+  }
+  private async readPage(signal: AbortSignal) {
+    const movies = await this.fetchers.page(this.sourcePage, signal, items => {
+      if (!this.entries.length) {
+        this.preview = items
+        this.emit()
+      }
+    })
+    if (signal.aborted) return
+    if (!movies.length) {
+      this.ended = true
+      this.preview = []
+      return
+    }
+    let added = 0
+    for (const movie of movies) {
+      if (this.ids.has(movie.id)) continue
+      this.ids.add(movie.id)
+      this.entries.push({
+        movie: { ...movie, actors: [], tags: [], preview_images: [], preview_video: '' }
+      })
+      added++
+    }
+    // A non-empty repeated page is a pagination failure, not proof of EOF.
+    if (!added) throw new Error('来源返回了重复页，请刷新列表或稍后重试')
+    this.sourcePage++
+    this.preview = []
+    this.emit()
   }
 }

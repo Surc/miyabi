@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/ppxb/miyabi/internal/database"
+	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/embynotification"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
+	"github.com/ppxb/miyabi/internal/export"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
 	"github.com/ppxb/miyabi/internal/library/scrape"
 	"github.com/ppxb/miyabi/internal/nfo"
@@ -39,6 +41,75 @@ func writeLocalFile(t *testing.T, root, name string, body []byte) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, name), body, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLocalImportAllowsExportsBetweenCommittedBatches(t *testing.T) {
+	scanner := localScannerFixture(t)
+	root := t.TempDir()
+	manager := export.NewManager(export.Config{EmbyDir: root})
+	scanner.SetExportManager(manager)
+	for i := range localScanBatchSize + 1 {
+		writeLocalFile(t, root, fmt.Sprintf("TEST-%03d.strm", i), []byte("stream"))
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var exported chan error
+	pending := false
+	reports := 0
+	result, err := scanner.ScanWithProgress(ctx, root, func(progress LocalScanResult) error {
+		reports++
+		if reports != 1 {
+			return nil
+		}
+		if got := scanner.db.File.Query().CountX(ctx); got != localScanBatchSize || progress.MediaFiles != got {
+			t.Fatalf("reported an uncommitted batch: files=%d progress=%+v", got, progress)
+		}
+		exported = make(chan error, 1)
+		pending = true
+		go func() {
+			exported <- manager.WithConfig(func(cfg export.Config) error {
+				return os.WriteFile(filepath.Join(cfg.EmbyDir, "export.marker"), []byte("exported"), 0600)
+			})
+		}()
+		select {
+		case err := <-exported:
+			pending = false
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		// A whole-scan fence releases when the callback times out; let its waiter exit.
+		if pending {
+			<-exported
+		}
+		t.Fatal(err)
+	}
+	if reports != 2 || result.MediaFiles != localScanBatchSize+1 {
+		t.Fatalf("missing batch progress: reports=%d result=%+v", reports, result)
+	}
+}
+
+func TestLocalImportStopsWhenExportDirectoryChangesBetweenBatches(t *testing.T) {
+	scanner := localScannerFixture(t)
+	root := t.TempDir()
+	manager := export.NewManager(export.Config{EmbyDir: root})
+	scanner.SetExportManager(manager)
+	for i := range localScanBatchSize + 1 {
+		writeLocalFile(t, root, fmt.Sprintf("TEST-%03d.strm", i), []byte("stream"))
+	}
+	next := t.TempDir()
+	_, err := scanner.ScanWithProgress(t.Context(), root, func(LocalScanResult) error {
+		manager.Set(export.Config{EmbyDir: next})
+		return nil
+	})
+	if !domain.IsKind(err, domain.KindConflict) {
+		t.Fatalf("old directory continued importing after reconfiguration: %v", err)
+	}
+	if got := scanner.db.File.Query().CountX(t.Context()); got != localScanBatchSize {
+		t.Fatalf("reconfiguration lost committed work or imported a stale batch: files=%d", got)
 	}
 }
 

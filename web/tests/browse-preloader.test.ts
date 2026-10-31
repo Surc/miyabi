@@ -127,6 +127,63 @@ test('partial, stale and failed resources stay retryable without advancing or lo
     expect(new Set(loader.getSnapshot().rows.map(row => row.movie.id)).size).toBe(20)
   }
 })
+test('a failed resource does not hide page three or later batches of the ordinary list', async () => {
+  const read: number[] = []
+  let failed = true
+  const loader = new BrowsePreloader(
+    {
+      page: async page => {
+        read.push(page)
+        return Array.from({ length: 20 }, (_, i) => movie((page - 1) * 20 + i + 1))
+      },
+      resources: async id => {
+        if (id === '25' && failed) throw new Error('resource unavailable')
+        return resources(id)
+      }
+    },
+    false
+  )
+  await loader.start()
+  expect(read).toEqual([1, 2, 3, 4, 5, 6])
+  expect(loader.getSnapshot()).toMatchObject({ phase: 'error', ready: 119, exhausted: false })
+  expect(loader.getSnapshot().rows.slice(40, 60)).toHaveLength(20)
+  loader.setTarget(7, 6)
+  await loader.start()
+  expect(read).toEqual(Array.from({ length: 12 }, (_, i) => i + 1))
+  expect(loader.getSnapshot().rows).toHaveLength(240)
+  failed = false
+  await loader.resume()
+  expect(loader.getSnapshot()).toMatchObject({ phase: 'complete', ready: 240 })
+})
+
+test('ordinary list pages are visible while the first resource requests are still pending', async () => {
+  let release!: () => void
+  let started!: () => void
+  const waiting = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const resourceStarted = new Promise<void>(resolve => {
+    started = resolve
+  })
+  const loader = new BrowsePreloader(
+    {
+      page: async page => Array.from({ length: 20 }, (_, i) => movie((page - 1) * 20 + i + 1)),
+      resources: async id => {
+        started()
+        await waiting
+        return resources(id)
+      }
+    },
+    false
+  )
+  const running = loader.start()
+  await resourceStarted
+  expect(loader.getSnapshot()).toMatchObject({ phase: 'loading', ready: 0 })
+  expect(loader.getSnapshot().rows).toHaveLength(120)
+  release()
+  await running
+})
+
 test('a repeated upstream page reports pagination failure rather than looping forever', async () => {
   const loader = new BrowsePreloader(
     { page: async () => [movie(1)], resources: async id => resources(id) },

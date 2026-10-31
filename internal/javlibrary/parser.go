@@ -86,12 +86,17 @@ func plain(n *html.Node) string {
 	return strings.TrimSpace(b.String())
 }
 
-func searchFilm(doc *html.Node, code string) (string, error) {
+type filmTarget struct {
+	id   string
+	html bool
+}
+
+func searchFilm(doc *html.Node, code string) (filmTarget, error) {
 	list := byClass(doc, "videos")
 	if list == nil {
-		return "", failure("unexpected_page", "search_container_missing")
+		return filmTarget{}, failure("unexpected_page", "search_container_missing")
 	}
-	ids := map[string]bool{}
+	ids := map[string]filmTarget{}
 	identified := map[string]bool{}
 	var invalid error
 	walk(list, func(n *html.Node) {
@@ -109,7 +114,7 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 		if u.IsAbs() || u.Host != "" {
 			return
 		}
-		id := filmIDFromQuery(sourceQuery(u))
+		id := filmIDFromURL(u)
 		if id != "" {
 			// A poster link may omit the code when another link for the same
 			// film supplies it; only genuinely unidentified candidates fail.
@@ -122,23 +127,23 @@ func searchFilm(doc *html.Node, code string) (string, error) {
 			invalid = failure("unexpected_page", "search_link_invalid")
 			return
 		}
-		ids[id] = true
+		ids[id] = filmTarget{id: id, html: ids[id].html || filmHTMLPath.MatchString(u.Path)}
 	})
 	if invalid != nil {
-		return "", invalid
+		return filmTarget{}, invalid
 	}
 	for _, known := range identified {
 		if !known {
-			return "", failure("unexpected_page", "search_identity_missing")
+			return filmTarget{}, failure("unexpected_page", "search_identity_missing")
 		}
 	}
 	if len(ids) > 1 {
-		return "", failure("identity", "ambiguous_film")
+		return filmTarget{}, failure("identity", "ambiguous_film")
 	}
-	for id := range ids {
-		return id, nil
+	for _, target := range ids {
+		return target, nil
 	}
-	return "", nil
+	return filmTarget{}, nil
 }
 
 // URL.Query silently drops malformed parameters. Never infer film identity or
@@ -158,6 +163,25 @@ func filmIDFromQuery(query url.Values) string {
 		return ""
 	}
 	return ids[0]
+}
+
+var filmHTMLPath = regexp.MustCompile(`^(?:/(?:cn|tw|en|ja)/)?(jav[A-Za-z0-9_-]{1,77})\.html$`)
+
+// Canonical detail URLs now use /cn/<film ID>.html. A query must still decode
+// completely, and an explicit v must agree with the path's identity.
+func filmIDFromURL(u *url.URL) string {
+	query := sourceQuery(u)
+	if query == nil {
+		return ""
+	}
+	match := filmHTMLPath.FindStringSubmatch(u.Path)
+	if match == nil {
+		return filmIDFromQuery(query)
+	}
+	if _, present := query["v"]; present && filmIDFromQuery(query) != match[1] {
+		return ""
+	}
+	return match[1]
 }
 
 func commentPageFromQuery(query url.Values) (int, bool) {
@@ -180,6 +204,11 @@ func parseFilm(doc *html.Node, id, code string) (Film, error) {
 		return Film{}, failure("identity", "film_identity_mismatch")
 	}
 	if byID(doc, "video_review") == nil {
+		// Unrated releases omit video_review entirely, while retaining the
+		// surrounding metadata and user-review sections.
+		if byID(doc, "video_info") != nil && byID(doc, "video_reviews") != nil {
+			return film, nil
+		}
 		return Film{}, failure("unexpected_page", "review_container_missing")
 	}
 	score := plain(byClass(byID(doc, "video_review"), "score"))

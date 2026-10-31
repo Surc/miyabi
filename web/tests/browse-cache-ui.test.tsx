@@ -13,6 +13,8 @@ import { MovieDetailDialogContext } from '@/features/movie-detail/dialog-context
 import type { PreloadRow, PreloadState } from '@/features/discover/extensions/preloader'
 import type { DiscoverMovieDetail } from '@/api/discover'
 
+const ratingState = vi.hoisted(() => ({ unavailable: false }))
+
 vi.mock('@/components/overflow-tooltip', () => ({
   OverflowTooltip: ({ children }: { children: React.ReactNode }) => children
 }))
@@ -25,18 +27,21 @@ vi.mock('@/stores/settings', () => ({
 }))
 vi.mock('@/api/browse-cache', async importOriginal => ({
   ...(await importOriginal<typeof import('@/api/browse-cache')>()),
-  useBrowseRating: (_id: string, source: string) => ({
-    data: {
-      data: {
-        source,
-        found: true,
-        score: source === 'javdb' ? 4.2 : 8.1,
-        max: source === 'javdb' ? 5 : 10
-      },
-      stale: false,
-      updated_at: '2026-10-21T00:00:00Z'
-    }
-  })
+  useBrowseRating: (_id: string, source: string) =>
+    ratingState.unavailable && source === 'javlibrary'
+      ? { isError: true }
+      : {
+          data: {
+            data: {
+              source,
+              found: true,
+              score: source === 'javdb' ? 4.2 : 8.1,
+              max: source === 'javdb' ? 5 : 10
+            },
+            stale: false,
+            updated_at: '2026-10-21T00:00:00Z'
+          }
+        }
 }))
 
 test('preloading has compact controls and no separate progress panel', () => {
@@ -134,13 +139,28 @@ test('six cached pages mount images and rating UI only for the current twenty wo
 test.each([
   { count: 120, page: 4, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },
   { count: 120, page: 6, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },
-  { count: 45, page: 3, exhausted: true, pages: [1, 2, 3], hasMore: false }
+  { count: 45, page: 3, exhausted: true, pages: [1, 2, 3], hasMore: false },
+  {
+    count: 120,
+    page: 3,
+    exhausted: false,
+    pages: [1, 2, 3, 4, 5, 6],
+    hasMore: true,
+    phase: 'error'
+  }
 ])(
   'browse pagination exposes loaded pages at page $page (exhausted=$exhausted)',
-  ({ count, page, exhausted, pages, hasMore }) => {
+  ({ count, page, exhausted, pages, hasMore, phase }) => {
     const rows = makeRows(count)
     vi.mocked(useBrowsePreloader).mockReturnValue({
-      state: { rows, phase: 'complete', ready: count, target: 120, exhausted },
+      state: {
+        rows,
+        phase: phase ?? 'complete',
+        ready: count,
+        target: 120,
+        exhausted,
+        error: phase ? 'resource unavailable' : undefined
+      },
       controller: { pause: vi.fn(), resume: vi.fn() },
       settings: { data: defaultBrowseSettings }
     } as unknown as ReturnType<typeof useBrowsePreloader>)
@@ -166,8 +186,29 @@ test.each([
         ?.find(button => button.includes('下一页'))
       expect(nextButton).toBeDefined()
       expect(nextButton?.includes('disabled=""')).toBe(!hasMore)
+      if (phase === 'error') {
+        expect(html).toContain('resource unavailable')
+        expect(html).toContain('/movies/41/image')
+        expect(html).not.toContain('等待作品资料与磁力确认')
+      }
     } finally {
       client.clear()
     }
   }
 )
+
+test('unavailable JavLibrary ratings are distinguished from a confirmed missing score', () => {
+  ratingState.unavailable = true
+  try {
+    const html = renderToStaticMarkup(
+      <MovieDetailDialogContext.Provider value={() => {}}>
+        <CurrentBrowsePage rows={makeRows(1)} page={1} />
+      </MovieDetailDialogContext.Provider>
+    )
+    expect(html).toContain('暂不可用')
+    expect(html).not.toContain('8.1/10')
+    expect(html).toContain('4.2/5')
+  } finally {
+    ratingState.unavailable = false
+  }
+})

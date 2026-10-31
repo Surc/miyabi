@@ -102,9 +102,9 @@ func TestMalformedSearchCandidatesDoNotBecomeNotFound(t *testing.T) {
 func TestSearchPosterAndTitleCanIdentifyTheSameFilm(t *testing.T) {
 	body := `<div class="videos"><a href="?v=other"><span class="id">ABP-1234</span></a><a href="?v=film"><img src="poster.jpg"></a><a href="?v=film"><span class="id">ABP-123</span></a><a href="?v=film"><img src="poster-again.jpg"></a><a href="?keyword=ABP-123">Search</a></div>`
 	doc, _ := parseDocument([]byte(body))
-	id, err := searchFilm(doc, "ABP-123")
-	if err != nil || id != "film" {
-		t.Fatalf("poster link prevented an exact match: %s %v", id, err)
+	target, err := searchFilm(doc, "ABP-123")
+	if err != nil || target.id != "film" {
+		t.Fatalf("poster link prevented an exact match: %+v %v", target, err)
 	}
 }
 

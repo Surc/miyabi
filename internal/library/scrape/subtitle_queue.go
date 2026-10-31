@@ -12,7 +12,7 @@ import (
 // SubtitleTask exports the subtitles of one movie after its artwork and .strm are written.
 type SubtitleTask struct {
 	MovieID int
-	Target  subtitlemeta.Target
+	Targets []subtitlemeta.Target
 }
 
 // SubtitleQueue is a bounded, concurrency-controlled background worker queue for subtitle processing.
@@ -74,7 +74,6 @@ func (q *SubtitleQueue) Enqueue(task SubtitleTask) {
 		delete(q.pending, task.MovieID)
 		q.mu.Unlock()
 		q.logger.WarnContext(q.ctx, "subtitle task queue is full; dropping task",
-			"code", task.Target.Code,
 			"movie_id", task.MovieID,
 		)
 	}
@@ -106,13 +105,18 @@ func (q *SubtitleQueue) process(task SubtitleTask) {
 	ctx, cancel := context.WithTimeout(q.ctx, 2*time.Minute)
 	defer cancel()
 
-	written, err := q.service.subtitles.Export(ctx, task.MovieID, task.Target)
-	if err != nil {
-		q.logger.WarnContext(ctx, "export subtitles", "code", task.Target.Code, "error", err)
-	}
-	if written > 0 && q.service.mediaNotifier != nil {
-		if err := q.service.mediaNotifier.NotifyUpdated(ctx, task.Target.Dir); err != nil {
-			q.logger.ErrorContext(ctx, "persist subtitle notification", "error", err)
+	for _, target := range task.Targets {
+		if ctx.Err() != nil {
+			return
+		}
+		written, err := q.service.subtitles.Export(ctx, task.MovieID, target)
+		if err != nil {
+			q.logger.WarnContext(ctx, "export subtitles", "code", target.Code, "error", err)
+		}
+		if written > 0 && q.service.mediaNotifier != nil {
+			if err := q.service.mediaNotifier.NotifyUpdated(ctx, target.Dir); err != nil {
+				q.logger.ErrorContext(ctx, "persist subtitle notification", "error", err)
+			}
 		}
 	}
 }

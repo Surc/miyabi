@@ -2,9 +2,11 @@ package javdb
 
 import (
 	"context"
+	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -21,14 +23,20 @@ func (c *Client) Magnets(ctx context.Context, movieID string) ([]domain.Magnet, 
 	if err := c.getJSON(ctx, "/api/v1/movies/"+url.PathEscape(movieID)+"/magnets", nil, &data); err != nil {
 		return nil, err
 	}
-	magnets := make([]domain.Magnet, len(data.Magnets))
-	for index, item := range data.Magnets {
-		hash, err := hex.DecodeString(item.Hash)
-		if err != nil {
-			return nil, fmt.Errorf("decode JavDB magnet %d hash: %w", index, err)
+	magnets := make([]domain.Magnet, 0, len(data.Magnets))
+	invalid := 0
+	for _, item := range data.Magnets {
+		value := strings.TrimSpace(item.Hash)
+		var hash []byte
+		var err error
+		if len(value) == 32 {
+			hash, err = base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(value))
+		} else {
+			hash, err = hex.DecodeString(value)
 		}
-		if len(hash) != 20 {
-			return nil, fmt.Errorf("JavDB magnet %d has an invalid info hash length", index)
+		if err != nil || len(hash) != 20 {
+			invalid++
+			continue
 		}
 		var tags []string
 		if item.CNSub {
@@ -37,7 +45,7 @@ func (c *Client) Magnets(ctx context.Context, movieID string) ([]domain.Magnet, 
 		if item.HD {
 			tags = append(tags, domain.MagnetTagHD)
 		}
-		magnets[index] = domain.Magnet{
+		magnets = append(magnets, domain.Magnet{
 			Hash:        hex.EncodeToString(hash),
 			Name:        item.Name,
 			Size:        item.SizeMiB * 1024 * 1024,
@@ -47,7 +55,13 @@ func (c *Client) Magnets(ctx context.Context, movieID string) ([]domain.Magnet, 
 			CreatedAt:   item.CreatedAt,
 			Sources:     []string{domain.MagnetSourceJavDB},
 			Tags:        tags,
+		})
+	}
+	if invalid > 0 {
+		if len(magnets) == 0 {
+			return nil, fmt.Errorf("JavDB returned %d invalid info hashes and no usable magnets", invalid)
 		}
+		slog.WarnContext(ctx, "ignored invalid JavDB info hashes", "movie_id", movieID, "count", invalid)
 	}
 	return magnets, nil
 }

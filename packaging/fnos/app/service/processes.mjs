@@ -2,7 +2,7 @@ import { open, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readJSON, writeJSON, engineRevision, childEnvironment } from "./configuration.mjs";
+import { readJSON, writeJSON, engineRevision, childEnvironment, bridgeConnection, syncBridgeConnection } from "./configuration.mjs";
 
 import { identity, alive } from "./identity.mjs";
 export { identity, alive } from "./identity.mjs";
@@ -58,9 +58,10 @@ async function json(url, key) {
 }
 export async function healthy(config) {
   try {
+    const connection = bridgeConnection(config);
     const [main, bridge] = await Promise.all([
       json(`http://127.0.0.1:${config.port}/api/auth/config`),
-      json(`http://127.0.0.1:${config.bridgePort}/v1/health`, config.bridgeKey),
+      json(`${connection.server_url}/v1/health`, connection.api_key),
     ]);
     return (
       main.enabled === true &&
@@ -78,7 +79,7 @@ export async function status(paths, config) {
   return (
     !!saved &&
     saved.phase === "running" &&
-    saved.children?.length === 2 &&
+    saved.children?.length === (config.externalMDCz ? 1 : 2) &&
     (await Promise.all([saved.supervisor, ...saved.children].map((record) => alive(record)))).every(
       Boolean,
     ) &&
@@ -144,11 +145,12 @@ export async function supervise(paths, config) {
   process.on("SIGINT", shutdown);
   await persist();
   const env = childEnvironment(paths, config);
+  const programs = [
+    ...(!config.externalMDCz ? [["bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, "bridge/bridge.js")]]] : []),
+    ["miyabi", join(paths.app, "bin/miyabi"), []],
+  ];
   try {
-    for (const [name, program, args] of [
-      ["bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, "bridge/bridge.js")]],
-      ["miyabi", join(paths.app, "bin/miyabi"), []],
-    ]) {
+    for (const [name, program, args] of programs) {
       if (stopping) break;
       const output = await logFile(paths, name);
       const child = spawn(program, args, {
@@ -176,7 +178,7 @@ export async function supervise(paths, config) {
     }
     const deadline = Date.now() + 25_000;
     while (!stopping && Date.now() < deadline) {
-      if (saved.children.length === 2 && (await healthy(config))) {
+      if (saved.children.length === programs.length && (await healthy(config))) {
         if (stopping) break;
         saved.phase = "running";
         await persist();
@@ -199,6 +201,7 @@ export async function supervise(paths, config) {
 export async function start(paths, config) {
   if (await status(paths, config)) return;
   await stop(paths);
+  await syncBridgeConnection(paths, config);
   const log = await logFile(paths, "supervisor");
   const child = spawn(
     join(paths.app, "runtime/bin/node"),

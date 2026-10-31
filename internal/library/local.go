@@ -60,14 +60,17 @@ func (s *Service) scanLocal(ctx context.Context, id int, payload domain.ScanPayl
 	if err := scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks); err != nil {
 		return err
 	}
-	result, err := s.localScanner.Scan(ctx, root)
+	report := func(result scan.LocalScanResult) error {
+		payload.Scan.FilesScanned = result.FilesScanned
+		payload.Scan.VideoFiles = result.MediaFiles
+		payload.Scan.MatchedFiles = result.MediaFiles
+		payload.Scan.Movies = result.MoviesAdded
+		return scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks)
+	}
+	_, err = s.localScanner.ScanWithProgress(ctx, root, report)
 	if err != nil {
 		return fmt.Errorf("scan Emby directory: %w", err)
 	}
 	payload.Scan.Stage = "done"
-	payload.Scan.FilesScanned = result.FilesScanned
-	payload.Scan.VideoFiles = result.MediaFiles
-	payload.Scan.MatchedFiles = result.MediaFiles
-	payload.Scan.Movies = result.MoviesAdded
 	return scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"testing/synctest"
 
@@ -64,7 +65,7 @@ func TestSubtitleQueue_DeduplicationAndCapacity(t *testing.T) {
 		t.Fatal("tasks 101 and 102 should be in pending map")
 	}
 	q.mu.Unlock()
-	if first, second := <-q.tasks, <-q.tasks; first != task1 || second != task2 {
+	if first, second := <-q.tasks, <-q.tasks; !reflect.DeepEqual(first, task1) || !reflect.DeepEqual(second, task2) {
 		t.Fatalf("queued tasks = %+v, %+v", first, second)
 	}
 }
@@ -85,7 +86,7 @@ func TestSubtitleQueue_GracefulShutdown(t *testing.T) {
 		service := New(nil, nil, nil, nil, nil, Dependencies{Subtitles: exporter})
 		t.Cleanup(service.Close)
 		q := service.subtitleQueue
-		q.Enqueue(SubtitleTask{MovieID: 201})
+		q.Enqueue(SubtitleTask{MovieID: 201, Targets: []subtitlemeta.Target{{}}})
 		<-started
 
 		closed := make(chan struct{})
@@ -126,17 +127,31 @@ func TestSubtitleTaskTargetsTheExportedSTRM(t *testing.T) {
 	input := MetadataPayload{MovieID: 7, Code: "SSIS-589"}
 
 	task := service.subtitleTask(input, []pan.File{{ID: "video", Name: "SSIS-589-UC.mp4"}})
-	if task == nil || task.MovieID != 7 || task.Target.Dir != filepath.Join("emby", "SSIS", "SSIS-589") ||
-		task.Target.Stem != "SSIS-589" || task.Target.Code != "SSIS-589" ||
-		!task.Target.Uncensored || !task.Target.HardSubtitled {
+	if task == nil || task.MovieID != 7 || len(task.Targets) != 1 || task.Targets[0].Dir != filepath.Join("emby", "SSIS", "SSIS-589") ||
+		task.Targets[0].Stem != "SSIS-589" || task.Targets[0].Code != "SSIS-589" ||
+		!task.Targets[0].Uncensored || !task.Targets[0].HardSubtitled {
 		t.Fatalf("subtitle task = %+v", task)
 	}
-	if task := service.subtitleTask(input, []pan.File{{Name: "SSIS-589.mp4"}}); task == nil || task.Target.Uncensored || task.Target.HardSubtitled {
+	if task := service.subtitleTask(input, []pan.File{{Name: "SSIS-589.mp4"}}); task == nil || task.Targets[0].Uncensored || task.Targets[0].HardSubtitled {
 		t.Fatalf("plain release task = %+v", task)
 	}
 	parts := []pan.File{{Name: "SSIS-589-CD1.mp4"}, {Name: "SSIS-589-CD2.mp4"}}
 	if task := service.subtitleTask(input, parts); task != nil {
 		t.Fatalf("multi-part movie received a single subtitle target: %+v", task)
+	}
+	if task := service.subtitleTask(input, parts[1:]); task != nil {
+		t.Fatal("remaining fragment received whole-movie subtitles")
+	}
+	versions := []pan.File{{ID: "original", Name: "SSIS-589-1080p.mp4"}, {ID: "uncensored", Name: "SSIS-589-U.mp4"}}
+	task = service.subtitleTask(input, versions)
+	plan, _ := export.PlanVideos(input.Code, versions)
+	if task == nil || len(task.Targets) != 2 {
+		t.Fatalf("version targets = %+v", task)
+	}
+	for i, target := range task.Targets {
+		if target.Stem != plan[i].Stem || target.Version != subtitlemeta.DetectVersion(plan[i].File.Name) {
+			t.Fatalf("version subtitle target differs from exported video: %+v", target)
+		}
 	}
 	service.subtitles = nil
 	if task := service.subtitleTask(input, []pan.File{{Name: "SSIS-589.mp4"}}); task != nil {

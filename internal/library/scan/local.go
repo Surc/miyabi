@@ -30,6 +30,7 @@ type LocalScanner struct {
 	db       *ent.Client
 	images   *mediaimage.Cache
 	notifier export.MediaNotifier
+	exports  *export.Manager
 }
 
 // NewLocalScanner creates a new LocalScanner.
@@ -45,6 +46,9 @@ func (s *LocalScanner) SetMediaNotifier(notifier export.MediaNotifier) {
 	s.notifier = notifier
 }
 
+// SetExportManager fences each import batch against sidecar writes and STRM rewrites.
+func (s *LocalScanner) SetExportManager(manager *export.Manager) { s.exports = manager }
+
 type dirGroup struct {
 	mediaFiles []fs.FileInfo
 	nfoFiles   []string
@@ -54,9 +58,18 @@ type dirGroup struct {
 
 // Scan walks rootDir and imports any found media (.strm, .mp4, etc.) into the SQLite database.
 func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResult, error) {
+	return s.ScanWithProgress(ctx, rootDir, nil)
+}
+
+// ScanWithProgress reports committed batches after releasing export protection.
+func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, report func(LocalScanResult) error) (*LocalScanResult, error) {
 	rootDir, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve local directory: %w", err)
+	}
+	rootDir, err = filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve local directory links: %w", err)
 	}
 	stat, err := os.Stat(rootDir)
 	if err != nil {
@@ -108,6 +121,15 @@ func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResu
 	}
 
 	batch := make([]localMedia, 0, localScanBatchSize)
+	flush := func() error {
+		if err := s.ingestBatch(ctx, rootDir, batch, result); err != nil {
+			return err
+		}
+		if report != nil {
+			return report(*result)
+		}
+		return nil
+	}
 	for dir, group := range dirs {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -133,10 +155,10 @@ func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResu
 				path: mediaPath, name: media.Name(), size: media.Size(), code: code,
 				nfoPath:    findMatchingNFO(dir, stem, code, group.nfoFiles),
 				posterPath: posterPath, fanartPath: fanartPath,
-				subPaths: findMatchingSubtitles(stem, group.subFiles),
+				subPaths: findMatchingSubtitles(stem, group.subFiles, len(group.mediaFiles) == 1),
 			})
 			if len(batch) == localScanBatchSize {
-				if err := s.ingestBatch(ctx, rootDir, batch, result); err != nil {
+				if err := flush(); err != nil {
 					return nil, err
 				}
 				batch = batch[:0]
@@ -145,7 +167,7 @@ func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResu
 	}
 
 	if len(batch) > 0 {
-		if err := s.ingestBatch(ctx, rootDir, batch, result); err != nil {
+		if err := flush(); err != nil {
 			return nil, err
 		}
 	}
@@ -218,14 +240,14 @@ func findMatchingArtwork(dir, stem string, imageFiles []string) (posterPath, fan
 // findMatchingSubtitles returns the subtitles named after a media file, such
 // as IPX-123.zh-CN.srt for IPX-123.strm. A lone subtitle belongs to the lone
 // media file in its directory.
-func findMatchingSubtitles(stem string, subFiles []string) []string {
+func findMatchingSubtitles(stem string, subFiles []string, singleVideo bool) []string {
 	var matches []string
 	for _, f := range subFiles {
 		if strings.HasPrefix(strings.ToLower(filepath.Base(f)), strings.ToLower(stem)+".") {
 			matches = append(matches, f)
 		}
 	}
-	if len(matches) == 0 && len(subFiles) == 1 {
+	if len(matches) == 0 && singleVideo && len(subFiles) == 1 {
 		return subFiles
 	}
 	return matches

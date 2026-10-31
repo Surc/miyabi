@@ -34,6 +34,7 @@ async function preflight(paths, config) {
     `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>${xml(join(paths.app, "fonts"))}</dir><cachedir>${xml(join(paths.data, "font-cache"))}</cachedir></fontconfig>`,
     { mode: 0o600 },
   );
+  if (config.externalMDCz) return;
   try {
     await exec(join(paths.app, "runtime/bin/node"), [join(paths.app, "service/native-probe.mjs")], {
       env: { ...childEnvironment(paths, config).bridge, TRIM_APPDEST: paths.app },
@@ -66,7 +67,7 @@ async function main(action, paths) {
     await stop(paths);
     await preflight(paths, config);
     await freePort(config.port, "0.0.0.0");
-    await freePort(config.bridgePort, "127.0.0.1");
+    if (!config.externalMDCz) await freePort(config.bridgePort, "127.0.0.1");
     return start(paths, config);
   }
   if (action === "configure") {
@@ -86,11 +87,14 @@ async function main(action, paths) {
     }
     return;
   }
-  if (action === "upgrade-before" || action === "uninstall-before") {
+  if (action === "upgrade-before" || action === "uninstall-before" || action === "backup") {
     await stop(paths);
-    // Full application-state backup includes original artwork; exported STRM
-    // and media are outside these private directories and are never deleted.
-    await backup(paths, config, action === "upgrade-before" ? "upgrade" : "uninstall");
+    // fnOS may call uninstall hooks while upgrading. Reuse the existing data
+    // for both hooks; full snapshots are manual or precede an actual uninstall.
+    const upgrading =
+      process.env.TRIM_APP_STATUS === "UPGRADE" || !!process.env.TRIM_TEMP_UPGRADE_FOLDER;
+    if (action === "backup" || (action === "uninstall-before" && !upgrading))
+      await backup(paths, config, action === "backup" ? "manual" : "uninstall");
     return;
   }
   throw new Error("未知的应用管理操作");

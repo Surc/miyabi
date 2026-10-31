@@ -88,6 +88,7 @@ func New(database *ent.Client, d *drive.Drive, tasks *tasks.Service, images *med
 		localScanner: scan.NewLocalScanner(database, images),
 		exportMgr:    options.ExportManager,
 	}
+	svc.localScanner.SetExportManager(options.ExportManager)
 	if d != nil && tasks != nil {
 		d.SetMountListener(func(ctx context.Context, event drive.MountEvent) error {
 			if event.Source.Directory.ID != "" {
@@ -167,10 +168,7 @@ func (s *Service) Scan(ctx context.Context, job tasks.Job) error {
 		return err
 	}
 	if payload.Source.AccountID == domain.LocalAccountID {
-		// Imports must not observe partially rewritten STRM or exported sidecars.
-		return s.exportMgr.WithConfig(func(export.Config) error {
-			return s.scanLocal(ctx, job.ID, payload)
-		})
+		return s.scanLocal(ctx, job.ID, payload)
 	}
 	return s.scanner.Run(ctx, job)
 }

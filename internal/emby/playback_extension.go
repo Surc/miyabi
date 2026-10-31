@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,43 +49,54 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 		return PlaybackTarget{}, err
 	}
 	directory := export.EmbyMovieDir(cfg.LocalDir, code)
-	file, err := firstPlaybackFile(directory, nfo.FileStem(code))
+	files, err := playbackFiles(directory, nfo.FileStem(code))
 	if err != nil {
 		return PlaybackTarget{}, domain.E(domain.KindUpstream, "读取影片播放文件失败", err)
 	}
-	if file == "" {
+	if len(files) == 0 {
 		return PlaybackTarget{Status: "not_exported"}, nil
 	}
-	mediaPath := playbackMediaPath(filepath.Join(directory, file), cfg.LocalDir, cfg.MediaPath)
-	if mediaPath == "" {
-		return PlaybackTarget{}, domain.E(domain.KindInvalid, "Emby 媒体库路径与导出目录不匹配", nil)
+	var mediaPaths []string
+	for _, file := range files {
+		mediaPath := playbackMediaPath(filepath.Join(directory, file), cfg.LocalDir, cfg.MediaPath)
+		if mediaPath == "" {
+			return PlaybackTarget{}, domain.E(domain.KindInvalid, "Emby 媒体库路径与导出目录不匹配", nil)
+		}
+		mediaPaths = append(mediaPaths, mediaPath)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	query := url.Values{"Path": {mediaPath}, "Fields": {"Path"}, "Limit": {"2"}, "Recursive": {"true"}, "IncludeItemTypes": {"Movie"}, "EnableImages": {"false"}, "EnableUserData": {"false"}}
-	var result struct {
-		Items *[]struct {
-			ID       string `json:"Id"`
-			Path     string `json:"Path"`
-			IsFolder bool   `json:"IsFolder"`
-		} `json:"Items"`
-	}
-	if err := client.get(ctx, "Items", query, &result); err != nil {
-		return PlaybackTarget{}, err
-	}
-	if result.Items == nil {
-		return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 返回了无法识别的影片列表", nil)
-	}
 	itemID := ""
-	for _, item := range *result.Items {
-		if item.IsFolder || !samePlaybackPath(mediaPath, item.Path) || !playbackID.MatchString(item.ID) {
-			return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 影片路径或标识不匹配，无法确认播放目标", nil)
+	// Emby can index only the primary path of a merged version group. Try each
+	// exported path, accepting a returned primary only if it is one of ours.
+	for _, mediaPath := range mediaPaths {
+		query := url.Values{"Path": {mediaPath}, "Fields": {"Path"}, "Limit": {"2"}, "Recursive": {"true"}, "IncludeItemTypes": {"Movie"}, "EnableImages": {"false"}, "EnableUserData": {"false"}}
+		var result struct {
+			Items *[]struct {
+				ID       string `json:"Id"`
+				Path     string `json:"Path"`
+				IsFolder bool   `json:"IsFolder"`
+			} `json:"Items"`
 		}
-		if itemID != "" && itemID != item.ID {
-			return PlaybackTarget{}, domain.E(domain.KindConflict, "Emby 返回多个播放目标，请检查媒体库重复项", nil)
+		if err := client.get(ctx, "Items", query, &result); err != nil {
+			return PlaybackTarget{}, err
 		}
-		itemID = item.ID
+		if result.Items == nil {
+			return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 返回了无法识别的影片列表", nil)
+		}
+		for _, item := range *result.Items {
+			if item.IsFolder || !slices.ContainsFunc(mediaPaths, func(path string) bool { return samePlaybackPath(path, item.Path) }) || !playbackID.MatchString(item.ID) {
+				return PlaybackTarget{}, domain.E(domain.KindUpstream, "Emby 影片路径或标识不匹配，无法确认播放目标", nil)
+			}
+			if itemID != "" && itemID != item.ID {
+				return PlaybackTarget{}, domain.E(domain.KindConflict, "Emby 返回多个播放目标，请检查媒体库重复项", nil)
+			}
+			itemID = item.ID
+		}
+		if itemID != "" {
+			break
+		}
 	}
 	if itemID == "" {
 		return PlaybackTarget{Status: "not_found"}, nil
@@ -104,42 +115,60 @@ func (s *Service) PlaybackTarget(ctx context.Context, code string) (PlaybackTarg
 	return PlaybackTarget{Status: "ready", URL: "emby://play/" + info.ID + "/" + itemID, WebURL: webURL.String()}, nil
 }
 
-// Only Miyabi-generated STRM names qualify. Multipart films start with cd1;
-// unrelated files, directories and symbolic links are never selected.
+// Only Miyabi-generated STRMs qualify. Complete versions precede fragments;
+// multipart versions live in their own generated subdirectories.
 func firstPlaybackFile(directory, stem string) (string, error) {
-	entries, err := os.ReadDir(directory)
-	if os.IsNotExist(err) {
-		return "", nil
-	}
-	if err != nil {
+	files, err := playbackFiles(directory, stem)
+	if err != nil || len(files) == 0 {
 		return "", err
 	}
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(stem) + `(?:-cd([1-9][0-9]*))?\.strm$`)
+	return files[0], nil
+}
+
+func playbackFiles(directory, stem string) ([]string, error) {
+	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	type candidate struct {
 		name string
 		part int
 	}
 	var files []candidate
-	for _, entry := range entries {
-		if !entry.Type().IsRegular() {
-			continue
-		}
-		match := pattern.FindStringSubmatch(entry.Name())
-		if match == nil {
-			continue
-		}
-		part := 0
-		if match[1] != "" {
-			part, err = strconv.Atoi(match[1])
-			if err != nil {
+	add := func(dir string, entries []os.DirEntry) {
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() {
 				continue
 			}
+			part, ok := export.VideoPart(stem, entry.Name())
+			if !ok {
+				continue
+			}
+			files = append(files, candidate{filepath.Join(dir, entry.Name()), part})
 		}
-		files = append(files, candidate{entry.Name(), part})
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].part < files[j].part })
-	if len(files) == 0 {
-		return "", nil
+	add("", entries)
+	for _, entry := range entries {
+		if entry.IsDir() && export.VersionDirectory(stem, entry.Name()) {
+			children, err := os.ReadDir(filepath.Join(directory, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			add(entry.Name(), children)
+		}
 	}
-	return files[0].name, nil
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].part != files[j].part {
+			return files[i].part < files[j].part
+		}
+		return files[i].name < files[j].name
+	})
+	var names []string
+	for _, file := range files {
+		names = append(names, file.name)
+	}
+	return names, nil
 }

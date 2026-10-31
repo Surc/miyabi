@@ -48,8 +48,8 @@ func TestSearchRejectsAmbiguousAndPartialCodes(t *testing.T) {
 	} {
 		doc, _ := parseDocument([]byte(test.body))
 		got, err := searchFilm(doc, "ABP-123")
-		if got != test.want || (err != nil) != test.bad {
-			t.Fatalf("got=%s err=%v", got, err)
+		if got.id != test.want || (err != nil) != test.bad {
+			t.Fatalf("got=%+v err=%v", got, err)
 		}
 	}
 }

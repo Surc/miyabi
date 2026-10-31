@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { mkdir, cp, symlink, writeFile, readFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { createServer as createHTTPServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { fixture } from "./fixture.mjs";
-import { writeJSON, load } from "../app/service/configuration.mjs";
+import { writeJSON, load, engineRevision } from "../app/service/configuration.mjs";
 import { state } from "../app/service/processes.mjs";
 const nativeProcfs =
   Number((await readFile("/proc/self/stat", "utf8")).split(" ")[0]) === process.pid;
@@ -23,6 +24,30 @@ async function port() {
   await new Promise((resolve) => server.close(resolve));
   return value;
 }
+
+test("external MDCz starts only Miyabi and survives application stop/start",async(t)=>{
+  const {paths,env,config}=await installed(t);
+  const key="e".repeat(64);
+  const server=createHTTPServer((req,res)=>{
+    assert.equal(req.headers.authorization,"Bearer "+key);
+    res.setHeader("content-type","application/json");
+    res.end(JSON.stringify({protocol:1,revision:engineRevision,configuration_version:1,configuration_id:"external"}));
+  });
+  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  config.externalMDCz={serverURL:`http://127.0.0.1:${server.address().port}`,apiKey:key};
+  await writeJSON(paths.config,config);
+  const call=(action)=>exec("bash",[join(paths.app,"service/control"),action],{env,timeout:45000});
+  await call("start");
+  assert.equal((await state(paths)).children.length,1);
+  await call("status");
+  await call("stop");
+  assert.equal(server.listening,true);
+  await call("start");
+  assert.equal((await state(paths)).children.length,1);
+  assert.equal(JSON.parse(await readFile(join(paths.etc,"mdcz-connection.json"),"utf8")).server_url,config.externalMDCz.serverURL);
+  await call("stop");
+});
 async function installed(t) {
   const data = await fixture(t);
   const { paths, env, config } = data;
@@ -169,17 +194,33 @@ test("port conflict is rejected before spawning and reused PID records never sig
   assert.equal(await alive(own), true);
 });
 
-test("upgrade and uninstall stop both services and keep complete backups and exports", async (t) => {
+test("upgrades reuse data while manual backups and actual uninstalls preserve full snapshots", async (t) => {
   const { paths, config, call } = await installed(t);
   await writeFile(join(config.exports, "fixture.strm"), "export");
   await writeFile(join(paths.data, "miyabi/original.jpg"), "original");
   assert.equal((await call("start")).code, 0);
   const key = (await load(paths)).bridgeKey;
   assert.equal((await call("upgrade-before")).code, 0);
+  assert.equal((await call("status")).code, 3);
+  assert.deepEqual(await readdir(config.backups), []);
+  assert.equal(await readFile(join(paths.data, "miyabi/original.jpg"), "utf8"), "original");
+  for (const extra of [
+    { TRIM_APP_STATUS: "UPGRADE" },
+    { TRIM_APP_STATUS: "UNINSTALL", TRIM_TEMP_UPGRADE_FOLDER: join(paths.run, "upgrade") },
+  ]) {
+    assert.equal((await call("uninstall-before", extra)).code, 0);
+    assert.deepEqual(await readdir(config.backups), []);
+  }
   assert.equal((await call("verify")).code, 0);
   assert.equal((await load(paths)).bridgeKey, key);
   assert.equal((await call("start")).code, 0);
-  assert.equal((await call("uninstall-before")).code, 0);
+  assert.equal((await call("backup")).code, 0);
+  assert.equal((await call("status")).code, 3);
+  assert.equal((await call("start")).code, 0);
+  assert.equal(
+    (await call("uninstall-before", { TRIM_APP_STATUS: "UNINSTALL", TRIM_TEMP_UPGRADE_FOLDER: "" })).code,
+    0,
+  );
   assert.equal((await call("status")).code, 3);
   const snapshots = await readdir(config.backups);
   assert.equal(snapshots.length, 2);

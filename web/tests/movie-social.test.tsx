@@ -65,15 +65,14 @@ test('rating errors remain retryable and distinct from unrated', () => {
   expect(html).toContain('重试评分')
   expect(html).not.toContain('暂无评分')
 })
-test('only active source mounts, with a JavLibrary default for unlinked saved films', () => {
+test.each(['film', ''])('JavLibrary comments stay disabled for JavDB ID "%s"', javdbId => {
   vi.mocked(useMovieComments).mockClear()
-  renderToStaticMarkup(<MovieComments javdbId="film" code="ABP-123" />)
+  const html = renderToStaticMarkup(<MovieComments javdbId={javdbId} code="ABP-123" />)
   expect(useMovieComments).toHaveBeenCalledTimes(1)
-  expect(useMovieComments).toHaveBeenCalledWith('javdb', 'film', 'ABP-123')
-  vi.mocked(useMovieComments).mockClear()
-  renderToStaticMarkup(<MovieComments javdbId="" code="ABP-123" />)
-  expect(useMovieComments).toHaveBeenCalledTimes(1)
-  expect(useMovieComments).toHaveBeenCalledWith('javlibrary', '', 'ABP-123')
+  expect(useMovieComments).toHaveBeenCalledWith('javdb', javdbId, 'ABP-123')
+  expect(html).toContain('JavDB')
+  expect(html).not.toContain('JavLibrary')
+  if (!javdbId) expect(html).toContain('尚未关联 JavDB')
 })
 test('comment pages deduplicate IDs, escape text and retain loaded comments after a next-page failure', () => {
   vi.mocked(useMovieComments).mockReturnValue({

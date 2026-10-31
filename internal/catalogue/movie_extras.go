@@ -2,6 +2,7 @@ package catalogue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -89,6 +90,9 @@ func extrasError(ctx context.Context, err error) error {
 	}
 	if domain.IsKind(err, domain.KindInvalid) {
 		return err
+	}
+	if errors.Is(err, javlibrary.ErrVerificationRequired) {
+		return domain.E(domain.KindUpstream, "JavLibrary 需要在已连接的浏览器中完成人工验证", err)
 	}
 	return domain.E(domain.KindUpstream, "外部评分或评论暂不可用，请稍后重试", err)
 }

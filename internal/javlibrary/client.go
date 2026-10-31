@@ -134,21 +134,25 @@ func (c *Client) Lookup(ctx context.Context, code string) (Film, error) {
 		return empty, err
 	}
 	if byID(page.doc, "video_id") != nil {
-		film, err := parseFilm(page.doc, filmIDFromQuery(sourceQuery(page.location)), code)
+		film, err := parseFilm(page.doc, filmIDFromURL(page.location), code)
 		return film, page.trace.wrap(err)
 	}
-	id, err := searchFilm(page.doc, code)
-	if err != nil || id == "" {
+	target, err := searchFilm(page.doc, code)
+	if err != nil || target.id == "" {
 		return empty, page.trace.wrap(err)
 	}
-	page, err = c.page(ctx, "detail", "", url.Values{"v": {id}})
+	path, query := "", url.Values{"v": {target.id}}
+	if target.html {
+		path, query = target.id+".html", nil
+	}
+	page, err = c.page(ctx, "detail", path, query)
 	if err != nil {
 		return empty, err
 	}
-	if filmIDFromQuery(sourceQuery(page.location)) != id {
+	if filmIDFromURL(page.location) != target.id {
 		return empty, page.trace.wrap(failure("identity", "film_redirect_changed_identity"))
 	}
-	film, err := parseFilm(page.doc, id, code)
+	film, err := parseFilm(page.doc, target.id, code)
 	return film, page.trace.wrap(err)
 }
 

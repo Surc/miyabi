@@ -44,16 +44,21 @@ export function MovieComments({ javdbId, code }: { javdbId: string; code: string
   return (
     <section className="space-y-4">
       <h2 className="text-xl font-semibold tracking-normal">站点评论</h2>
-      <Tabs key={`${javdbId}:${code}`} defaultValue={javdbId ? 'javdb' : 'javlibrary'}>
+      <Tabs key={`${javdbId}:${code}`} defaultValue="javdb">
         <TabsList aria-label="评论来源">
           <TabsTrigger value="javdb">JavDB</TabsTrigger>
+          {/* JavLibrary comments are temporarily disabled pending live-source verification.
           <TabsTrigger value="javlibrary">JavLibrary</TabsTrigger>
+          */}
         </TabsList>
-        {(['javdb', 'javlibrary'] as const).map(source => (
-          <TabsContent key={source} value={source}>
-            <CommentList source={source} javdbId={javdbId} code={code} />
-          </TabsContent>
-        ))}
+        <TabsContent value="javdb">
+          <CommentList source="javdb" javdbId={javdbId} code={code} />
+        </TabsContent>
+        {/*
+        <TabsContent value="javlibrary">
+          <CommentList source="javlibrary" javdbId={javdbId} code={code} />
+        </TabsContent>
+        */}
       </Tabs>
     </section>
   )

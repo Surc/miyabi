@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JavLibrary 评分连接</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;max-width:640px;margin:72px auto;padding:0 24px;color:#1c1c1c;background:#fafafa}main{background:white;padding:32px;border:1px solid #ddd;border-radius:20px}h1{font-size:25px;margin:0 0 12px}p{color:#555}button{font:inherit;border:1px solid #ccc;border-radius:9px;background:white;padding:10px 16px;cursor:pointer;margin:6px 8px 6px 0}button:first-child{background:#151515;color:white;border-color:#151515}button:disabled{opacity:.5;cursor:wait}#status{font-weight:600;color:#151515}#message{min-height:2em;color:#a13220}
+</style>
+<main>
+<h1>JavLibrary 评分连接</h1>
+<p>打开专用浏览器，完成网站要求的真人验证。验证成功、看到影片列表或详情后，点击“验证完成”。Miyabi 将继续通过这个浏览器会话读取评分。</p>
+<p id="status" role="status">正在读取连接状态…</p>
+<div><button id="open">打开验证浏览器</button><button id="confirm">验证完成</button></div>
+<p id="message" role="alert"></p>
+<p>请保留专用浏览器窗口，保持这台电脑和代理开启。再次要求验证时，完成验证后重新点击“验证完成”。</p>
+</main>
+<script>
+const labels={closed:'尚未打开浏览器',verification_required:'等待你完成验证',ready:'已连接，可以读取评分',loading:'正在获取页面，请稍候'};
+const messages={verification_required:'仍未看到有效影片页面，请先在专用浏览器中完成验证。',browser_unavailable:'无法连接专用浏览器，请关闭旧的专用验证窗口后重新打开。',debug_port_in_use:'专用浏览器调试端口已被占用，请关闭旧的专用验证窗口后重试。',busy:'正在获取页面，请稍后再试。'};
+async function update(){try{const r=await fetch('/control/status');const s=await r.json();document.querySelector('#status').textContent=labels[s.state]||'连接不可用'}catch{document.querySelector('#status').textContent='连接服务未运行'}}
+for(const name of ['open','confirm'])document.querySelector('#'+name).onclick=async()=>{
+  document.querySelectorAll('button').forEach(b=>b.disabled=true);document.querySelector('#message').textContent='';
+  try{const r=await fetch('/control/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const s=await r.json();if(!r.ok)document.querySelector('#message').textContent=messages[s.error]||'操作失败，请重新打开验证浏览器。'}
+  catch{document.querySelector('#message').textContent='连接服务未运行。'}
+  finally{document.querySelectorAll('button').forEach(b=>b.disabled=false);await update()}
+};update();setInterval(update,1500);
+</script>
+</html>

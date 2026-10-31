@@ -128,6 +128,11 @@ export function CachedBrowseResults({
       {settings.isError ? (
         <InlineError onRetry={() => void settings.refetch()}>预加载设置读取失败</InlineError>
       ) : null}
+      {state.phase === 'error' ? (
+        <InlineError>
+          {state.error ?? '部分资源读取失败，已有作品仍可浏览，请重试预加载'}
+        </InlineError>
+      ) : null}
       {rows.length ? (
         <CurrentBrowsePage
           rows={state.rows}
@@ -146,7 +151,9 @@ export function CachedBrowseResults({
                 : searching
                   ? '没有搜索结果'
                   : '暂无内容'
-              : '等待作品资料与磁力确认'
+              : state.phase === 'error'
+                ? '本页尚未加载，请重试预加载'
+                : '等待作品资料与磁力确认'
           }
         />
       )}
@@ -258,6 +265,8 @@ function CardRating({ id, source }: { id: string; source: 'javdb' | 'javlibrary'
           <LoaderCircleIcon className="size-3 animate-spin" aria-label={`${label} 加载中`} />
         ) : rating?.found && rating.score !== null ? (
           `${rating.score.toFixed(1)}/${rating.max}`
+        ) : query.isError ? (
+          '暂不可用'
         ) : (
           '—'
         )}

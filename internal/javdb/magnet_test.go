@@ -1,7 +1,10 @@
 package javdb
 
 import (
+	"encoding/base32"
+	"encoding/hex"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ppxb/miyabi/internal/domain"
@@ -44,6 +47,22 @@ func TestMagnetsNormalizeInfoHash(t *testing.T) {
 	}
 }
 
+func TestMagnetsAcceptsBase32AndKeepsUsableEntries(t *testing.T) {
+	const expected = "abcdef0123456789abcdef0123456789abcdef01"
+	bytes, _ := hex.DecodeString(expected)
+	encoded := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes))
+	transport := &fixtureTransport{responses: map[string][]byte{
+		"/api/v1/movies/movie/magnets": []byte(`{"success":1,"data":{"magnets":[{"hash":"0123456789abcdef0123456789abcdef"},{"hash":"` + encoded + `","name":"Base32","cnsub":true},{"hash":"` + expected + `","name":"Hex"}]}}`),
+	}}
+	magnets, err := clientWithTransport(transport).Magnets(t.Context(), "movie")
+	if err != nil || len(magnets) != 2 {
+		t.Fatalf("usable magnets = %+v, error = %v", magnets, err)
+	}
+	if magnets[0].Hash != expected || magnets[0].Name != "Base32" || !magnets[0].HasSubtitle || magnets[1].Hash != expected || magnets[1].Name != "Hex" {
+		t.Fatalf("normalization lost metadata or source order: %+v", magnets)
+	}
+}
+
 func TestFindWithoutJavDBIDDoesNotSearchByCode(t *testing.T) {
 	transport := &stubTransport{}
 	magnets, err := clientWithTransport(transport).Find(t.Context(), domain.MovieRef{JavDBID: " ", Code: "ABP-001"})
@@ -70,7 +89,7 @@ func TestAggregatorRanksJavDBResources(t *testing.T) {
 }
 
 func TestMagnetsRejectsMalformedInfoHash(t *testing.T) {
-	for _, hash := range []string{"", "abc", "not-a-hash"} {
+	for _, hash := range []string{"", "abc", "not-a-hash", "0123456789abcdef0123456789abcdef", strings.Repeat("z", 40)} {
 		transport := &fixtureTransport{responses: map[string][]byte{
 			"/api/v1/movies/movie/magnets": []byte(`{"success":1,"data":{"magnets":[{"hash":"` + hash + `"}]}}`),
 		}}

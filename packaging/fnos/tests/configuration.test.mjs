@@ -8,6 +8,8 @@ import {
   patchConfiguration,
   childEnvironment,
   backup,
+  bridgeConnection,
+  validate,
 } from "../app/service/configuration.mjs";
 
 import { fixture } from "./fixture.mjs";
@@ -26,6 +28,34 @@ test("installation is idempotent and keeps keys, configuration and artwork", asy
   const connection = JSON.parse(await readFile(join(paths.etc, "mdcz-connection.json"), "utf8"));
   assert.equal(connection.api_key, config.bridgeKey);
   assert.equal(connection.server_url, "http://127.0.0.1:3840");
+});
+
+test("external MDCz provisioning persists across initialization without replacing app credentials", async (t) => {
+  const {paths, env, config} = await fixture(t);
+  const next={...config,externalMDCz:{serverURL:"http://nas.test:3841",apiKey:"a".repeat(64)}};
+  validate(next);
+  await writeFile(paths.config,JSON.stringify(next));
+  assert.deepEqual(await initialize(paths,env),next);
+  assert.deepEqual(JSON.parse(await readFile(join(paths.etc,"mdcz-connection.json"),"utf8")),bridgeConnection(next));
+  assert.equal((await load(paths)).strmToken,config.strmToken);
+  assert.throws(()=>validate({...next,externalMDCz:{...next.externalMDCz,serverURL:"http://user:secret@nas.test/"}}));
+  assert.throws(()=>validate({...next,externalMDCz:{...next.externalMDCz,apiKey:"short"}}));
+});
+
+test("optional JavLibrary browser connection survives initialization and stays out of other processes", async (t) => {
+  const {paths, env, config} = await fixture(t);
+  assert.equal(childEnvironment(paths, config).miyabi.MIYABI_JAVLIBRARY_BROWSER_CONFIG, undefined);
+  const next = {...config, javlibraryBrowser:{serverURL:"http://pc.test:18082",apiToken:"b".repeat(64)}};
+  validate(next);
+  await writeFile(paths.config,JSON.stringify(next));
+  assert.deepEqual(await initialize(paths,env),next);
+  const file = join(paths.etc,"javlibrary-browser.json");
+  assert.deepEqual(JSON.parse(await readFile(file,"utf8")),{enabled:true,server_url:"http://pc.test:18082",api_token:"b".repeat(64)});
+  assert.equal((await stat(file)).mode & 0o777,0o600);
+  assert.equal(childEnvironment(paths,next).miyabi.MIYABI_JAVLIBRARY_BROWSER_CONFIG,file);
+  assert.equal(childEnvironment(paths,next).bridge.MIYABI_JAVLIBRARY_BROWSER_CONFIG,undefined);
+  assert.throws(()=>validate({...next,javlibraryBrowser:{...next.javlibraryBrowser,serverURL:"http://user:secret@pc.test/"}}));
+  assert.equal((await load(paths)).strmToken,config.strmToken);
 });
 
 test("malformed existing settings are not replaced and user settings are validated", async (t) => {

@@ -51,7 +51,20 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 		if !autoDownload && fileExists(track.StoragePath) {
 			continue
 		}
-		if filepath.Dir(track.StoragePath) == target.Dir && fileExists(track.StoragePath) {
+		destination := target.Path(trackKind(track))
+		if track.StoragePath == destination && fileExists(destination) {
+			exported[trackKind(track)] = true
+		} else if fileExists(track.StoragePath) {
+			// This track belongs to another complete version of the movie.
+			continue
+		} else if fileExists(destination) {
+			if exported[trackKind(track)] {
+				continue
+			}
+			// Media export moved this video's subtitle along with its STRM.
+			if err := s.db.Subtitle.UpdateOne(track).SetStoragePath(destination).SetName(filepath.Base(destination)).Exec(ctx); err != nil {
+				return 0, err
+			}
 			exported[trackKind(track)] = true
 		} else {
 			pending = append(pending, track)
@@ -91,6 +104,9 @@ func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitle
 	written := make(map[[sha256.Size]byte]bool)
 	for _, distinctLanguage := range []bool{true, false} {
 		for _, candidate := range candidates {
+			if target.Version != "" && candidate.Version != target.Version {
+				continue
+			}
 			if len(exported) >= MaxTracks {
 				return len(written), nil
 			}

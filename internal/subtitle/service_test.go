@@ -14,6 +14,9 @@ import (
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
+	"github.com/ppxb/miyabi/internal/export"
+	"github.com/ppxb/miyabi/internal/nfo"
+	"github.com/ppxb/miyabi/internal/pan"
 )
 
 const (
@@ -189,5 +192,52 @@ func TestExportDeletesOrphanPendingSubtitles(t *testing.T) {
 	exists, err := db.Subtitle.Query().Where(subtitle.IDEQ(orphan.ID)).Exist(ctx)
 	if err != nil || exists {
 		t.Fatalf("expected orphan subtitle to be deleted, exists: %v, err: %v", exists, err)
+	}
+}
+
+func TestVersionSubtitlesStaySeparateAndFollowSTRMRenames(t *testing.T) {
+	service, db, movieID, target := exportFixture(t, map[string]string{"/standard.srt": simplifiedSRT, "/uncensored.srt": traditionalSRT},
+		Candidate{Name: "ABP-123.chs.srt", URL: "/standard.srt", Format: "srt", Language: subtitlemeta.LangSimplifiedChinese, Version: subtitlemeta.VersionStandard},
+		Candidate{Name: "ABP-123-U.cht.srt", URL: "/uncensored.srt", Format: "srt", Language: subtitlemeta.LangTraditionalChinese, Version: subtitlemeta.VersionUncensored})
+	cfg := export.Config{EmbyDir: filepath.Dir(filepath.Dir(target.Dir)), PublicURL: "http://localhost"}
+	first := pan.File{ID: "one", Name: "ABP-123.mp4"}
+	if _, err := export.WriteMedia(cfg, "ABP-123", nfo.Movie{Code: "ABP-123"}, []pan.File{first}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Export(t.Context(), movieID, target); err != nil {
+		t.Fatal(err)
+	}
+	files := []pan.File{first, {ID: "two", Name: "ABP-123-U.mp4"}}
+	if _, err := export.WriteMedia(cfg, "ABP-123", nfo.Movie{Code: "ABP-123"}, files, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := export.PlanVideos("ABP-123", files)
+	for _, v := range plan {
+		version := subtitlemeta.DetectVersion(v.File.Name)
+		target.Stem, target.Version, target.Uncensored = v.Stem, version, subtitlemeta.IsUncensored(v.File.Name)
+		if _, err := service.Export(t.Context(), movieID, target); err != nil {
+			t.Fatal(err)
+		}
+		kind := subtitlemeta.Kind{Language: subtitlemeta.LangSimplifiedChinese, Version: subtitlemeta.VersionStandard, Format: "srt"}
+		if version == subtitlemeta.VersionUncensored {
+			kind.Language = subtitlemeta.LangTraditionalChinese
+			kind.Version = version
+		}
+		if !fileExists(target.Path(kind)) {
+			t.Fatal("missing version subtitle", target.Path(kind))
+		}
+	}
+	if db.Subtitle.Query().CountX(t.Context()) != 2 {
+		t.Fatal("version subtitle records were lost or duplicated")
+	}
+	service.finder.client.Transport = subtitleTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("downloaded an existing version subtitle")
+		return nil, nil
+	})
+	for _, v := range plan {
+		target.Stem, target.Version, target.Uncensored = v.Stem, subtitlemeta.DetectVersion(v.File.Name), subtitlemeta.IsUncensored(v.File.Name)
+		if count, err := service.Export(t.Context(), movieID, target); err != nil || count != 0 {
+			t.Fatalf("reuse=%d %v", count, err)
+		}
 	}
 }

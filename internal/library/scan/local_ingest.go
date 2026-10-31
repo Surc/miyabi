@@ -90,6 +90,25 @@ func (s *LocalScanner) prepareMedia(ctx context.Context, rootDir string, media *
 }
 
 func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult) error {
+	if s.exports == nil {
+		return s.importBatch(ctx, rootDir, batch, result)
+	}
+	return s.exports.WithConfig(func(cfg export.Config) error {
+		current, err := filepath.Abs(cfg.EmbyDir)
+		if err == nil {
+			current, err = filepath.EvalSymlinks(current)
+		}
+		if err != nil {
+			return fmt.Errorf("resolve current export directory: %w", err)
+		}
+		if current != rootDir {
+			return domain.E(domain.KindConflict, "Emby 本地目录已变更，请扫描当前目录", nil)
+		}
+		return s.importBatch(ctx, rootDir, batch, result)
+	})
+}
+
+func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult) error {
 	if s.images != nil {
 		for _, media := range batch {
 			if media.posterPath != "" {

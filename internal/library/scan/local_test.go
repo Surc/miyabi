@@ -61,6 +61,21 @@ func TestExportedPreviewsAndCatalogueEntitiesSurviveLocalRescan(t *testing.T) {
 	}
 }
 
+func TestLocalSubtitlesDoNotFallBackAcrossVersions(t *testing.T) {
+	first := "IPX-906 - 1080p [123456abcdef]"
+	second := "IPX-906 - 4k [abcdef123456]"
+	files := []string{filepath.Join("movies", first+".zh-CN.srt")}
+	if matches := findMatchingSubtitles(first, files, false); !reflect.DeepEqual(matches, files) {
+		t.Fatalf("matching version lost its subtitle: %v", matches)
+	}
+	if matches := findMatchingSubtitles(second, files, false); len(matches) != 0 {
+		t.Fatalf("subtitle attached to a different version: %v", matches)
+	}
+	if matches := findMatchingSubtitles(second, files, true); !reflect.DeepEqual(matches, files) {
+		t.Fatal("single-video fallback was lost")
+	}
+}
+
 func testJPEG(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer

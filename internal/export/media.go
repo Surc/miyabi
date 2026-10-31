@@ -21,19 +21,42 @@ func WriteMedia(cfg Config, code string, doc nfo.Movie, videos []pan.File, poste
 	if err := cfg.Validate(); err != nil {
 		return false, err
 	}
+	plan, err := PlanVideos(code, videos)
+	if err != nil {
+		return false, err
+	}
 	stem := nfo.FileStem(code)
 	destDir := EmbyMovieDir(cfg.EmbyDir, code)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return false, fmt.Errorf("create emby directory %s: %w", destDir, err)
 	}
+	previous, err := mediaFiles(destDir, stem)
+	if err != nil {
+		return false, err
+	}
+	oldVideos := make(map[string]string)
+	for _, name := range previous {
+		if _, ok := VideoPart(stem, filepath.Base(name)); ok {
+			body, err := os.ReadFile(filepath.Join(destDir, name))
+			if err != nil {
+				return false, err
+			}
+			oldVideos[name] = ParseSTRMFileID(string(body))
+		}
+	}
 	changed := false
+	expected := make(map[string]bool)
 	write := func(name string, body []byte) error {
+		expected[name] = true
 		path := filepath.Join(destDir, name)
 		before, err := os.ReadFile(path)
 		if err == nil && bytes.Equal(before, body) {
 			return nil
 		}
 		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
 		if err := atomicfile.WriteFile(path, body, 0o644); err != nil {
@@ -43,68 +66,78 @@ func WriteMedia(cfg Config, code string, doc nfo.Movie, videos []pan.File, poste
 		return nil
 	}
 
-	// Ensure videos are sorted deterministically
-	sortFiles(videos)
+	// Each isolated multipart release needs its own complete set of sidecars.
+	directories := map[string]string{}
+	for _, video := range plan {
+		name := stem
+		if video.Dir != "" {
+			name = video.Dir
+		}
+		directories[video.Dir] = name
+	}
+	if len(plan) == 0 {
+		directories[""] = stem
+	}
 
 	// 1. Write poster and fanart FIRST
 	posterName, fanartName := "poster.jpg", "fanart.jpg"
-	if len(poster) > 0 {
-		if err := write(posterName, poster); err != nil {
-			return changed, fmt.Errorf("write poster: %w", err)
+	for dir := range directories {
+		expected[filepath.Join(dir, posterName)] = true
+		expected[filepath.Join(dir, fanartName)] = true
+		if len(poster) > 0 {
+			if err := write(filepath.Join(dir, posterName), poster); err != nil {
+				return changed, fmt.Errorf("write poster: %w", err)
+			}
 		}
-	}
-	if len(fanart) > 0 {
-		if err := write(fanartName, fanart); err != nil {
-			return changed, fmt.Errorf("write fanart: %w", err)
+		if len(fanart) > 0 {
+			if err := write(filepath.Join(dir, fanartName), fanart); err != nil {
+				return changed, fmt.Errorf("write fanart: %w", err)
+			}
 		}
 	}
 
 	// 2. Write NFO file SECOND
-	nfoName := stem + ".nfo"
 	doc.Thumbs = []nfo.Thumb{{Aspect: "poster", Path: posterName}}
 	doc.Fanart = fanartName
 	nfoBody, err := nfo.Encode(doc)
 	if err != nil {
 		return changed, fmt.Errorf("encode nfo: %w", err)
 	}
-	if err := write(nfoName, nfoBody); err != nil {
-		return changed, fmt.Errorf("write nfo file: %w", err)
-	}
-
-	// 3. Write STRM files LAST so media servers (Emby) watching via inotify detect complete assets
-	expectedSTRMs := make(map[string]bool)
-	if len(videos) == 1 {
-		strmName := stem + ".strm"
-		expectedSTRMs[strmName] = true
-		if err := write(strmName, STRMContent(cfg.PublicURL, videos[0].ID, cfg.STRMToken)); err != nil {
-			return changed, fmt.Errorf("write strm file: %w", err)
+	for dir, name := range directories {
+		if err := write(filepath.Join(dir, name+".nfo"), nfoBody); err != nil {
+			return changed, fmt.Errorf("write nfo file: %w", err)
 		}
-	} else if len(videos) > 1 {
-		for i, v := range videos {
-			strmName := fmt.Sprintf("%s-cd%d.strm", stem, i+1)
-			expectedSTRMs[strmName] = true
-			if err := write(strmName, STRMContent(cfg.PublicURL, v.ID, cfg.STRMToken)); err != nil {
-				return changed, fmt.Errorf("write strm file: %w", err)
+	}
+	for _, video := range plan {
+		if video.Part == 0 && video.Dir == "" && video.Stem != stem {
+			if err := write(video.Stem+".nfo", nfoBody); err != nil {
+				return changed, err
 			}
 		}
 	}
 
-	// Clean up obsolete .strm files belonging to this movie
-	entries, err := os.ReadDir(destDir)
-	if err != nil {
+	// 3. Write STRM files LAST so media servers (Emby) watching via inotify detect complete assets
+	for _, video := range plan {
+		strmName := filepath.Join(video.Dir, video.Stem+".strm")
+		if err := write(strmName, STRMContent(cfg.PublicURL, video.File.ID, cfg.STRMToken)); err != nil {
+			return changed, fmt.Errorf("write strm file: %w", err)
+		}
+	}
+
+	if err := moveVideoSubtitles(destDir, oldVideos, plan, write, &changed); err != nil {
 		return changed, err
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasSuffix(name, ".strm") && strings.HasPrefix(name, stem) && !expectedSTRMs[name] {
+	// Delete only exact generated names, after all replacement files exist.
+	for _, name := range previous {
+		if !expected[name] {
 			if err := os.Remove(filepath.Join(destDir, name)); err != nil {
 				return changed, err
 			}
 			changed = true
 		}
+	}
+	if err := removeEmptyVersionDirs(destDir, stem); err != nil {
+		return changed, err
 	}
 
 	return changed, nil
