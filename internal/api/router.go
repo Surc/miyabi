@@ -32,6 +32,7 @@ type Dependencies struct {
 	Artwork         ArtworkReader
 	Maintenance     MaintenanceManager
 	Network         NetworkManager
+	Subtitles       SubtitleManager
 	Emby            EmbyManager
 	EmbyPlayback    EmbyPlaybackManager
 	Frontend        fs.FS
@@ -92,6 +93,11 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	settingsAPI.GET("/network", networkHandler(deps.Network))
 	settingsAPI.PUT("/network", networkUpdateHandler(deps.Network))
 	settingsAPI.POST("/network/test", networkTestHandler(deps.Network))
+	if deps.Subtitles != nil {
+		settingsAPI.GET("/subtitles", subtitleSettingsHandler(deps.Subtitles))
+		settingsAPI.PUT("/subtitles", subtitleSettingsUpdateHandler(deps.Subtitles))
+		settingsAPI.POST("/subtitles/test", subtitleTestHandler(deps.Subtitles))
+	}
 	settingsAPI.GET("/emby", embyConfigHandler(deps.Emby))
 	settingsAPI.PUT("/emby", embyUpdateHandler(deps.Emby))
 	settingsAPI.POST("/emby/test", embyTestHandler(deps.Emby))

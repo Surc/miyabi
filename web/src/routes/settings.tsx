@@ -12,6 +12,7 @@ import { NetworkSection } from '@/features/settings/network-section'
 import { PanSection } from '@/features/settings/pan-section'
 import { PrivacySection } from '@/features/settings/privacy-section'
 import { SubscriptionSection } from '@/features/settings/subscription-section'
+import { SubtitleSection } from '@/features/settings/subtitle-section'
 import { ScrapingSettings } from '@/features/settings/extensions/scraping-settings'
 import { TasksSection } from '@/features/settings/tasks-section'
 import { TopSection } from '@/features/settings/top-section'
@@ -36,6 +37,8 @@ function SettingsPage() {
           <NetworkSection />
           <Separator />
           <ScrapingSettings />
+          <Separator />
+          <SubtitleSection />
           <Separator />
           <EmbySection />
           <Separator />

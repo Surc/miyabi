@@ -6,6 +6,7 @@ import { useDataInfo } from '@/api/data'
 import { useEmbyConfig } from '@/api/emby'
 import { useNetworkConfig } from '@/api/network'
 import { useSubscriptionSettings } from '@/api/subscription-settings'
+import { useSubtitleConfig } from '@/api/subtitle'
 import { useTopConfig } from '@/api/top'
 
 // Feed each hook's actual options into QueryObserver to test remounts without a browser.
@@ -24,6 +25,7 @@ test.each([
   { name: 'network', useConfig: useNetworkConfig, path: '/api/settings/network' },
   { name: 'Emby', useConfig: useEmbyConfig, path: '/api/settings/emby' },
   { name: 'subscriptions', useConfig: useSubscriptionSettings, path: '/api/settings/subscription' },
+  { name: 'subtitles', useConfig: useSubtitleConfig, path: '/api/settings/subtitles' },
   { name: 'TOP rankings', useConfig: useTopConfig, path: '/api/settings/top' },
   { name: 'cache statistics', useConfig: useDataInfo, path: '/api/settings/system' }
 ])(

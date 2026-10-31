@@ -235,6 +235,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Artwork:         scrapeSvc,
 		Maintenance:     maintenanceSvc,
 		Network:         networkSvc,
+		Subtitles:       subtitleSvc,
 		Emby:            embySvc,
 		EmbyPlayback:    embySvc,
 		Frontend:        miyabi.Frontend(),

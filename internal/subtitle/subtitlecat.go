@@ -3,6 +3,7 @@ package subtitle
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -22,8 +23,7 @@ type SubtitleCatProvider struct {
 }
 
 func NewSubtitleCatProvider(proxyManager *netx.ProxyManager) *SubtitleCatProvider {
-	opts := netx.RestyOptions{Timeout: 15 * time.Second}
-	client := netx.NewRestyClient(proxyManager, opts)
+	client := netx.NewSafeRestyClient(proxyManager, 15*time.Second)
 	return &SubtitleCatProvider{origin: defaultSubtitleCatOrigin, client: client}
 }
 
@@ -57,15 +57,21 @@ func (p *SubtitleCatProvider) Search(ctx context.Context, code string) ([]Candid
 	}
 
 	var candidates []Candidate
+	var errs []error
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return candidates, ctx.Err()
+			return candidates, errors.Join(append(errs, ctx.Err())...)
 		default:
 		}
 
 		detailResp, err := p.client.R().SetContext(ctx).Get(entry.DetailURL)
-		if err != nil || detailResp.StatusCode() != 200 {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("subtitlecat detail request: %w", err))
+			continue
+		}
+		if detailResp.StatusCode() != 200 {
+			errs = append(errs, fmt.Errorf("subtitlecat detail status %d", detailResp.StatusCode()))
 			continue
 		}
 
@@ -73,7 +79,7 @@ func (p *SubtitleCatProvider) Search(ctx context.Context, code string) ([]Candid
 		candidates = append(candidates, items...)
 	}
 
-	return candidates, nil
+	return candidates, errors.Join(errs...)
 }
 
 func parseSubtitleCatSearch(body []byte, origin string) []catSearchEntry {

@@ -2,6 +2,7 @@ package subtitle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -35,6 +36,7 @@ func NewFinder(proxyManager *netx.ProxyManager, opts ...FinderOption) *Finder {
 		providers: []Provider{
 			NewXunleiProvider(proxyManager),
 			NewSubtitleCatProvider(proxyManager),
+			NewAVSubtitlesProvider(proxyManager),
 		},
 		client: netx.NewSafeDownloadClient(proxyManager, 20*time.Second),
 	}
@@ -48,28 +50,50 @@ func NewFinder(proxyManager *netx.ProxyManager, opts ...FinderOption) *Finder {
 // may decorate the number catalogue sites use (259LUXU-1899 for LUXU-1899),
 // so relaxed forms are queried only when the exact number finds nothing.
 func (f *Finder) Search(ctx context.Context, code string, uncensored bool) []Candidate {
-	for _, query := range codeid.Candidates(code) {
-		if ranked := Rank(f.search(ctx, query), code, uncensored); len(ranked) > 0 {
-			return ranked
-		}
-	}
-	return nil
+	candidates, _ := f.SearchWithConfig(ctx, code, uncensored, DefaultConfig())
+	return candidates
 }
 
-// search queries all providers concurrently. A failing provider must not hide
-// the others' results, so its error is dropped.
-func (f *Finder) search(ctx context.Context, query string) []Candidate {
+func (f *Finder) SearchWithConfig(ctx context.Context, code string, uncensored bool, config Config) ([]Candidate, error) {
+	if !config.Enabled || !config.Sources.Any() {
+		return nil, nil
+	}
+	var errs []error
+	for _, query := range codeid.Candidates(code) {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(append(errs, err)...)
+		}
+		candidates, err := f.search(ctx, query, config.Sources)
+		errs = append(errs, err)
+		if ranked := Rank(candidates, code, uncensored, config.Language); len(ranked) > 0 {
+			return ranked, errors.Join(errs...)
+		}
+	}
+	return nil, errors.Join(errs...)
+}
+
+// search queries enabled providers concurrently and reports errors alongside
+// usable results, so a failing provider never hides the others' candidates.
+func (f *Finder) search(ctx context.Context, query string, sources Sources) ([]Candidate, error) {
 	var (
 		mu         sync.Mutex
 		wg         sync.WaitGroup
 		candidates []Candidate
+		errs       []error
 		seen       = make(map[string]bool)
 	)
 	for _, provider := range f.providers {
+		id, name := providerSource(provider)
+		if !sources.enabled(id) {
+			continue
+		}
 		wg.Go(func() {
-			results, _ := provider.Search(ctx, query)
+			results, err := provider.Search(ctx, query)
 			mu.Lock()
 			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			}
 			for _, candidate := range results {
 				if candidate.URL != "" && !seen[candidate.URL] {
 					seen[candidate.URL] = true
@@ -79,7 +103,20 @@ func (f *Finder) search(ctx context.Context, query string) []Candidate {
 		})
 	}
 	wg.Wait()
-	return candidates
+	return candidates, errors.Join(errs...)
+}
+
+func providerSource(provider Provider) (string, string) {
+	switch provider.(type) {
+	case *XunleiProvider:
+		return "xunlei", "迅雷"
+	case *SubtitleCatProvider:
+		return "subtitlecat", "SubtitleCat"
+	case *AVSubtitlesProvider:
+		return "avsubtitles", "AVSubtitles"
+	default:
+		return "", "字幕源"
+	}
 }
 
 // Download fetches a candidate and resolves an unknown language from its text.
@@ -87,7 +124,13 @@ func (f *Finder) Download(ctx context.Context, candidate Candidate) ([]byte, sub
 	if candidate.URL == "" {
 		return nil, "", fmt.Errorf("empty candidate URL")
 	}
-	raw, err := netx.SafeDownload(ctx, f.client, candidate.URL)
+	var raw []byte
+	var err error
+	if candidate.download != nil {
+		raw, err = candidate.download.fetch(ctx, f.client, candidate)
+	} else {
+		raw, err = netx.SafeDownload(ctx, f.client, candidate.URL)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("download subtitle: %w", err)
 	}

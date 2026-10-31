@@ -21,8 +21,7 @@ type XunleiProvider struct {
 }
 
 func NewXunleiProvider(proxyManager *netx.ProxyManager) *XunleiProvider {
-	opts := netx.RestyOptions{Timeout: 10 * time.Second}
-	client := netx.NewRestyClient(proxyManager, opts)
+	client := netx.NewSafeRestyClient(proxyManager, 10*time.Second)
 	return &XunleiProvider{endpoint: defaultXunleiEndpoint, client: client}
 }
 

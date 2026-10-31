@@ -2,6 +2,8 @@ package subtitle
 
 import (
 	"cmp"
+	"context"
+	"net/http"
 	"slices"
 
 	"github.com/ppxb/miyabi/internal/codeid"
@@ -19,6 +21,12 @@ type Candidate struct {
 	Language subtitlemeta.Language
 	Version  subtitlemeta.VersionTag
 	Score    int
+	download candidateDownloader
+}
+
+// Some sources require a download session or return an archive instead of text.
+type candidateDownloader interface {
+	fetch(context.Context, *http.Client, Candidate) ([]byte, error)
 }
 
 func (c Candidate) Kind() subtitlemeta.Kind {
@@ -29,7 +37,11 @@ func (c Candidate) Kind() subtitlemeta.Kind {
 // them by relevance. Provider search is fuzzy: querying ABP-1 also returns
 // ABP-123, so the catalogue number parsed from each name must be equivalent
 // to code (padding, label digits and delimiters may differ).
-func Rank(candidates []Candidate, code string, uncensored bool) []Candidate {
+func Rank(candidates []Candidate, code string, uncensored bool, language ...subtitlemeta.Language) []Candidate {
+	preferred := subtitlemeta.LangSimplifiedChinese
+	if len(language) > 0 {
+		preferred = language[0]
+	}
 	ranked := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		if !identifies(candidate.Name, code) || candidate.Format == "" {
@@ -40,7 +52,7 @@ func Rank(candidates []Candidate, code string, uncensored bool) []Candidate {
 		if leaked && !uncensored {
 			continue
 		}
-		candidate.Score = score(candidate, uncensored)
+		candidate.Score = score(candidate, uncensored, preferred)
 		ranked = append(ranked, candidate)
 	}
 	slices.SortStableFunc(ranked, func(a, b Candidate) int { return cmp.Compare(b.Score, a.Score) })
@@ -52,13 +64,14 @@ func identifies(name, code string) bool {
 	return ok && codeid.IsEquivalent(parsed, code)
 }
 
-func score(candidate Candidate, uncensored bool) int {
+func score(candidate Candidate, uncensored bool, preferred subtitlemeta.Language) int {
 	score := 0
 	switch candidate.Language {
-	case subtitlemeta.LangSimplifiedChinese:
-		score += 150
-	case subtitlemeta.LangTraditionalChinese:
+	case subtitlemeta.LangSimplifiedChinese, subtitlemeta.LangTraditionalChinese:
 		score += 120
+		if candidate.Language == preferred {
+			score += 30
+		}
 	default:
 		score += 100
 	}

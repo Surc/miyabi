@@ -1,12 +1,64 @@
 package netx
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/go-resty/resty/v2"
 )
+
+func TestSafeRestyClientGuardsMetadataRequests(t *testing.T) {
+	var requests atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("User-Agent") != "go-resty/"+resty.Version+" (https://github.com/go-resty/resty)" {
+			t.Errorf("changed source user agent: %q", r.Header.Get("User-Agent"))
+		}
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "http://127.0.0.1/private", http.StatusFound)
+		case "/large":
+			io.WriteString(w, strings.Repeat("x", int(MaxSafeDownloadBytes)+1))
+		case "/cookie":
+			if _, err := r.Cookie("session"); err != nil {
+				t.Error("source client lost its session")
+			}
+		default:
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "test", Path: "/"})
+			io.WriteString(w, "metadata")
+		}
+	}))
+	defer proxy.Close()
+	manager, err := NewProxyManager(ProxyConfig{Enabled: true, URL: proxy.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewSafeRestyClient(manager, time.Second)
+	defer client.GetClient().CloseIdleConnections()
+	const origin = "http://93.184.216.34"
+	if response, err := client.R().Get(origin); err != nil || response.String() != "metadata" {
+		t.Fatalf("metadata request: %v, %v", response, err)
+	}
+	if _, err := client.R().Get(origin + "/cookie"); err != nil {
+		t.Fatal(err)
+	}
+	before := requests.Load()
+	if _, err := client.R().Get("http://127.0.0.1/private"); err == nil || requests.Load() != before {
+		t.Fatalf("private target reached proxy: requests=%d error=%v", requests.Load(), err)
+	}
+	if _, err := client.R().Get(origin + "/redirect"); err == nil || !strings.Contains(err.Error(), "redirect blocked") || requests.Load() != before+1 {
+		t.Fatalf("private redirect reached proxy: requests=%d error=%v", requests.Load(), err)
+	}
+	if _, err := client.R().Get(origin + "/large"); !errors.Is(err, resty.ErrResponseBodyTooLarge) {
+		t.Fatalf("oversized metadata error=%v", err)
+	}
+}
 
 func TestRestyClientResolvesProxyPerRequest(t *testing.T) {
 	manager, err := NewProxyManager(ProxyConfig{})

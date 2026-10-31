@@ -36,6 +36,11 @@ func NewService(db *ent.Client, finder *Finder) *Service {
 // files it wrote. Existing exports are reused; online subtitles fill the
 // remaining kinds up to MaxTracks.
 func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.Target) (int, error) {
+	config, err := s.Config(ctx)
+	if err != nil {
+		return 0, err
+	}
+	autoDownload := config.Enabled && config.Sources.Any()
 	tracks, err := s.db.Subtitle.Query().Where(subtitle.MovieIDEQ(movieID)).Order(ent.Asc(subtitle.FieldID)).All(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("list movie subtitles: %w", err)
@@ -43,6 +48,9 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 	exported := make(map[subtitlemeta.Kind]bool)
 	var pending []*ent.Subtitle
 	for _, track := range tracks {
+		if !autoDownload && fileExists(track.StoragePath) {
+			continue
+		}
 		if filepath.Dir(track.StoragePath) == target.Dir && fileExists(track.StoragePath) {
 			exported[trackKind(track)] = true
 		} else {
@@ -61,8 +69,8 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 		}
 		errs = append(errs, s.db.Subtitle.DeleteOne(track).Exec(ctx))
 	}
-	if !target.HardSubtitled && len(exported) < MaxTracks {
-		count, err := s.exportOnline(ctx, movieID, target, exported)
+	if autoDownload && !target.HardSubtitled && len(exported) < MaxTracks {
+		count, err := s.exportOnline(ctx, movieID, target, exported, config)
 		written += count
 		errs = append(errs, err)
 	}
@@ -77,8 +85,8 @@ type download struct {
 
 // exportOnline fills the remaining kinds in two passes: first a language or
 // cut the movie lacks, then another format of one it has.
-func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitlemeta.Target, exported map[subtitlemeta.Kind]bool) (int, error) {
-	candidates := s.finder.Search(ctx, target.Code, target.Uncensored)
+func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitlemeta.Target, exported map[subtitlemeta.Kind]bool, config Config) (int, error) {
+	candidates, _ := s.finder.SearchWithConfig(ctx, target.Code, target.Uncensored, config)
 	downloads := make(map[string]download)
 	written := make(map[[sha256.Size]byte]bool)
 	for _, distinctLanguage := range []bool{true, false} {

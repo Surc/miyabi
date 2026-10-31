@@ -88,18 +88,8 @@ func ValidateSafeURL(ctx context.Context, rawURL string) (*url.URL, error) {
 	}
 
 	// Resolve hostname to IPs and ensure none are private/loopback
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", hostname)
-	if err != nil {
-		return nil, fmt.Errorf("resolve hostname %s: %w", hostname, err)
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("no IP resolved for %s", hostname)
-	}
-
-	for _, ip := range ips {
-		if IsPrivateOrLoopbackIP(ip) {
-			return nil, fmt.Errorf("domain %s resolved to private/loopback IP %s", hostname, ip)
-		}
+	if _, err := lookupSafeIPs(ctx, hostname); err != nil {
+		return nil, err
 	}
 
 	return parsed, nil
@@ -123,51 +113,42 @@ func NewSafeTransport(proxyManager *ProxyManager) *http.Transport {
 			return dialer.DialContext(ctx, network, addr)
 		}
 
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		if strings.EqualFold(host, "localhost") {
-			return nil, errors.New("access to localhost is prohibited")
-		}
-
-		if ip := net.ParseIP(host); ip != nil {
-			if IsPrivateOrLoopbackIP(ip) {
-				return nil, fmt.Errorf("access to private/loopback IP %s is prohibited", ip)
-			}
-			return dialer.DialContext(ctx, network, addr)
-		}
-
-		// Resolve domain and check every resolved IP
-		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-		if err != nil {
-			return nil, fmt.Errorf("dns resolve error: %w", err)
-		}
-
-		var firstErr error
-		for _, ip := range ips {
-			if IsPrivateOrLoopbackIP(ip) {
-				return nil, fmt.Errorf("access to private/loopback IP %s is prohibited", ip)
-			}
-		}
-
-		// Connect to the verified IP directly
-		for _, ip := range ips {
-			target := net.JoinHostPort(ip.String(), port)
-			conn, err := dialer.DialContext(ctx, network, target)
-			if err == nil {
-				return conn, nil
-			}
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-
-		return nil, firstErr
+		return dialSafe(ctx, network, addr, dialer.DialContext)
 	}
 
 	return transport
+}
+
+func dialSafe(ctx context.Context, network, addr string, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil, errors.New("access to localhost is prohibited")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if IsPrivateOrLoopbackIP(ip) {
+			return nil, fmt.Errorf("access to private/loopback IP %s is prohibited", ip)
+		}
+		return dial(ctx, network, addr)
+	}
+	ips, err := lookupSafeIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	// Dial the checked real address, never the hostname or its Fake-IP placeholder.
+	var firstErr error
+	for _, ip := range ips {
+		conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return nil, firstErr
 }
 
 // NewSafeDownloadClient applies SSRF protection, redirect checks and a timeout.

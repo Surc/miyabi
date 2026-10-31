@@ -28,6 +28,19 @@ func NewRestyClient(manager *ProxyManager, options RestyOptions) *resty.Client {
 	return resty.New().SetTimeout(options.Timeout).SetTransport(transport)
 }
 
+// NewSafeRestyClient applies the same URL, dial and redirect checks as safe
+// downloads, including a limit on the uncompressed response body.
+func NewSafeRestyClient(manager *ProxyManager, timeout time.Duration) *resty.Client {
+	safe := NewSafeDownloadClient(manager, timeout)
+	client := resty.New().SetTransport(safe.Transport).SetTimeout(timeout).
+		SetResponseBodyLimit(int(MaxSafeDownloadBytes))
+	client.GetClient().CheckRedirect = safe.CheckRedirect
+	return client.OnBeforeRequest(func(_ *resty.Client, request *resty.Request) error {
+		_, err := ValidateSafeURL(request.Context(), request.URL)
+		return err
+	})
+}
+
 // NewDirectRestyClient creates a client that never reads the proxy manager.
 func NewDirectRestyClient(options RestyOptions) *resty.Client {
 	return NewRestyClient(nil, options)

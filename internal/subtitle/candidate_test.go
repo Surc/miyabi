@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
+	"github.com/ppxb/miyabi/internal/netx"
 )
 
 func TestXunleiSearchParsing(t *testing.T) {
@@ -23,8 +24,12 @@ func TestXunleiSearchParsing(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewXunleiProvider(nil)
-	provider.endpoint = ts.URL
+	proxy, err := netx.NewProxyManager(netx.ProxyConfig{Enabled: true, URL: ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := NewXunleiProvider(proxy)
+	provider.endpoint = "http://93.184.216.34"
 	results, err := provider.Search(context.Background(), "SSIS-589")
 	if err != nil {
 		t.Fatal(err)
