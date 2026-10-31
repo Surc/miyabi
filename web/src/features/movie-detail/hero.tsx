@@ -12,11 +12,13 @@ import { movieDisplayTitle } from '@/components/movie/display-title'
 export function MovieHero({
   movie,
   libraryStatus,
+  extraBadges,
   extraStats,
   actions
 }: {
   movie: DiscoverMovieDetail | LibraryMovieDetail
   libraryStatus?: LibraryMovieDetail['scrape_status']
+  extraBadges?: ReactNode
   extraStats?: ReactNode
   actions?: ReactNode
 }) {
@@ -39,6 +41,7 @@ export function MovieHero({
             ) : (
               <MovieStateBadge movie={movie} hideViewed />
             )}
+            {extraBadges}
           </div>
           <h1 className="text-xl leading-snug font-bold tracking-normal sm:text-2xl">
             {movieDisplayTitle(movie.code, movie.title)}

@@ -20,6 +20,7 @@ type Dependencies struct {
 	Catalogue       CatalogueManager
 	MovieExtras     MovieExtrasManager
 	BrowseExtension BrowseExtensionManager
+	TopSettings     TopSettingsManager
 	Metadata        MetadataManager
 	MDCz            MDCzManager
 	Drive           DriveManager
@@ -76,6 +77,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	api.HEAD("/strm/play/:fileID/*filename", noStore(), strmHandler)
 
 	protected := api.Group("", authMiddleware(deps.Access))
+	registerTop(protected, deps.TopSettings)
 	registerMovieExtras(protected, deps.MovieExtras)
 	registerBrowseExtension(protected, deps.BrowseExtension)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)

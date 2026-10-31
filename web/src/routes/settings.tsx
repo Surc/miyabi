@@ -14,6 +14,7 @@ import { PrivacySection } from '@/features/settings/privacy-section'
 import { SubscriptionSection } from '@/features/settings/subscription-section'
 import { ScrapingSettings } from '@/features/settings/extensions/scraping-settings'
 import { TasksSection } from '@/features/settings/tasks-section'
+import { TopSection } from '@/features/settings/top-section'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage
@@ -29,6 +30,8 @@ function SettingsPage() {
           <AppearanceSection />
           <Separator />
           <PrivacySection />
+          <Separator />
+          <TopSection />
           <Separator />
           <NetworkSection />
           <Separator />

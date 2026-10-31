@@ -11,6 +11,7 @@ import { MovieRecommendations } from './recommendations'
 import { MovieDetailSkeleton } from './skeleton'
 import { MovieEmbyPlayback } from './extensions/emby-playback'
 import { MovieSynopsis } from './extensions/synopsis'
+import { MovieTopRankings } from './extensions/top-rankings'
 
 export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
   if ('libraryId' in movie) return <LibraryMovieDetail movieId={movie.libraryId} />
@@ -43,6 +44,7 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
       <MovieHero
         movie={detail.data}
         libraryStatus={detail.data.scrape_status}
+        extraBadges={<MovieTopRankings code={detail.data.code} />}
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
@@ -118,6 +120,7 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
       ) : null}
       <MovieHero
         movie={detail.data}
+        extraBadges={<MovieTopRankings code={detail.data.code} />}
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />

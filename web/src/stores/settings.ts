@@ -13,7 +13,8 @@ export const useSettingsStore = create<SettingsState>()(
       setNsfwMode: nsfwMode => set({ nsfwMode })
     }),
     {
-      name: 'miyabi-settings'
+      name: 'miyabi-settings',
+      partialize: state => ({ nsfwMode: state.nsfwMode })
     }
   )
 )

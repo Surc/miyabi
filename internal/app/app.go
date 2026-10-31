@@ -35,6 +35,7 @@ import (
 	"github.com/ppxb/miyabi/internal/strm"
 	"github.com/ppxb/miyabi/internal/subtitle"
 	"github.com/ppxb/miyabi/internal/tasks"
+	"github.com/ppxb/miyabi/internal/top"
 )
 
 const (
@@ -222,6 +223,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Catalogue:       catalogueSvc,
 		MovieExtras:     extras,
 		BrowseExtension: browseExtension,
+		TopSettings:     top.NewService(store.Client),
 		Metadata:        mdczSvc,
 		MDCz:            mdczSvc,
 		Drive:           driveSvc,
