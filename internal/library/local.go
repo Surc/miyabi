@@ -56,21 +56,30 @@ func (s *Service) scanLocal(ctx context.Context, id int, payload domain.ScanPayl
 	if root != payload.Source.Directory.ID {
 		return domain.E(domain.KindConflict, "Emby 本地目录已变更，请扫描当前目录", nil)
 	}
-	payload.Scan = domain.ScanProgress{Stage: "scanning", CurrentPath: root}
-	if err := scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks); err != nil {
-		return err
+	if payload.Checkpoint == "" {
+		payload.Scan = domain.ScanProgress{Stage: "scanning", CurrentPath: root}
+		if err := scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks); err != nil {
+			return err
+		}
+	}
+	previous := scan.LocalScanResult{
+		LastMediaPath: payload.Checkpoint,
+		MediaFiles:    payload.Scan.VideoFiles,
+		MoviesAdded:   payload.Scan.Movies,
 	}
 	report := func(result scan.LocalScanResult) error {
+		payload.Checkpoint = result.LastMediaPath
 		payload.Scan.FilesScanned = result.FilesScanned
 		payload.Scan.VideoFiles = result.MediaFiles
 		payload.Scan.MatchedFiles = result.MediaFiles
 		payload.Scan.Movies = result.MoviesAdded
 		return scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks)
 	}
-	_, err = s.localScanner.ScanWithProgress(ctx, root, report)
+	result, err := s.localScanner.ScanWithProgress(ctx, root, previous, report)
 	if err != nil {
 		return fmt.Errorf("scan Emby directory: %w", err)
 	}
 	payload.Scan.Stage = "done"
-	return scan.ReportScan(ctx, s.database.Task, id, payload, s.tasks)
+	result.LastMediaPath = ""
+	return report(*result)
 }

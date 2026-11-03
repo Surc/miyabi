@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/domain"
@@ -15,14 +18,16 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
 	"github.com/ppxb/miyabi/internal/export"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
+	"github.com/ppxb/miyabi/internal/tasks"
 )
 
 // LocalScanResult summarizes the outcome of a local directory scan.
 type LocalScanResult struct {
-	FilesScanned int `json:"files_scanned"`
-	MediaFiles   int `json:"media_files"`
-	MoviesAdded  int `json:"movies_added"`
-	NFORead      int `json:"nfo_read"`
+	FilesScanned  int    `json:"files_scanned"`
+	MediaFiles    int    `json:"media_files"`
+	MoviesAdded   int    `json:"movies_added"`
+	NFORead       int    `json:"nfo_read"`
+	LastMediaPath string `json:"-"`
 }
 
 // LocalScanner scans a local directory structure containing .strm and video files.
@@ -58,11 +63,15 @@ type dirGroup struct {
 
 // Scan walks rootDir and imports any found media (.strm, .mp4, etc.) into the SQLite database.
 func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResult, error) {
-	return s.ScanWithProgress(ctx, rootDir, nil)
+	return s.ScanWithProgress(ctx, rootDir, LocalScanResult{}, nil)
 }
 
-// ScanWithProgress reports committed batches after releasing export protection.
-func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, report func(LocalScanResult) error) (*LocalScanResult, error) {
+// ScanWithProgress resumes after the last committed media file and reports each
+// committed batch after releasing export protection.
+func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, previous LocalScanResult, report func(LocalScanResult) error) (*LocalScanResult, error) {
+	if err := tasks.Checkpoint(ctx, s.db); err != nil {
+		return nil, err
+	}
 	rootDir, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve local directory: %w", err)
@@ -79,15 +88,24 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, rep
 		return nil, fmt.Errorf("local path %s is not a directory", rootDir)
 	}
 
-	result := &LocalScanResult{}
+	result := previous
+	result.FilesScanned = 0
 	dirs := make(map[string]*dirGroup)
+	const pauseCheckInterval = 500 * time.Millisecond
+	nextPauseCheck := time.Now().Add(pauseCheckInterval)
 
 	err = filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if now := time.Now(); !now.Before(nextPauseCheck) {
+			if err := tasks.Checkpoint(ctx, s.db); err != nil {
+				return err
+			}
+			nextPauseCheck = now.Add(pauseCheckInterval)
 		}
 		if d.IsDir() || d.Type()&os.ModeSymlink != 0 {
 			return nil
@@ -122,22 +140,34 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, rep
 
 	batch := make([]localMedia, 0, localScanBatchSize)
 	flush := func() error {
-		if err := s.ingestBatch(ctx, rootDir, batch, result); err != nil {
+		if err := s.ingestBatch(ctx, rootDir, batch, &result); err != nil {
 			return err
 		}
+		result.MediaFiles += len(batch)
+		result.LastMediaPath = batch[len(batch)-1].path
 		if report != nil {
-			return report(*result)
+			return report(result)
 		}
 		return nil
 	}
-	for dir, group := range dirs {
+	var resumeDir, resumeName string
+	if previous.LastMediaPath != "" {
+		resumeDir, resumeName = filepath.Dir(previous.LastMediaPath), filepath.Base(previous.LastMediaPath)
+	}
+	// WalkDir supplies names in lexical order within each directory. Sorting the
+	// directories makes the saved cursor independent of map iteration order.
+	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if len(group.mediaFiles) == 0 {
+		if dir < resumeDir {
 			continue
 		}
+		group := dirs[dir]
 		for _, media := range group.mediaFiles {
+			if dir == resumeDir && media.Name() <= resumeName {
+				continue
+			}
 			mediaPath := filepath.Join(dir, media.Name())
 			stem := strings.TrimSuffix(media.Name(), filepath.Ext(media.Name()))
 
@@ -148,8 +178,6 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, rep
 			if !ok || code == "" {
 				continue
 			}
-			result.MediaFiles++
-
 			posterPath, fanartPath := findMatchingArtwork(dir, stem, group.imageFiles)
 			batch = append(batch, localMedia{
 				path: mediaPath, name: media.Name(), size: media.Size(), code: code,
@@ -171,7 +199,7 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, rep
 			return nil, err
 		}
 	}
-	return result, nil
+	return &result, nil
 }
 
 func isImageFile(name string) bool {

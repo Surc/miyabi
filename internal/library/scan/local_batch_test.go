@@ -57,7 +57,7 @@ func TestLocalImportAllowsExportsBetweenCommittedBatches(t *testing.T) {
 	var exported chan error
 	pending := false
 	reports := 0
-	result, err := scanner.ScanWithProgress(ctx, root, func(progress LocalScanResult) error {
+	result, err := scanner.ScanWithProgress(ctx, root, LocalScanResult{}, func(progress LocalScanResult) error {
 		reports++
 		if reports != 1 {
 			return nil
@@ -101,7 +101,7 @@ func TestLocalImportStopsWhenExportDirectoryChangesBetweenBatches(t *testing.T) 
 		writeLocalFile(t, root, fmt.Sprintf("TEST-%03d.strm", i), []byte("stream"))
 	}
 	next := t.TempDir()
-	_, err := scanner.ScanWithProgress(t.Context(), root, func(LocalScanResult) error {
+	_, err := scanner.ScanWithProgress(t.Context(), root, LocalScanResult{}, func(LocalScanResult) error {
 		manager.Set(export.Config{EmbyDir: next})
 		return nil
 	})
