@@ -66,6 +66,18 @@ func TestPartialRefreshCannotReplaceExistingMetadata(t *testing.T) {
 	}
 }
 
+func TestPartialMetadataStillRejectsAmbiguousJavDB(t *testing.T) {
+	s := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"protocol": Protocol, "revision": EngineRevision, "partial": true, "detail": map[string]string{"code": "ABF-027", "title": "Partial title"}})
+	})
+	s.catalogue = func(context.Context, domain.MovieRef) (domain.MovieMetadata, error) {
+		return domain.MovieMetadata{}, metadata.ErrAmbiguousJavDB
+	}
+	if _, err := s.Resolve(t.Context(), domain.MovieRef{Code: "ABF-027"}); !errors.Is(err, metadata.ErrAmbiguousJavDB) {
+		t.Fatalf("partial metadata accepted despite ambiguous JavDB: %v", err)
+	}
+}
+
 func TestMetadataChecksProtocolIdentityAndPreservesKnownCatalogueID(t *testing.T) {
 	for _, scenario := range []struct {
 		code, revision string

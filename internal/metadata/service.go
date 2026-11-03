@@ -21,6 +21,9 @@ import (
 
 var ErrNotFound = errors.New("metadata not found")
 
+// ErrAmbiguousJavDB indicates that an unlinked number matches multiple JavDB entries.
+var ErrAmbiguousJavDB = domain.E(domain.KindConflict, "JavDB 同番号对应多个影片", nil)
+
 // Source returns confirmed identities, never the closest unverified search hit.
 type Source interface {
 	ID() string

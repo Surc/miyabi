@@ -182,10 +182,13 @@ func (s *Service) Resolve(ctx context.Context, ref domain.MovieRef) (domain.Movi
 		return domain.MovieMetadata{}, ctx.Err()
 	}
 	if err != nil {
+		if !result.Partial && errors.Is(err, metadata.ErrAmbiguousJavDB) {
+			return result.MovieMetadata, nil
+		}
 		if domain.IsKind(err, domain.KindConflict) || (ref.Refresh && !errors.Is(err, metadata.ErrNotFound)) {
 			return domain.MovieMetadata{}, err
 		}
-		return result, nil
+		return result.MovieMetadata, nil
 	}
 	detail := catalogue.Detail
 	if !codeid.IsFormatEquivalent(ref.Code, detail.Code) || (ref.JavDBID != "" && ref.JavDBID != detail.ID) {
@@ -197,30 +200,31 @@ func (s *Service) Resolve(ctx context.Context, ref domain.MovieRef) (domain.Movi
 		result.Detail.Sources = append(result.Detail.Sources, domain.SourceID{Provider: "javdb", ID: detail.ID})
 	}
 	result.Detail.Rating, result.Detail.RatingSource, result.Detail.RatingMax = detail.Rating, detail.RatingSource, detail.RatingMax
-	return result, nil
+	return result.MovieMetadata, nil
+}
+
+type bridgeMetadata struct {
+	Health
+	domain.MovieMetadata
+	Partial bool `json:"partial"`
 }
 
 // Synopsis uses this bridge-only path: opening a detail does not perform a
 // second catalogue lookup or run the native artwork pipeline.
-func (s *Service) resolve(ctx context.Context, cfg Settings, ref domain.MovieRef) (domain.MovieMetadata, error) {
-	var result struct {
-		Health
-		Partial bool                    `json:"partial"`
-		Detail  domain.MovieDetail      `json:"detail"`
-		Images  []domain.ImageCandidate `json:"images"`
-	}
+func (s *Service) resolve(ctx context.Context, cfg Settings, ref domain.MovieRef) (bridgeMetadata, error) {
+	var result bridgeMetadata
 	if err := s.json(ctx, cfg, http.MethodPost, "/v1/metadata", map[string]any{"code": ref.Code, "translate": cfg.Translate}, &result); err != nil {
-		return domain.MovieMetadata{}, err
+		return bridgeMetadata{}, err
 	}
 	if result.Protocol != Protocol || result.Revision != EngineRevision || !codeid.IsFormatEquivalent(ref.Code, result.Detail.Code) || strings.TrimSpace(result.Detail.Title) == "" {
-		return domain.MovieMetadata{}, domain.E(domain.KindUpstream, "MDCz 返回的影片身份或协议版本不匹配", nil)
+		return bridgeMetadata{}, domain.E(domain.KindUpstream, "MDCz 返回的影片身份或协议版本不匹配", nil)
 	}
 	if ref.Refresh && result.Partial {
-		return domain.MovieMetadata{}, domain.E(domain.KindUpstream, "MDCz 部分来源未完成，暂不覆盖已有资料，请稍后重试", nil)
+		return bridgeMetadata{}, domain.E(domain.KindUpstream, "MDCz 部分来源未完成，暂不覆盖已有资料，请稍后重试", nil)
 	}
 	for _, candidate := range result.Images {
 		if candidate.Provider != "mdcz" || !validImageID(candidate.URL) {
-			return domain.MovieMetadata{}, domain.E(domain.KindUpstream, "MDCz 图片引用无效", nil)
+			return bridgeMetadata{}, domain.E(domain.KindUpstream, "MDCz 图片引用无效", nil)
 		}
 	}
 	result.Detail.Code = codeid.Normalize(ref.Code)
@@ -232,13 +236,13 @@ func (s *Service) resolve(ctx context.Context, cfg Settings, ref domain.MovieRef
 	if result.Detail.Plot != "" {
 		body, err := json.Marshal(Synopsis{Enabled: true, Plot: result.Detail.Plot, ConfigurationID: result.ConfigurationID})
 		if err != nil {
-			return domain.MovieMetadata{}, err
+			return bridgeMetadata{}, err
 		}
 		if err := atomicfile.WriteFile(s.synopsisPath(cfg, ref.Code), body, 0o600); err != nil {
-			return domain.MovieMetadata{}, err
+			return bridgeMetadata{}, err
 		}
 	}
-	return domain.MovieMetadata{Detail: result.Detail, Images: result.Images}, nil
+	return result, nil
 }
 
 func validImageID(value string) bool {

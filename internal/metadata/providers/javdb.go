@@ -57,7 +57,7 @@ func (s *JavDB) Fetch(ctx context.Context, ref domain.MovieRef) (domain.MovieMet
 					continue
 				}
 				if id != "" && id != candidate.ID {
-					return domain.MovieMetadata{}, domain.E(domain.KindConflict, "JavDB 同番号对应多个影片", nil)
+					return domain.MovieMetadata{}, metadata.ErrAmbiguousJavDB
 				}
 				id = candidate.ID
 			}
