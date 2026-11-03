@@ -18,6 +18,7 @@ import (
 	mediaimage "github.com/ppxb/miyabi/internal/image"
 	"github.com/ppxb/miyabi/internal/library/scrape"
 	"github.com/ppxb/miyabi/internal/nfo"
+	"github.com/ppxb/miyabi/internal/tasks"
 )
 
 const localScanBatchSize = 32
@@ -119,6 +120,9 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 				break
 			}
 		}
+	}
+	if err := tasks.Checkpoint(ctx, s.db); err != nil {
+		return err
 	}
 	codes, fileIDs := make([]string, len(batch)), make([]string, len(batch))
 	for i := range batch {

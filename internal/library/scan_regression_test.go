@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/file"
@@ -20,6 +21,101 @@ import (
 	"github.com/ppxb/miyabi/internal/pan"
 	"github.com/ppxb/miyabi/internal/tasks"
 )
+
+func TestLocalScanPausesAndResumesAfterCommittedMedia(t *testing.T) {
+	ctx, root := t.Context(), t.TempDir()
+	store, err := database.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	taskService := tasks.NewService(store.Client, tasks.NewRegistry())
+	lib := New(store.Client, nil, taskService, nil, Options{ExportManager: export.NewManager(export.Config{EmbyDir: root})})
+	const mediaCount = 70
+	for _, dir := range []string{"a", "z"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range mediaCount {
+		dir := "a"
+		if i >= mediaCount/2 {
+			dir = "z"
+		}
+		path := filepath.Join(root, dir, fmt.Sprintf("ABP-%03d.strm", i+1))
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("http://localhost/api/strm/play/remote-%d", i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queued, err := lib.startLocalScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := taskService.Queue()
+	kinds := []tasks.Kind{tasks.KindScan}
+	job, err := queue.Claim(ctx, kinds)
+	if err != nil || job == nil || job.ID != queued.ID {
+		t.Fatalf("claim local scan: %+v, %v", job, err)
+	}
+	pauseRequested := false
+	store.Client.Task.Use(func(next ent.Mutator) ent.Mutator {
+		return ent.MutateFunc(func(ctx context.Context, mutation ent.Mutation) (ent.Value, error) {
+			value, err := next.Mutate(ctx, mutation)
+			if err != nil || pauseRequested {
+				return value, err
+			}
+			body, ok := mutation.(*ent.TaskMutation).Payload()
+			if !ok {
+				return value, nil
+			}
+			payload, err := tasks.DecodePayload[domain.ScanPayload](body)
+			if err == nil && payload.Scan.VideoFiles > 0 {
+				pauseRequested = true
+				err = taskService.SetLibraryPaused(ctx, true)
+			}
+			return value, err
+		})
+	})
+	scanErr := lib.Scan(ctx, *job)
+	if !errors.Is(scanErr, tasks.ErrPaused) {
+		t.Fatalf("local scan ignored pause: %v", scanErr)
+	}
+	if err := queue.Finish(ctx, job.ID, scanErr); err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Client.Task.GetX(ctx, job.ID)
+	checkpoint, err := tasks.DecodePayload[domain.ScanPayload](saved.Payload)
+	count := store.Client.File.Query().CountX(ctx)
+	if err != nil || saved.Status != task.StatusQueued || saved.RetryCount != 0 || checkpoint.Checkpoint == "" ||
+		count == 0 || count >= mediaCount || checkpoint.Scan.VideoFiles != count {
+		t.Fatalf("pause did not preserve the committed batch: status=%s files=%d payload=%+v err=%v", saved.Status, count, checkpoint, err)
+	}
+	if claimed, err := queue.Claim(ctx, kinds); err != nil || claimed != nil {
+		t.Fatalf("claimed paused scan: %+v, %v", claimed, err)
+	}
+	// Re-reading an already committed STRM on resume would import this new ID.
+	if err := os.WriteFile(filepath.Join(root, "a", "ABP-001.strm"), []byte("http://localhost/api/strm/play/replayed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskService.SetLibraryPaused(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := queue.Claim(ctx, kinds)
+	if err != nil || resumed == nil || resumed.ID != job.ID {
+		t.Fatalf("resume original scan: %+v, %v", resumed, err)
+	}
+	if err := lib.Scan(ctx, *resumed); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := tasks.DecodePayload[domain.ScanPayload](store.Client.Task.GetX(ctx, resumed.ID).Payload)
+	if err != nil || finished.Checkpoint != "" || finished.Scan.Stage != "done" ||
+		finished.Scan.FilesScanned != mediaCount || finished.Scan.VideoFiles != mediaCount || finished.Scan.Movies != mediaCount {
+		t.Fatalf("resume lost scan progress: %+v, %v", finished, err)
+	}
+	if count := store.Client.File.Query().CountX(ctx); count != mediaCount || store.Client.File.Query().Where(file.FileIDEQ("replayed")).ExistX(ctx) {
+		t.Fatalf("resume re-imported committed files: %d files", count)
+	}
+}
 
 func TestScanPausesAtDirectoryCheckpointAndResumesRemainingWork(t *testing.T) {
 	lib, client := panConcurrencyFixture(t)
