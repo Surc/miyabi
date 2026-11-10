@@ -119,6 +119,14 @@ func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 // Initial reads return last-known data immediately. A separate refresh request
 // revalidates only stale values; failures retain the last successful snapshot.
 func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
+	result, err := loadBrowseRecord(ctx, s, namespace, key, ttl, refresh, load)
+	if err != nil && ctx.Err() == nil {
+		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
+	}
+	return result, err
+}
+
+func loadBrowseRecord[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
 	if err := ctx.Err(); err != nil {
 		return BrowseCached[T]{}, err
 	}
@@ -162,7 +170,10 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 		}
 		if complete {
 			if err := s.store.write(namespace, key, browseRecord{result.UpdatedAt, body}, generation); err != nil {
-				return nil, err
+				if namespace != "images" {
+					return nil, err
+				}
+				slog.WarnContext(ctx, "persist browse image", "error", err)
 			}
 		}
 		encoded, err := json.Marshal(result)
@@ -183,7 +194,7 @@ func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key s
 			slog.WarnContext(ctx, "discovery cache refresh failed", "namespace", namespace, "error", err)
 			return cached, nil
 		}
-		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
+		return result, err
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err
@@ -317,20 +328,6 @@ func (s *BrowseExtension) Rating(ctx context.Context, source, id string, refresh
 		}
 		return rating, true, err
 	})
-}
-func (s *BrowseExtension) Image(ctx context.Context, id string) (domain.Media, error) {
-	_, _, generation := s.store.read("works", id)
-	ctx = context.WithValue(ctx, browseGenerationKey{}, browseGeneration(ctx, generation))
-	ref, err := s.reference(ctx, id)
-	if err != nil {
-		return domain.Media{}, err
-	}
-	// Target URLs come only from verified metadata, never from request parameters.
-	result, err := browseLoad(ctx, s, "images", id+":"+ref.Cover, 0, false, func(ctx context.Context) (domain.Media, bool, error) {
-		media, err := s.source.Media(ctx, ref.Cover)
-		return media, true, err
-	})
-	return result.Data, err
 }
 
 // Lists already supply trustworthy cover URLs and codes. Images and optional

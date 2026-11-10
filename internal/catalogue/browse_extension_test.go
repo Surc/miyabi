@@ -115,12 +115,74 @@ func TestBrowseCachePersistsResourcesAndOnlyLoadsImagesOnDemand(t *testing.T) {
 	if err != nil || string(image.Body) != "image" {
 		t.Fatalf("image=%+v %v", image, err)
 	}
+	image, err = restarted.Media(t.Context(), "https://example.com/cover.jpg")
+	if err != nil || string(image.Body) != "image" {
+		t.Fatalf("proxy did not reuse the cached cover: image=%+v %v", image, err)
+	}
 	if f.details != 1 || f.magnets != 1 || f.images != 1 {
 		t.Fatalf("calls %+v", f)
 	}
 	stats, err := restarted.CacheStats()
 	if err != nil || stats.Movies != 1 || stats.Images != 1 || stats.Bytes == 0 {
 		t.Fatalf("stats %+v %v", stats, err)
+	}
+}
+
+func TestBrowseCoverReusesLegacyCache(t *testing.T) {
+	f := &browseFake{}
+	s, _ := newBrowseTest(t, f)
+	if _, err := s.BrowsePage(t.Context(), domain.BrowseOptions{}, false); err != nil {
+		t.Fatal(err)
+	}
+	url := "https://example.com/cover.jpg"
+	body, err := json.Marshal(domain.Media{ContentType: "image/png", Body: []byte("legacy cover")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.write("images", "film:"+url, browseRecord{time.Now(), body}, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []func() (domain.Media, error){
+		func() (domain.Media, error) { return s.Image(t.Context(), "film") },
+		func() (domain.Media, error) { return s.Media(t.Context(), url) },
+	} {
+		image, err := read()
+		if err != nil || string(image.Body) != "legacy cover" || f.images != 0 {
+			t.Fatalf("image=%+v upstream calls=%d error=%v", image, f.images, err)
+		}
+	}
+}
+
+func TestLibraryPreviewCacheKeepsProvidersSeparateAndRetriesFailures(t *testing.T) {
+	f := &browseFake{}
+	s, directory := newBrowseTest(t, f)
+	candidate := domain.ImageCandidate{Provider: "fanza", URL: "https://example.com/preview.jpg", Role: "preview"}
+	calls := 0
+	fetch := func(_ context.Context, candidate domain.ImageCandidate) (domain.Media, error) {
+		calls++
+		if calls == 1 {
+			return domain.Media{}, domain.E(domain.KindInvalid, "image unavailable", nil)
+		}
+		return domain.Media{ContentType: "image/jpeg", Body: []byte(candidate.Provider)}, nil
+	}
+	if _, err := s.PreviewImage(t.Context(), candidate, fetch); !domain.IsKind(err, domain.KindInvalid) {
+		t.Fatalf("provider error changed: %v", err)
+	}
+	if _, err := s.PreviewImage(t.Context(), candidate, fetch); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewBrowseExtension(directory, f, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := restarted.PreviewImage(t.Context(), candidate, fetch)
+	if err != nil || string(image.Body) != "fanza" || calls != 2 {
+		t.Fatalf("preview=%+v provider calls=%d error=%v", image, calls, err)
+	}
+	candidate.Provider = "fc2"
+	image, err = restarted.PreviewImage(t.Context(), candidate, fetch)
+	if err != nil || string(image.Body) != "fc2" || calls != 3 {
+		t.Fatalf("preview=%+v provider calls=%d error=%v", image, calls, err)
 	}
 }
 func TestBrowseCacheExpiresDynamicFieldsWithoutDeletingMetadata(t *testing.T) {

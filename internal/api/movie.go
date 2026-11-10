@@ -58,7 +58,7 @@ func libraryMovieHandler(library LibraryManager) gin.HandlerFunc {
 	}
 }
 
-func libraryPreviewHandler(library LibraryManager, metadata MetadataManager) gin.HandlerFunc {
+func libraryPreviewHandler(library LibraryManager, metadata MetadataManager, cache BrowseExtensionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uri, ok := bindURI[struct {
 			ID    int `uri:"id" binding:"min=1"`
@@ -72,7 +72,13 @@ func libraryPreviewHandler(library LibraryManager, metadata MetadataManager) gin
 			c.Error(err)
 			return
 		}
-		media, err := metadata.Image(c.Request.Context(), candidate)
+		ctx := c.Request.Context()
+		var media domain.Media
+		if cache != nil {
+			media, err = cache.PreviewImage(ctx, candidate, metadata.Image)
+		} else {
+			media, err = metadata.Image(ctx, candidate)
+		}
 		if err != nil {
 			c.Error(err)
 			return

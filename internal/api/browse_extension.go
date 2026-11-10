@@ -21,6 +21,7 @@ type BrowseExtensionManager interface {
 	CachedRating(string, string) *catalogue.BrowseCached[domain.ExternalRating]
 	Tags(context.Context, domain.Zone, bool) (catalogue.BrowseCached[[]domain.TagCategory], error)
 	Media(context.Context, string) (domain.Media, error)
+	PreviewImage(context.Context, domain.ImageCandidate, func(context.Context, domain.ImageCandidate) (domain.Media, error)) (domain.Media, error)
 	ExportCache(context.Context, io.Writer) error
 	ImportCache(context.Context, io.ReaderAt, int64) (catalogue.BrowseCacheStats, error)
 	Image(context.Context, string) (domain.Media, error)
@@ -146,6 +147,8 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 			c.Error(err)
 			return
 		}
+		c.Header("Cache-Control", "private, max-age=300")
+		c.Writer.Header().Add("Vary", "Cookie")
 		c.Data(http.StatusOK, media.ContentType, media.Body)
 	})
 	group.GET("/settings", func(c *gin.Context) { respond(c, service.Settings(), nil) })

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ppxb/miyabi/internal/codeid"
@@ -55,13 +54,4 @@ func (s *BrowseExtension) RatingByCode(ctx context.Context, code string, refresh
 		rating, err := s.ratings.JavLibraryRating(ctx, code)
 		return rating, true, err
 	})
-}
-
-// Media also retains viewed previews and actor pictures fetched by the image proxy.
-func (s *BrowseExtension) Media(ctx context.Context, url string) (domain.Media, error) {
-	result, err := browseLoad(ctx, s, "images", "url:"+url, 0, false, func(ctx context.Context) (domain.Media, bool, error) {
-		media, err := s.source.Media(ctx, url)
-		return media, strings.HasPrefix(media.ContentType, "image/"), err
-	})
-	return result.Data, err
 }

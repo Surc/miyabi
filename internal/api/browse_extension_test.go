@@ -65,7 +65,14 @@ func TestBrowseExtensionRoutesPreserveValidationAndAuthentication(t *testing.T) 
 			if w.Code != test.status {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body)
 			}
-			if test.status == 200 && (s.calls != 1 || !strings.Contains(w.Header().Get("Cache-Control"), "no-store")) {
+			cacheControl := "no-store"
+			if test.path == "movies/film/image" {
+				cacheControl = "private, max-age=300"
+				if w.Header().Get("Vary") != "Cookie" {
+					t.Fatalf("cover cache must vary by authentication cookie: %v", w.Header())
+				}
+			}
+			if test.status == 200 && (s.calls != 1 || w.Header().Get("Cache-Control") != cacheControl) {
 				t.Fatalf("calls=%d headers=%v", s.calls, w.Header())
 			}
 			if test.status != 200 && s.calls != 0 {

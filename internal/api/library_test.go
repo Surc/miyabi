@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ppxb/miyabi/internal/catalogue"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/library"
 )
@@ -98,6 +99,30 @@ func TestLibraryPreviewRoutesSavedSourceAndRejectsInvalidTargets(t *testing.T) {
 				t.Fatalf("invalid target fetched an image: %+v", metadata.received)
 			}
 		})
+	}
+}
+
+func TestLibraryPreviewReusesNASCacheAcrossBrowserCacheKeys(t *testing.T) {
+	cache, err := catalogue.NewBrowseExtension(t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := domain.ImageCandidate{Provider: "fanza", URL: "https://image.example/preview.jpg", Role: "preview"}
+	metadata := &metadataImageStub{}
+	router := NewRouter(Dependencies{
+		Access: NewAccessGateService("", ""), Library: &libraryPreviewStub{candidate: candidate},
+		Metadata: metadata, BrowseExtension: cache,
+	})
+	for _, version := range []string{"1", "2"} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/library/movies/42/previews/0?v="+version, nil))
+		if response.Code != http.StatusOK || response.Body.String() != "preview bytes" {
+			t.Fatalf("preview v%s: status=%d body=%s", version, response.Code, response.Body)
+		}
+		if (version == "1" && metadata.received != candidate) || (version == "2" && metadata.received != (domain.ImageCandidate{})) {
+			t.Fatalf("unexpected provider fetch for preview v%s: %+v", version, metadata.received)
+		}
+		metadata.received = domain.ImageCandidate{}
 	}
 }
 
