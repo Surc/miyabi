@@ -7,6 +7,7 @@ import { imageURL } from '@/api/client'
 import { useDiscoverMagnets, useDiscoverMovie, useResolveDiscoverMovie } from '@/api/discover'
 import { useLibraryMovie, type LibraryMovieDetail } from '@/api/library'
 import { MovieDetailContent } from '@/features/movie-detail/content'
+import { MovieMetadata } from '@/features/movie-detail/metadata'
 
 vi.mock('@/api/discover', () => ({
   useDiscoverMovie: vi.fn(),
@@ -87,6 +88,20 @@ test('library preview URLs keep their own provider route and revision', () => {
   expect(imageURL(url)).toBe(url)
   expect(imageURL('https://image.example/preview.jpg')).toContain('/api/image?')
   expect(imageURL('/api/library/movies/42/previews/0/../../other')).toContain('/api/image?')
+})
+
+test.each([
+  ['female', ' text-red-700 dark:text-red-400'],
+  ['male', ' text-blue-700 dark:text-blue-400'],
+  ['unknown', ''],
+  [undefined, '']
+])('actor names use the expected color for gender %s', (gender, color) => {
+  const html = renderToStaticMarkup(
+    <MovieMetadata movie={{ actors: [{ name: 'Actor', gender }], tags: [] }} />
+  )
+  expect(html).toContain(
+    `class="inline-flex max-w-full items-center gap-3${color}"><span class="max-w-full break-words">Actor`
+  )
 })
 
 test('known JavDB identities open details without a code lookup', () => {

@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import type { JavDBEntityType, JavDBZone } from '@/api/discover'
@@ -10,7 +11,7 @@ export type MovieMetadataValues = {
   maker?: MetadataEntity
   series?: MetadataEntity
   director?: MetadataEntity
-  actors: MetadataEntity[]
+  actors: (MetadataEntity & { gender?: string })[]
   tags: MetadataEntity[]
   zone?: JavDBZone | 'unknown'
 }
@@ -33,7 +34,11 @@ export function MovieMetadata({ movie }: { movie: MovieMetadataValues }) {
           {movie.actors.map((actor, index) => (
             <span
               key={`${actor.provider}:${actor.id || actor.name}:${index}`}
-              className="inline-flex max-w-full items-center gap-3"
+              className={cn(
+                'inline-flex max-w-full items-center gap-3',
+                actor.gender === 'female' && 'text-red-700 dark:text-red-400',
+                actor.gender === 'male' && 'text-blue-700 dark:text-blue-400'
+              )}
             >
               {index > 0 ? <span className="text-muted-foreground">/</span> : null}
               <EntityLink kind="actor" entity={actor} />
