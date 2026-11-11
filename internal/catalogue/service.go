@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +42,9 @@ type Service struct {
 	tags    *responseCache[[]domain.TagCategory]
 	magnets *responseCache[[]domain.Magnet]
 
-	persistRouteMu sync.Mutex
+	persistRouteMu   sync.Mutex
+	javdbSessionMu   sync.Mutex
+	javdbSessionPath string
 	// Used only to avoid redundant database writes; live state belongs to JavDB.
 	lastSavedRoute persistedRoute
 }
@@ -50,6 +54,7 @@ type Service struct {
 func New(
 	ctx context.Context,
 	db *ent.Client,
+	dataDir string,
 	proxy *netx.ProxyManager,
 	local LocalState,
 	supplement JavBusSource,
@@ -72,6 +77,11 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	sessionPath := filepath.Join(dataDir, "javdb-session")
+	token, err := os.ReadFile(sessionPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read JavDB session: %w", err)
+	}
 	client, err := javdb.New(javdb.Options{
 		DeviceUUID:    deviceUUID,
 		Proxy:         proxy,
@@ -81,8 +91,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	client.SetSessionToken(string(token))
 
 	service := newService(db, client, supplement, local, route)
+	service.javdbSessionPath = sessionPath
 	service.proxy = proxy
 	return service, nil
 }

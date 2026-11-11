@@ -35,8 +35,10 @@ func TestTransportBuildsSignedAppRequest(t *testing.T) {
 	transport := &transport{host: "https://api.example", deviceUUID: "device-1"}
 	request, err := transport.newRequest(
 		context.Background(),
+		http.MethodGet,
 		"/api/v2/search",
 		url.Values{"q": {"SSIS-589"}},
+		nil,
 		1784134914,
 	)
 	if err != nil {

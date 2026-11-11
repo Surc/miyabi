@@ -30,7 +30,7 @@ type jsonTransport interface {
 	closeIdleConnections()
 }
 
-// Client is the anonymous JavDB App API client.
+// Client is the JavDB App API client.
 type Client struct {
 	options       Options
 	limiter       *rate.Limiter
@@ -38,6 +38,7 @@ type Client struct {
 	cooldownUntil time.Time
 	media         *resty.Client
 	current       atomic.Pointer[routeState]
+	sessionToken  atomic.Pointer[string]
 	lastProbe     atomic.Pointer[[]RouteCandidate]
 	routes        singleflight.Group
 	selectionMu   sync.Mutex
@@ -231,7 +232,7 @@ func (c *Client) getJSON(
 		if err := c.waitRequest(ctx, deadline); err != nil {
 			return err
 		}
-		if current := c.current.Load(); current != nil {
+		if current := c.usableRoute(); current != nil {
 			state = current
 		}
 		err = state.transport.getJSON(ctx, path, params, destination)
@@ -264,11 +265,11 @@ func (c *Client) getJSON(
 }
 
 func (c *Client) ensureRoute(ctx context.Context) (*routeState, error) {
-	if state := c.current.Load(); state != nil {
+	if state := c.usableRoute(); state != nil {
 		return state, nil
 	}
 	return c.waitRoute(ctx, "initialize", func(ctx context.Context) (*routeState, error) {
-		if state := c.current.Load(); state != nil {
+		if state := c.usableRoute(); state != nil {
 			return state, nil
 		}
 		return c.selector(ctx, routeSelection{full: true, hosts: c.routeHosts()})
@@ -277,7 +278,7 @@ func (c *Client) ensureRoute(ctx context.Context) (*routeState, error) {
 
 func (c *Client) replaceFailedRoute(ctx context.Context, failed *routeState) (*routeState, error) {
 	return c.waitRoute(ctx, "recover", func(ctx context.Context) (*routeState, error) {
-		if current := c.current.Load(); current != failed {
+		if current := c.usableRoute(); current != nil && current != failed {
 			return current, nil
 		}
 		return c.selector(ctx, routeSelection{hosts: c.routeHosts()})
@@ -309,6 +310,7 @@ func (c *Client) waitRoute(ctx context.Context, key string, selectFn func(contex
 }
 
 func (c *Client) selectAndInstall(ctx context.Context, options routeSelection) (*routeState, error) {
+	options.bootstrapOnly = c.HasSession()
 	result, err := selectRoute(ctx, options, c.probe)
 	// Publish completed measurements even if every candidate failed.
 	if result.Candidates != nil {
@@ -324,6 +326,9 @@ func (c *Client) installRoute(ctx context.Context, status RouteStatus) (*routeSt
 	transport, err := routeTransport(status.Host, c.fingerprint, c.options)
 	if err != nil {
 		return nil, err
+	}
+	if trustedSessionHost(transport.host) {
+		transport.token = c.token
 	}
 	if err := ctx.Err(); err != nil {
 		transport.closeIdleConnections()

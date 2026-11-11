@@ -33,8 +33,9 @@ const (
 var backupKey, backupIV = backupKeyMaterial()
 
 type routeSelection struct {
-	full  bool
-	hosts []string
+	full          bool
+	hosts         []string
+	bootstrapOnly bool
 }
 
 type startupData struct {
@@ -97,6 +98,9 @@ func selectRoute(ctx context.Context, options routeSelection, check probeFunc) (
 	}
 	for _, host := range bootstrapHosts {
 		start(host)
+	}
+	if options.bootstrapOnly {
+		options.hosts = nil
 	}
 	for _, host := range options.hosts {
 		start(host)
@@ -163,7 +167,7 @@ func selectRoute(ctx context.Context, options routeSelection, check probeFunc) (
 			if best.host == "" || result.latency < best.latency {
 				best = result
 			}
-			if options.full || len(dynamic) == 0 {
+			if !options.bootstrapOnly && (options.full || len(dynamic) == 0) {
 				hosts, err := apiHostsFromStartup(result.startup)
 				if err != nil {
 					failures = append(failures, fmt.Errorf("%s: %w", result.host, err))

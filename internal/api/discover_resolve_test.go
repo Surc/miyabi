@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javdb"
 )
 
 type discoverResolverStub struct {
@@ -36,6 +37,7 @@ func TestDiscoverResolveMovie(t *testing.T) {
 		{name: "oversized code", query: "?code=" + strings.Repeat("a", 201), status: http.StatusBadRequest},
 		{name: "ambiguous movie", query: "?code=ABP-123", code: "ABP-123", err: domain.E(domain.KindConflict, "无法唯一匹配影片", nil), status: http.StatusConflict},
 		{name: "upstream failure", query: "?code=ABP-123", code: "ABP-123", err: domain.E(domain.KindUpstream, "来源查询失败", nil), status: http.StatusBadGateway},
+		{name: "JavDB login required", query: "?code=ABP-123", code: "ABP-123", err: &javdb.APIError{Action: "JWTVerificationError"}, status: http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &discoverResolverStub{err: tc.err}
@@ -48,6 +50,9 @@ func TestDiscoverResolveMovie(t *testing.T) {
 			var body map[string]any
 			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
+			}
+			if tc.name == "JavDB login required" && body["code"] != "JAVDB_LOGIN_REQUIRED" {
+				t.Fatalf("missing JavDB login error code: %v", body)
 			}
 			if tc.status == http.StatusOK {
 				if body["id"] != "confirmed-id" {

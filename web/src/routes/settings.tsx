@@ -8,6 +8,7 @@ import { AppearanceSection } from '@/features/settings/appearance-section'
 import { DataSection } from '@/features/settings/data-section'
 import { BrowseCacheSection } from '@/features/discover/extensions/cache-settings'
 import { EmbySection } from '@/features/settings/emby-section'
+import { JavDBSessionSection } from '@/features/settings/extensions/javdb-session'
 import { NetworkSection } from '@/features/settings/network-section'
 import { PanSection } from '@/features/settings/pan-section'
 import { PrivacySection } from '@/features/settings/privacy-section'
@@ -35,6 +36,8 @@ function SettingsPage() {
           <TopSection />
           <Separator />
           <NetworkSection />
+          <Separator />
+          <JavDBSessionSection />
           <Separator />
           <ScrapingSettings />
           <Separator />

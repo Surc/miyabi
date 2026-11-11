@@ -17,6 +17,7 @@ type transport struct {
 	host       string
 	client     netx.FingerprintHTTPClient
 	deviceUUID string
+	token      func() string
 }
 
 // routeTransport uses the managed client for normal API requests. Probe
@@ -75,10 +76,19 @@ func (t *transport) getJSON(
 	params url.Values,
 	destination any,
 ) error {
-	request, err := t.newRequest(ctx, path, params, time.Now().Unix())
+	request, err := t.newRequest(ctx, http.MethodGet, path, params, nil, time.Now().Unix())
 	if err != nil {
 		return err
 	}
+	if t.token != nil {
+		if token := t.token(); token != "" {
+			request.Header.Set("authorization", "Bearer "+token)
+		}
+	}
+	return t.doJSON(request, destination)
+}
+
+func (t *transport) doJSON(request *http.Request, destination any) error {
 	response, err := t.client.Do(request)
 	if err != nil {
 		return &networkError{err: err}
@@ -103,8 +113,10 @@ func (t *transport) getJSON(
 
 func (t *transport) newRequest(
 	ctx context.Context,
+	method string,
 	path string,
 	params url.Values,
+	body io.Reader,
 	timestamp int64,
 ) (*http.Request, error) {
 	query := url.Values{
@@ -125,9 +137,9 @@ func (t *transport) newRequest(
 
 	request, err := http.NewRequestWithContext(
 		ctx,
-		http.MethodGet,
+		method,
 		t.host+"/"+strings.TrimLeft(path, "/")+"?"+query.Encode(),
-		nil,
+		body,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create JavDB request: %w", err)

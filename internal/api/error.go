@@ -13,6 +13,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/drive"
 	"github.com/ppxb/miyabi/internal/ent"
+	"github.com/ppxb/miyabi/internal/javdb"
 	"github.com/ppxb/miyabi/internal/pan"
 	sloggin "github.com/samber/slog-gin"
 )
@@ -117,6 +118,8 @@ func errorMiddleware(logger *slog.Logger) gin.HandlerFunc {
 		switch {
 		case errors.Is(err, pan.ErrUnauthorized):
 			body["code"] = "PAN_UNAUTHORIZED"
+		case errors.Is(err, javdb.ErrLoginRequired):
+			body["code"] = "JAVDB_LOGIN_REQUIRED"
 		case errors.Is(err, drive.ErrMediaDirectoryRequired):
 			body["code"] = "PAN_DIRECTORY_REQUIRED"
 		case errors.Is(err, drive.ErrSourceChanged):

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -57,13 +59,14 @@ func taskPayloadJSON(t testing.TB, value any) json.RawMessage {
 }
 
 func TestNewPersistsDeviceWithoutSelectingRoute(t *testing.T) {
-	store, err := database.Open(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	store, err := database.Open(t.Context(), dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	first, err := New(t.Context(), store.Client, nil, nil, nil)
+	first, err := New(t.Context(), store.Client, dataDir, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +87,7 @@ func TestNewPersistsDeviceWithoutSelectingRoute(t *testing.T) {
 		t.Fatalf("device UUID = %q: %v", firstDevice, err)
 	}
 
-	second, err := New(t.Context(), store.Client, nil, nil, nil)
+	second, err := New(t.Context(), store.Client, dataDir, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +105,37 @@ func TestNewPersistsDeviceWithoutSelectingRoute(t *testing.T) {
 	}
 }
 
+func TestNewRestoresAndRemovesJavDBSession(t *testing.T) {
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	store, err := database.Open(ctx, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sessionPath := filepath.Join(dataDir, "javdb-session")
+	if err := os.WriteFile(sessionPath, []byte("test.app.token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(ctx, store.Client, dataDir, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if !service.JavDBSessionConfigured() {
+		t.Fatal("saved JavDB session was not restored")
+	}
+	if err := service.LogoutJavDB(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) || service.JavDBSessionConfigured() {
+		t.Fatalf("JavDB session was not removed: %v", err)
+	}
+}
+
 func TestNewRestoresPersistedRoute(t *testing.T) {
-	store, err := database.Open(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	store, err := database.Open(t.Context(), dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +144,7 @@ func TestNewRestoresPersistedRoute(t *testing.T) {
 	if err := database.SaveSetting(t.Context(), store.Client, javdbRouteSetting, saved); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(t.Context(), store.Client, nil, nil, nil)
+	service, err := New(t.Context(), store.Client, dataDir, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

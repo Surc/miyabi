@@ -116,7 +116,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	catalogueSvc, err := catalogue.New(ctx, store.Client, networkSvc.ProxyManager(), libSvc, javbusClient)
+	catalogueSvc, err := catalogue.New(ctx, store.Client, cfg.DataDir, networkSvc.ProxyManager(), libSvc, javbusClient)
 	if err != nil {
 		javbusClient.Close()
 		driveSvc.Close()

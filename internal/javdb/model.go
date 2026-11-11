@@ -18,7 +18,7 @@ const (
 	defaultBurst     = 1
 )
 
-// Options configures the anonymous JavDB App API client.
+// Options configures the JavDB App API client.
 type Options struct {
 	CachedHost    string
 	CachedLatency time.Duration
@@ -69,7 +69,21 @@ func (e *APIError) Error() string {
 
 func (e *APIError) DomainKind() domain.Kind { return domain.KindUpstream }
 
+func (e *APIError) Is(target error) bool {
+	if target != ErrLoginRequired {
+		return false
+	}
+	switch e.Action {
+	case "JWTVerificationError", "Unauthorized", "LoginRequired", "TokenInvalid", "TokenExpired":
+		return true
+	}
+	return false
+}
+
 func (e *APIError) PublicMessage() string {
+	if e.Is(ErrLoginRequired) {
+		return loginRequiredMessage
+	}
 	if e.Message == "" {
 		return "JavDB 返回了错误"
 	}
@@ -88,12 +102,17 @@ func (e *HTTPError) Error() string {
 
 func (e *HTTPError) DomainKind() domain.Kind { return domain.KindUpstream }
 
+func (e *HTTPError) Is(target error) bool { return target == ErrLoginRequired && e.StatusCode == 401 }
+
 func (e *HTTPError) Retryable() bool {
 	return (&domain.HTTPError{StatusCode: e.StatusCode}).Retryable()
 }
 func (e *HTTPError) RetryWait() time.Duration { return e.RetryAfter }
 
 func (e *HTTPError) PublicMessage() string {
+	if e.Is(ErrLoginRequired) {
+		return loginRequiredMessage
+	}
 	if e.StatusCode == 429 {
 		return "JavDB 请求过于频繁，请稍后重试"
 	}

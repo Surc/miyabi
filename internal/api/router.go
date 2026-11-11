@@ -86,6 +86,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerLibraryVersions(protected, deps.Library)
 
 	settingsAPI := protected.Group("/settings", noStore())
+	registerJavDBSession(settingsAPI, deps.Catalogue)
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))
 	settingsAPI.PUT("/scraping", metadataUpdateHandler(deps.Metadata))
 	settingsAPI.GET("/system", dataInfoHandler(deps.Maintenance))

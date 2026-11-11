@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { LoaderCircleIcon, PauseIcon, PlayIcon, StarIcon } from 'lucide-react'
 import type { BrowseMoviesParams, DiscoverMovie } from '@/api/discover'
 import { browseImage, useBrowseRating, resetBrowseSessions } from '@/api/browse-cache'
+import { describeApiError, isJavDBLoginRequired } from '@/api/client'
 import { MovieCard, MovieGridLayout } from '@/components/movie'
 import { MovieCardSkeleton } from '@/components/movie/movie-grid-skeleton'
 import { OwnedVersionBadge } from '@/components/movie/library-version-badge'
@@ -246,6 +247,7 @@ function CachedMovieCard({ row, phase }: { row: PreloadRow; phase: PreloadState[
 function CardRating({ id, source }: { id: string; source: 'javdb' | 'javlibrary' }) {
   const query = useBrowseRating(id, source)
   const rating = query.data?.data
+  const loginRequired = isJavDBLoginRequired(query.error)
   const label = rating?.source === 'fanza' ? 'FANZA' : source === 'javdb' ? 'JavDB' : 'JavLibrary'
   return (
     <span
@@ -254,7 +256,9 @@ function CardRating({ id, source }: { id: string; source: 'javdb' | 'javlibrary'
         query.data
           ? `${query.data.stale ? '旧缓存，等待更新 · ' : ''}${new Date(query.data.updated_at).toLocaleString()}`
           : query.isError
-            ? '评分暂不可用，不影响预加载'
+            ? loginRequired
+              ? describeApiError(query.error)
+              : '评分暂不可用，不影响预加载'
             : '正在读取评分'
       }
     >
@@ -266,7 +270,11 @@ function CardRating({ id, source }: { id: string; source: 'javdb' | 'javlibrary'
         ) : rating?.found && rating.score !== null ? (
           `${rating.score.toFixed(1)}/${rating.max}`
         ) : query.isError ? (
-          '暂不可用'
+          loginRequired ? (
+            '需登录'
+          ) : (
+            '暂不可用'
+          )
         ) : (
           '—'
         )}
