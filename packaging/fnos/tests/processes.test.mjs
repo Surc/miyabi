@@ -59,18 +59,22 @@ test("status checks all production process identities before reporting healthy",
   assert.equal(requests.mock.callCount(), 2);
 });
 
-test("external bridge health uses its endpoint and only expects the Miyabi child", async(t)=>{
-  const {paths,saved}=procfs(t);
-  saved.children=saved.children.slice(0,1);
-  const config={port:18080,externalMDCz:{serverURL:"http://docker.test:3841",apiKey:"a".repeat(64)}};
-  const requests=t.mock.method(globalThis,"fetch",async(url,options)=>{
-    if(url.endsWith("/api/auth/config")) return Response.json({enabled:true});
-    assert.equal(url,"http://docker.test:3841/v1/health");
-    assert.equal(options.headers.Authorization,"Bearer "+config.externalMDCz.apiKey);
-    return Response.json({protocol:1,revision:engineRevision,configuration_version:1,configuration_id:"docker"});
+test("external mode checks only the Miyabi process and its health endpoint", async (t) => {
+  const { paths, saved } = procfs(t);
+  saved.children = saved.children.slice(0, 1);
+  const config = {
+    port: 18080,
+    externalMDCz: { serverURL: "http://bridge.test:3841", apiKey: "a".repeat(64) },
+  };
+  let enabled = true;
+  const requests = t.mock.method(globalThis, "fetch", async (url) => {
+    assert.equal(url, "http://127.0.0.1:18080/api/auth/config");
+    return Response.json({ enabled });
   });
-  assert.equal(await status(paths,config),true);
-  assert.equal(requests.mock.callCount(),2);
+  assert.equal(await status(paths, config), true);
+  assert.equal(requests.mock.callCount(), 1);
+  enabled = false;
+  assert.equal(await status(paths, config), false);
 });
 
 for (const grace of [1000, 0])

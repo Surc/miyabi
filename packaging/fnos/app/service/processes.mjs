@@ -58,9 +58,12 @@ async function json(url, key) {
 }
 export async function healthy(config) {
   try {
+    const mainHealth = json(`http://127.0.0.1:${config.port}/api/auth/config`);
+    if (config.externalMDCz) return (await mainHealth).enabled === true;
+
     const connection = bridgeConnection(config);
     const [main, bridge] = await Promise.all([
-      json(`http://127.0.0.1:${config.port}/api/auth/config`),
+      mainHealth,
       json(`${connection.server_url}/v1/health`, connection.api_key),
     ]);
     return (

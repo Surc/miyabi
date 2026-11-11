@@ -3,12 +3,11 @@ import assert from "node:assert/strict";
 import { mkdir, cp, symlink, writeFile, readFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createServer } from "node:net";
-import { createServer as createHTTPServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { fixture } from "./fixture.mjs";
-import { writeJSON, load, engineRevision } from "../app/service/configuration.mjs";
+import { writeJSON, load } from "../app/service/configuration.mjs";
 import { state } from "../app/service/processes.mjs";
 const nativeProcfs =
   Number((await readFile("/proc/self/stat", "utf8")).split(" ")[0]) === process.pid;
@@ -25,28 +24,22 @@ async function port() {
   return value;
 }
 
-test("external MDCz starts only Miyabi and survives application stop/start",async(t)=>{
-  const {paths,env,config}=await installed(t);
-  const key="e".repeat(64);
-  const server=createHTTPServer((req,res)=>{
-    assert.equal(req.headers.authorization,"Bearer "+key);
-    res.setHeader("content-type","application/json");
-    res.end(JSON.stringify({protocol:1,revision:engineRevision,configuration_version:1,configuration_id:"external"}));
-  });
-  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
-  t.after(()=>new Promise(resolve=>server.close(resolve)));
-  config.externalMDCz={serverURL:`http://127.0.0.1:${server.address().port}`,apiKey:key};
-  await writeJSON(paths.config,config);
-  const call=(action)=>exec("bash",[join(paths.app,"service/control"),action],{env,timeout:45000});
-  await call("start");
-  assert.equal((await state(paths)).children.length,1);
-  await call("status");
-  await call("stop");
-  assert.equal(server.listening,true);
-  await call("start");
-  assert.equal((await state(paths)).children.length,1);
-  assert.equal(JSON.parse(await readFile(join(paths.etc,"mdcz-connection.json"),"utf8")).server_url,config.externalMDCz.serverURL);
-  await call("stop");
+test("Miyabi starts and restarts while external MDCz is offline", async (t) => {
+  const { paths, config, call } = await installed(t);
+  config.externalMDCz = { serverURL: `http://127.0.0.1:${await port()}`, apiKey: "e".repeat(64) };
+  await writeJSON(paths.config, config);
+
+  assert.equal((await call("start")).code, 0);
+  assert.equal((await call("status")).code, 0);
+  assert.equal((await state(paths)).children.length, 1);
+  assert.equal((await call("stop")).code, 0);
+  assert.equal((await call("status")).code, 3);
+  assert.equal((await call("start")).code, 0);
+  assert.equal((await call("status")).code, 0);
+  assert.equal((await state(paths)).children.length, 1);
+  const connection = JSON.parse(await readFile(join(paths.etc, "mdcz-connection.json"), "utf8"));
+  assert.equal(connection.server_url, config.externalMDCz.serverURL);
+  assert.equal((await call("stop")).code, 0);
 });
 async function installed(t) {
   const data = await fixture(t);
