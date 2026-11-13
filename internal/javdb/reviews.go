@@ -13,13 +13,13 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 )
 
-var reviewMovieID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
+var javdbMovieID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
 
 // MovieComments is an optional capability. Keep it outside the catalogue's
 // existing JavDBClient interface so upstream clients and test fakes stay intact.
 func (c *Client) MovieComments(ctx context.Context, movieID string, page int) (domain.MovieComments, error) {
 	result := domain.MovieComments{Source: "javdb", Page: page, Items: []domain.MovieComment{}}
-	if !reviewMovieID.MatchString(movieID) || page < 1 || page > 1000 {
+	if !javdbMovieID.MatchString(movieID) || page < 1 || page > 1000 {
 		return result, domain.E(domain.KindInvalid, "无效的影片或评论页码", nil)
 	}
 	var data struct {

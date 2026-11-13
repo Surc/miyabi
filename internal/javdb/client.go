@@ -240,7 +240,8 @@ func (c *Client) getJSON(
 			return ctx.Err()
 		}
 		var response *HTTPError
-		if errors.As(err, &response) && response.StatusCode == 429 {
+		hasHTTPError := errors.As(err, &response)
+		if hasHTTPError && response.StatusCode == 429 {
 			delay := response.RetryAfter
 			if delay <= 0 {
 				base := time.Second << retries
@@ -256,10 +257,15 @@ func (c *Client) getJSON(
 		if !routeFailure(err) || failover {
 			return err
 		}
-		state, err = c.replaceFailedRoute(ctx, state)
-		if err != nil {
-			return err
+		replacement, routeErr := c.replaceFailedRoute(ctx, state)
+		if routeErr != nil {
+			if ctx.Err() == nil && hasHTTPError && response.StatusCode == 403 {
+				// A failed route probe must not hide the original rejection.
+				return fmt.Errorf("recover JavDB route: %w", errors.Join(err, routeErr))
+			}
+			return routeErr
 		}
+		state = replacement
 		failover = true
 	}
 }

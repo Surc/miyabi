@@ -26,6 +26,9 @@ func (c *Client) MovieDetail(ctx context.Context, movieID string) (domain.MovieD
 		nil,
 		&data,
 	); err != nil {
+		if ctx.Err() == nil && requiresWebFallback(err) && javdbMovieID.MatchString(movieID) {
+			return c.movieDetailFromWeb(ctx, movieID, err)
+		}
 		return domain.MovieDetail{}, err
 	}
 	movie, err := movieFromWire(ctx, data.Movie.wireMovie)
