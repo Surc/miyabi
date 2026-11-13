@@ -14,12 +14,12 @@ type MovieExtrasManager interface {
 	MovieComments(context.Context, string, string, string, int) (domain.MovieComments, error)
 }
 
-func registerMovieExtras(protected *gin.RouterGroup, extras MovieExtrasManager) {
+func registerMovieExtras(protected *gin.RouterGroup, extras MovieExtrasManager, browserRating gin.HandlerFunc) {
 	if extras == nil {
 		return
 	}
 	group := protected.Group("/extensions/movie", noStore())
-	group.GET("/javlibrary-rating", func(c *gin.Context) {
+	group.GET("/javlibrary-rating", browserRating, func(c *gin.Context) {
 		q, ok := bindQuery[struct {
 			Code string `form:"code" binding:"required,max=200"`
 		}](c)

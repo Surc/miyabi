@@ -24,6 +24,9 @@ func newExternalRating() (catalogue.ExternalRatingReader, error) {
 		if err != nil {
 			return nil, err
 		}
+		if browser.Enabled && browser.ConnectBack {
+			return javlibrary.NewBrowserRelay(browser), nil
+		}
 		client, err := javlibrary.NewBrowserRatingReader(browser)
 		if err != nil || client == nil {
 			return nil, err

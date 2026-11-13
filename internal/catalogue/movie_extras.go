@@ -94,5 +94,8 @@ func extrasError(ctx context.Context, err error) error {
 	if errors.Is(err, javlibrary.ErrVerificationRequired) {
 		return domain.E(domain.KindUpstream, "JavLibrary 需要在已连接的浏览器中完成人工验证", err)
 	}
+	if errors.Is(err, javlibrary.ErrBrowserDisconnected) {
+		return domain.E(domain.KindUpstream, "当前电脑的 JavLibrary 验证服务尚未连接 Miyabi", err)
+	}
 	return domain.E(domain.KindUpstream, "外部评分或评论暂不可用，请稍后重试", err)
 }

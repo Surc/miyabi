@@ -56,6 +56,14 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 本次 PC 连接页为 `http://127.0.0.1:18082/`。用户点击“打开验证浏览器”，在专用 Edge 完成人工验证，再点击“验证完成”。请保持 PC、专用窗口及对应代理运行；浏览器再次要求验证时，评分请求返回可重试的来源错误，等待人工验证，不缓存该失败。LAN 取页接口仅绑定已配置的 PC 地址并校验指定 NAS 来源；本机控制和评分接口使用不同的访问限制。
 
+### 由验证服务主动连接 Miyabi
+
+在飞牛的 `native-v1.json` 中将 `javlibraryBrowser` 配置为 `{ "connectBack": true, "apiToken": "原有的连接密钥" }`，重启应用。独立部署可在 `MIYABI_JAVLIBRARY_BROWSER_CONFIG` 指向的文件中使用 `{ "enabled": true, "connect_back": true, "api_token": "同一个连接密钥" }`。
+
+在 PC 原有的验证服务配置中添加 `"miyabi_url": "http://NAS地址:Miyabi端口"`，沿用原来的 `api_token`、Edge 配置、代理和用户目录。启动命令与本机验证页面照旧。验证服务通过 Miyabi 的网页端口主动连接并自动重连，本机操作页仅监听回环地址。
+
+在同一台电脑上通过同一个 NAS 地址直连打开 Miyabi。遇到评分缓存未命中时，Miyabi 根据评分请求和验证连接的来源 IP 匹配电脑。电脑局域网地址改变后，验证服务重连即可。经反向代理或 NAT 访问时，Miyabi 可能只看到代理或网关的 IP，此模式适用于来源地址可直接区分的连接。
+
 ## 0.4.10 部署与真实评分验收
 
 飞牛原生安装已从 0.4.9 升级为 0.4.10，基于原 0.4.9 的隔离源码叠加本次评分修复及会话通道，未纳入共享工作区其他尚在开发的功能。升级包完成文件哈希核验与实际打包程序启动检查；安装后二进制 SHA-256 为 `283a4b269068877e27aa70a41f404109d5c0b401366ee8e6394c29cc321f4b5f`，与验证过的包一致。原安装设置、外部 MDCz 连接和登录校验通过。

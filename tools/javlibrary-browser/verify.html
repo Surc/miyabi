@@ -17,7 +17,7 @@ body{font:16px/1.65 system-ui,sans-serif;max-width:640px;margin:72px auto;paddin
 <script>
 const labels={closed:'尚未打开浏览器',verification_required:'等待你完成验证',ready:'已连接，可以读取评分',loading:'正在获取页面，请稍候'};
 const messages={verification_required:'仍未看到有效影片页面，请先在专用浏览器中完成验证。',browser_unavailable:'无法连接专用浏览器，请关闭旧的专用验证窗口后重新打开。',debug_port_in_use:'专用浏览器调试端口已被占用，请关闭旧的专用验证窗口后重试。',busy:'正在获取页面，请稍后再试。'};
-async function update(){try{const r=await fetch('/control/status');const s=await r.json();document.querySelector('#status').textContent=labels[s.state]||'连接不可用'}catch{document.querySelector('#status').textContent='连接服务未运行'}}
+async function update(){try{const r=await fetch('/control/status');const s=await r.json();document.querySelector('#status').textContent=s.miyabi_connected===false?'正在连接 Miyabi':labels[s.state]||'连接不可用'}catch{document.querySelector('#status').textContent='连接服务未运行'}}
 for(const name of ['open','confirm'])document.querySelector('#'+name).onclick=async()=>{
   document.querySelectorAll('button').forEach(b=>b.disabled=true);document.querySelector('#message').textContent='';
   try{const r=await fetch('/control/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const s=await r.json();if(!r.ok)document.querySelector('#message').textContent=messages[s.error]||'操作失败，请重新打开验证浏览器。'}

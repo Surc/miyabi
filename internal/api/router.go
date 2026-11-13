@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javlibrary"
 )
 
 type Dependencies struct {
@@ -19,6 +20,7 @@ type Dependencies struct {
 	Access          AccessGate
 	Catalogue       CatalogueManager
 	MovieExtras     MovieExtrasManager
+	JavLibraryRelay *javlibrary.BrowserRelay
 	BrowseExtension BrowseExtensionManager
 	TopSettings     TopSettingsManager
 	Metadata        MetadataManager
@@ -77,10 +79,17 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	api.GET("/strm/play/:fileID/*filename", noStore(), strmHandler)
 	api.HEAD("/strm/play/:fileID/*filename", noStore(), strmHandler)
 
+	browserRating := func(c *gin.Context) {}
+	if deps.JavLibraryRelay != nil {
+		api.GET("/extensions/movie/javlibrary-browser", noStore(), gin.WrapH(deps.JavLibraryRelay))
+		browserRating = func(c *gin.Context) {
+			c.Request = c.Request.WithContext(javlibrary.WithBrowserPeer(c.Request.Context(), c.Request.RemoteAddr))
+		}
+	}
 	protected := api.Group("", authMiddleware(deps.Access))
 	registerTop(protected, deps.TopSettings)
-	registerMovieExtras(protected, deps.MovieExtras)
-	registerBrowseExtension(protected, deps.BrowseExtension)
+	registerMovieExtras(protected, deps.MovieExtras, browserRating)
+	registerBrowseExtension(protected, deps.BrowseExtension, browserRating)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)
 	registerMDCz(protected, deps.MDCz)
 	registerLibraryVersions(protected, deps.Library)

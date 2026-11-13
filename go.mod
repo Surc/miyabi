@@ -8,6 +8,7 @@ require (
 	entgo.io/ent v0.14.6
 	github.com/bogdanfinn/fhttp v0.6.8
 	github.com/bogdanfinn/tls-client v1.15.1
+	github.com/bogdanfinn/websocket v1.5.5-barnius
 	github.com/disintegration/imaging v1.6.2
 	github.com/esimov/pigo v1.4.7-0.20240801095032-7465ed14de47
 	github.com/gin-gonic/gin v1.12.0
@@ -32,7 +33,6 @@ require (
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
 	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
 	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
-	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect

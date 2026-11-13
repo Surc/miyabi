@@ -3,6 +3,7 @@ package catalogue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javlibrary"
 	"github.com/ppxb/miyabi/internal/magnet"
 )
 
@@ -121,6 +123,9 @@ func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
 	result, err := loadBrowseRecord(ctx, s, namespace, key, ttl, refresh, load)
 	if err != nil && ctx.Err() == nil {
+		if errors.Is(err, javlibrary.ErrVerificationRequired) || errors.Is(err, javlibrary.ErrBrowserDisconnected) {
+			return result, extrasError(ctx, err)
+		}
 		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
 	}
 	return result, err
@@ -144,6 +149,9 @@ func loadBrowseRecord[T any](ctx context.Context, s *BrowseExtension, namespace,
 	}
 	var result BrowseCached[T]
 	callKey := fmt.Sprintf("%d:%s:%s", generation, namespace, key)
+	if peer := javlibrary.BrowserPeer(ctx); peer != "" {
+		callKey += "@" + peer
+	}
 	data, err := s.loads.get(ctx, callKey, func(ctx context.Context) (json.RawMessage, error) {
 		ctx = context.WithValue(ctx, browseGenerationKey{}, generation)
 		value, complete, err := load(ctx)

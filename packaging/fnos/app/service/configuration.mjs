@@ -43,12 +43,18 @@ export function validate(value) {
       throw new Error("外部 MDCz 连接配置无效");
   }
   if (value.javlibraryBrowser) {
-    let endpoint;
-    try { endpoint = new URL(value.javlibraryBrowser.serverURL); } catch { throw new Error("JavLibrary 浏览器地址无效"); }
-    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password ||
-        endpoint.search || endpoint.hash || endpoint.pathname !== "/" ||
-        !/^[a-f0-9]{64}$/.test(value.javlibraryBrowser.apiToken))
+    const { serverURL, connectBack, apiToken } = value.javlibraryBrowser;
+    if (!/^[a-f0-9]{64}$/.test(apiToken) || (connectBack !== undefined && typeof connectBack !== "boolean"))
       throw new Error("JavLibrary 浏览器连接配置无效");
+    if (connectBack) {
+      if (serverURL !== undefined) throw new Error("JavLibrary 反向连接无需填写浏览器地址");
+    } else {
+      let endpoint;
+      try { endpoint = new URL(serverURL); } catch { throw new Error("JavLibrary 浏览器地址无效"); }
+      if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password ||
+          endpoint.search || endpoint.hash || endpoint.pathname !== "/")
+        throw new Error("JavLibrary 浏览器连接配置无效");
+    }
   }
   if (
     typeof value.password !== "string" ||
@@ -146,7 +152,10 @@ export async function syncBridgeConnection(paths, config) {
   await writeJSON(join(paths.etc, "mdcz-connection.json"), bridgeConnection(config));
   if (config.javlibraryBrowser)
     await writeJSON(join(paths.etc, "javlibrary-browser.json"), {
-      enabled: true, server_url: config.javlibraryBrowser.serverURL.replace(/\/$/, ""),
+      enabled: true,
+      ...(config.javlibraryBrowser.connectBack
+        ? { connect_back: true }
+        : { server_url: config.javlibraryBrowser.serverURL.replace(/\/$/, "") }),
       api_token: config.javlibraryBrowser.apiToken,
     });
 }

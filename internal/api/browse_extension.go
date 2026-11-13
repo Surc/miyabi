@@ -31,7 +31,7 @@ type BrowseExtensionManager interface {
 	ClearCache(string) (catalogue.BrowseCacheStats, error)
 }
 
-func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtensionManager) {
+func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtensionManager, browserRating gin.HandlerFunc) {
 	if service == nil {
 		return
 	}
@@ -49,7 +49,7 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		result, err := service.Tags(c.Request.Context(), domain.Zone(q.Zone), refresh)
 		respond(c, result, err)
 	})
-	group.GET("/ratings/javlibrary", func(c *gin.Context) {
+	group.GET("/ratings/javlibrary", browserRating, func(c *gin.Context) {
 		q, ok := bindQuery[struct {
 			Code string `form:"code" binding:"required,max=200"`
 		}](c)
@@ -133,6 +133,9 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 		if cachedOnly {
 			respond(c, service.CachedRating(source, id), nil)
 			return
+		}
+		if source == "javlibrary" {
+			browserRating(c)
 		}
 		result, err := service.Rating(c.Request.Context(), source, id, refresh)
 		respond(c, result, err)

@@ -56,6 +56,12 @@ test("optional JavLibrary browser connection survives initialization and stays o
   assert.equal(childEnvironment(paths,next).bridge.MIYABI_JAVLIBRARY_BROWSER_CONFIG,undefined);
   assert.throws(()=>validate({...next,javlibraryBrowser:{...next.javlibraryBrowser,serverURL:"http://user:secret@pc.test/"}}));
   assert.equal((await load(paths)).strmToken,config.strmToken);
+
+  const relay = {...config, javlibraryBrowser:{connectBack:true, apiToken:next.javlibraryBrowser.apiToken}};
+  await writeFile(paths.config,JSON.stringify(relay));
+  assert.deepEqual(await initialize(paths,env),relay);
+  assert.deepEqual(JSON.parse(await readFile(file,"utf8")),{enabled:true, connect_back:true, api_token:next.javlibraryBrowser.apiToken});
+  assert.throws(()=>validate({...relay,javlibraryBrowser:{...relay.javlibraryBrowser,serverURL:"http://pc.test:18082"}}));
 });
 
 test("malformed existing settings are not replaced and user settings are validated", async (t) => {

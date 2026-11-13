@@ -2,10 +2,11 @@ import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { relayURL, runRelay } from './relay.mjs';
 import { BrowserError, BrowserSession, connectBrowser } from './session.mjs';
 
 const local = value => value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1';
-export function createBrowserServer(config, session) {
+export function createBrowserServer(config, session, relayStatus) {
   const expected = Buffer.from(`Bearer ${config.api_token}`);
   return createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -20,6 +21,7 @@ export function createBrowserServer(config, session) {
       if (!local(request.socket.remoteAddress) || !/^(127\.0\.0\.1|localhost):\d+$/.test(request.headers.host || '')) { send(403, { error: 'local_control_only' }); return; }
       if (request.method === 'POST' && (request.headers.origin !== `http://${request.headers.host}` || request.headers['content-type'] !== 'application/json')) { send(403, { error: 'invalid_origin' }); return; }
     } else {
+      if (relayStatus) { send(404, { error: 'not_found' }); return; }
       if (!local(request.socket.remoteAddress) && request.socket.remoteAddress !== config.nas_ip && request.socket.remoteAddress !== `::ffff:${config.nas_ip}`) { send(403, { error: 'client_not_allowed' }); return; }
       const supplied = Buffer.from(request.headers.authorization || '');
       if (request.headers.origin || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { send(401, { error: 'unauthorized' }); return; }
@@ -32,7 +34,10 @@ export function createBrowserServer(config, session) {
         response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'" });
         response.end(html); return;
       }
-      if (request.method === 'GET' && request.url === '/control/status') { send(200, session.status()); return; }
+      if (request.method === 'GET' && request.url === '/control/status') {
+        send(200, { ...session.status(), ...(relayStatus && { miyabi_connected: relayStatus() }) });
+        return;
+      }
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
       if (request.method === 'POST' && request.url === '/control/open') { await session.open(signal); send(200, session.status()); return; }
       if (request.method === 'POST' && request.url === '/control/confirm') { await session.confirm(signal); send(200, session.status()); return; }
@@ -60,10 +65,16 @@ export async function start(config) {
   if (!/^[a-f0-9]{64}$/.test(config.api_token) || !Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) throw new Error('Invalid browser service configuration');
   const proxy = new URL(config.proxy_url);
   if (!['http:', 'https:'].includes(proxy.protocol) || proxy.username || proxy.password || proxy.pathname !== '/' || proxy.search || proxy.hash) throw new Error('Invalid browser proxy');
+  const relay = config.miyabi_url === undefined ? null : relayURL(config.miyabi_url);
+  let connected = false;
   const session = new BrowserSession(signal => connectBrowser(config, signal));
-  const server = createBrowserServer(config, session);
+  const server = createBrowserServer(config, session, relay ? () => connected : undefined);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve); });
-  if (config.lan_host || config.nas_ip) {
+  if (relay) {
+    const controller = new AbortController();
+    server.on('close', () => controller.abort());
+    void runRelay(relay, config.api_token, session, controller.signal, value => { connected = value; });
+  } else if (config.lan_host || config.nas_ip) {
     if (isIP(config.lan_host) !== 4 || isIP(config.nas_ip) !== 4 || config.lan_host === '0.0.0.0' || config.nas_ip === '0.0.0.0') {
       server.close();
       throw new Error('Explicit PC and NAS addresses are required for LAN access');

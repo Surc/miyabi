@@ -220,11 +220,13 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("initialize discovery cache: %w", err)
 	}
 
+	browserRelay, _ := rating.(*javlibrary.BrowserRelay)
 	router := api.NewRouter(api.Dependencies{
 		Logger:          logger,
 		Access:          api.NewAccessGateService(cfg.AccessPassword, cfg.JWTSecret),
 		Catalogue:       catalogueSvc,
 		MovieExtras:     extras,
+		JavLibraryRelay: browserRelay,
 		BrowseExtension: browseExtension,
 		TopSettings:     top.NewService(store.Client),
 		Metadata:        mdczSvc,
@@ -251,6 +253,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+	if browserRelay != nil {
+		server.RegisterOnShutdown(browserRelay.Close)
 	}
 
 	return &App{

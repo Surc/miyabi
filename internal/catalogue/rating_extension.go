@@ -6,6 +6,7 @@ import (
 
 	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javlibrary"
 )
 
 // ExternalRatingReader is optional and independent of the comment client.
@@ -32,7 +33,11 @@ func NewMovieExtrasWithRating(service *Service, reader ExternalRatingReader) *Mo
 
 func (r *ratingExtension) rating(ctx context.Context, code string) (domain.ExternalRating, error) {
 	code = codeid.Normalize(code)
-	return r.cache.get(ctx, code, func(ctx context.Context) (domain.ExternalRating, error) {
+	key := code
+	if peer := javlibrary.BrowserPeer(ctx); peer != "" {
+		key = code + "@" + peer
+	}
+	return r.cache.get(ctx, key, func(ctx context.Context) (domain.ExternalRating, error) {
 		return r.reader.Rating(ctx, code)
 	})
 }
