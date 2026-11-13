@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { useJavLibraryRating, useMovieComments } from '@/api/movie-extras'
 import {
@@ -47,6 +48,44 @@ test('JavLibrary is an independent ten-point rating beside saved FANZA data', ()
   expect(html).toContain('8.5 / 10')
   expect(movie.rating).toBe(4.2)
 })
+
+test.each([
+  { name: ' 字幕汉化 ', hasSubtitle: false, visible: true },
+  { name: '其他标签', hasSubtitle: true, visible: true },
+  { name: '其他标签', hasSubtitle: false, visible: false }
+])(
+  'catalogue detail subtitle badge for $name (flag=$hasSubtitle)',
+  ({ name, hasSubtitle, visible }) => {
+    const movie: DiscoverMovieDetail = {
+      id: 'movie',
+      code: 'ABP-123',
+      title: 'Title',
+      origin_title: '',
+      cover: '',
+      thumbnail: '',
+      rating: 0,
+      duration: 0,
+      release_date: '',
+      release_status: 'released',
+      actors: [],
+      tags: [{ id: '', name, name_zht: '', category_id: '' }],
+      has_subtitle: hasSubtitle,
+      has_preview: false,
+      preview_images: [],
+      preview_video: '',
+      magnets_count: 0,
+      zone: 'censored',
+      actor_movies: [],
+      related_movies: []
+    }
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MovieHero movie={movie} />
+      </QueryClientProvider>
+    )
+    expect(html.match(/>含字幕<\/span>/g) ?? []).toHaveLength(visible ? 1 : 0)
+  }
+)
 test.each([
   { found: false, score: null, label: '未收录' },
   { found: true, score: null, label: '暂无评分' }

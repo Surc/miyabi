@@ -3,7 +3,11 @@ import type { ReactNode } from 'react'
 
 import type { DiscoverMovie, DiscoverMovieDetail } from '@/api/discover'
 import type { LibraryMovieDetail } from '@/api/library'
-import { MovieResourceBadges, MovieStateBadge } from '@/components/movie/movie-badges'
+import {
+  MovieResourceBadges,
+  MovieStateBadge,
+  MovieSubtitleBadge
+} from '@/components/movie/movie-badges'
 import { MovieCover } from '@/components/movie/movie-cover'
 import { Badge } from '@/components/ui/badge'
 import { MovieMetadata } from './metadata'
@@ -41,6 +45,7 @@ export function MovieHero({
             ) : (
               <MovieStateBadge movie={movie} hideViewed />
             )}
+            {libraryStatus ? <MovieSubtitleBadge movie={movie} label="含字幕" /> : null}
             {extraBadges}
           </div>
           <h1 className="text-xl leading-snug font-bold tracking-normal sm:text-2xl">
@@ -56,7 +61,7 @@ export function MovieHero({
 
         {!libraryStatus && 'release_status' in movie ? (
           <div className="flex flex-wrap gap-2">
-            <MovieResourceBadges movie={movie} />
+            <MovieResourceBadges movie={movie} subtitleLabel="含字幕" />
           </div>
         ) : null}
 

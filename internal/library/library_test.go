@@ -69,7 +69,8 @@ func TestLibraryPageLoadsCardMetadataWithScopedCounts(t *testing.T) {
 	ctx := t.Context()
 	database := lib.database
 	tagB := database.Tag.Create().SetProvider("javdb").SetSourceID("tag-b").SetName("B tag").SetCategoryID("category").SaveX(ctx)
-	tagA := database.Tag.Create().SetProvider("javdb").SetSourceID("tag-a").SetName("A tag").SetCategoryID("category").SaveX(ctx)
+	tagA := database.Tag.Create().SetProvider("javdb").SetSourceID("tag-a").SetName("A tag").
+		SetNameZht("字幕漢化").SetCategoryID("category").SaveX(ctx)
 	actorB := database.Actor.Create().SetProvider("javdb").SetSourceID("actor-b").SetName("B actor").SaveX(ctx)
 	actorA := database.Actor.Create().SetProvider("javdb").SetSourceID("actor-a").SetName("A actor").SaveX(ctx)
 	releaseDate := time.Date(2026, time.September, 12, 0, 0, 0, 0, time.UTC)
@@ -116,9 +117,13 @@ func TestLibraryPageLoadsCardMetadataWithScopedCounts(t *testing.T) {
 	}
 	for _, item := range page.Movies {
 		if item.ID == film.ID {
+			wantTags := []Tag{
+				{ID: tagA.ID, Provider: "javdb", SourceID: tagA.SourceID, Name: tagA.Name, NameZHT: "字幕漢化"},
+				{ID: tagB.ID, Provider: "javdb", SourceID: tagB.SourceID, Name: tagB.Name},
+			}
 			if item.Title != film.Title || item.Cover == nil || *item.Cover != "/cover" ||
 				item.ScrapeStatus != movie.ScrapeStatusDone ||
-				!reflect.DeepEqual(item.Tags, []Tag{{ID: tagA.ID, Provider: "javdb", SourceID: tagA.SourceID, Name: tagA.Name}, {ID: tagB.ID, Provider: "javdb", SourceID: tagB.SourceID, Name: tagB.Name}}) {
+				!reflect.DeepEqual(item.Tags, wantTags) {
 				t.Fatalf("card lost or reordered catalogue data: %#v", item)
 			}
 			if item.ReleaseDate != "2026-09-12" || item.Duration != 125 || item.Rating != 4.5 || item.Fanart != "/api/library/artwork/fanart" ||

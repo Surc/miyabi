@@ -1,5 +1,6 @@
 import type { DiscoverMovie } from '../../../api/discover'
 import type { Cached, ResourceSnapshot, ResourceStatus } from '../../../api/browse-cache'
+import { isSubtitleLocalizationTag } from '@/lib/subtitle-tags'
 
 export type PreloadPhase = 'loading' | 'paused' | 'error' | 'complete'
 export type PreloadRow = { movie: DiscoverMovie; resources?: Cached<ResourceStatus> }
@@ -90,10 +91,13 @@ export class BrowsePreloader {
     for (const listener of this.listeners) listener()
   }
   private acceptResource(entry: Entry, result: Cached<ResourceSnapshot>) {
+    const movie = result.data.movie
+    const subtitleTag = movie.tags?.find(isSubtitleLocalizationTag)
     entry.movie = {
       ...entry.movie,
-      title: result.data.movie.title || entry.movie.title,
-      cover: result.data.movie.cover || entry.movie.cover
+      title: movie.title || entry.movie.title,
+      cover: movie.cover || entry.movie.cover,
+      tags: subtitleTag ? [subtitleTag] : entry.movie.tags
     }
     entry.resources = {
       ...result,
@@ -238,7 +242,13 @@ export class BrowsePreloader {
       if (this.ids.has(movie.id)) continue
       this.ids.add(movie.id)
       this.entries.push({
-        movie: { ...movie, actors: [], tags: [], preview_images: [], preview_video: '' }
+        movie: {
+          ...movie,
+          actors: [],
+          tags: movie.tags?.filter(isSubtitleLocalizationTag) ?? [],
+          preview_images: [],
+          preview_video: ''
+        }
       })
       added++
     }

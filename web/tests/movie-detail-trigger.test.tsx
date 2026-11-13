@@ -129,7 +129,7 @@ test('library cards always use an explicit local detail target', () => {
         duration: 0,
         rating: 0,
         actors: [],
-        tags: [],
+        tags: [{ id: 1, provider: 'javdb', source_id: 'subtitle', name: '字幕漢化' }],
         scrape_status: 'done'
       }
     })
@@ -139,6 +139,7 @@ test('library cards always use an explicit local detail target', () => {
     assert.match(html, /role="button"/)
     assert.match(html, /tabindex="0"/)
     assert.doesNotMatch(html, /href=|<a\b/)
+    assert.match(html, />字幕<\/span>/)
     const event = click()
     props.onClick?.(event)
     assert.deepEqual(openMovie.mock.calls, [[{ libraryId: 42 }, event.currentTarget]])

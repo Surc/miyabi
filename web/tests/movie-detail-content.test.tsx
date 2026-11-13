@@ -5,7 +5,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import { useRecordMovieView } from '@/api/browse-history'
 import { imageURL } from '@/api/client'
 import { useDiscoverMagnets, useDiscoverMovie, useResolveDiscoverMovie } from '@/api/discover'
-import { useLibraryMovie, type LibraryMovieDetail } from '@/api/library'
+import { libraryKeys, useLibraryMovie, type LibraryMovieDetail } from '@/api/library'
 import { MovieDetailContent } from '@/features/movie-detail/content'
 import { MovieMetadata } from '@/features/movie-detail/metadata'
 
@@ -15,7 +15,10 @@ vi.mock('@/api/discover', () => ({
   useResolveDiscoverMovie: vi.fn()
 }))
 vi.mock('@/api/browse-history', () => ({ useRecordMovieView: vi.fn() }))
-vi.mock('@/api/library', () => ({ useLibraryMovie: vi.fn() }))
+vi.mock('@/api/library', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/api/library')>()),
+  useLibraryMovie: vi.fn()
+}))
 vi.mock('@/api/movie-extras', () => ({
   useJavLibraryRating: () => ({ isPending: true }),
   useMovieComments: () => ({ isPending: true })
@@ -53,7 +56,9 @@ test('saved library metadata renders without a JavDB identity or lookup', () => 
           avatar: ''
         }
       ],
-      tags: [{ provider: 'fanza', id: 'genre', name: 'Saved tag', name_zht: '', category_id: '' }],
+      tags: [
+        { provider: 'fanza', id: 'genre', name: 'Saved tag', name_zht: '字幕漢化', category_id: '' }
+      ],
       preview_images: [],
       preview_video: '',
       magnets_count: 0,
@@ -66,8 +71,30 @@ test('saved library metadata renders without a JavDB identity or lookup', () => 
     } satisfies LibraryMovieDetail,
     isPending: false
   })
+  const client = new QueryClient()
+  client.setQueryData(
+    [...libraryKeys.detail(42), 'subtitles'],
+    [
+      {
+        id: 7,
+        name: 'ABP-123.mp4',
+        can_download: true,
+        hard_subtitled: false,
+        tracks: [
+          {
+            id: 'track',
+            name: 'ABP-123.zh-CN.srt',
+            language: 'zh-CN',
+            format: 'srt',
+            source: 'local'
+          }
+        ]
+      },
+      { id: 8, name: 'ABP-123-CD1.mp4', can_download: false, hard_subtitled: false, tracks: [] }
+    ]
+  )
   const html = renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={client}>
       <MovieDetailContent movie={{ libraryId: 42 }} />
     </QueryClientProvider>
   )
@@ -78,6 +105,12 @@ test('saved library metadata renders without a JavDB identity or lookup', () => 
   expect(useRecordMovieView).not.toHaveBeenCalled()
   expect(html).toContain('Saved title')
   expect(html).toContain('Saved actor')
+  expect(html).toContain('>含字幕</span>')
+  expect(html).toContain('ABP-123.zh-CN.srt')
+  expect(html).toContain('简体中文')
+  expect(html).toContain('删除字幕 ABP-123.zh-CN.srt')
+  expect(html.match(/补充下载/g)).toHaveLength(1)
+  expect(html.match(/添加字幕/g)).toHaveLength(2)
   expect(html).toContain('FANZA 评分')
   expect(html).not.toContain('JavDB 评分')
   expect(html).not.toContain('href=')

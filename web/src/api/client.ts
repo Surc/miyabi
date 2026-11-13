@@ -58,10 +58,14 @@ export function apiPut<T>(path: string, body: unknown): Promise<T> {
   return requestJSON<T>(path, 'PUT', body)
 }
 
-export function apiUpload<T>(path: string, file: File): Promise<T> {
+export function apiUpload<T>(
+  path: string,
+  file: File,
+  contentType = 'application/zip'
+): Promise<T> {
   return request<T>(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/zip' },
+    headers: { 'Content-Type': contentType },
     body: file
   })
 }

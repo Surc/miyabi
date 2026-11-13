@@ -26,7 +26,7 @@ export type LibraryMovie = {
   series?: LibraryEntity
   director?: LibraryEntity
   actors: LibraryEntity[]
-  tags: Array<{ id: number; provider: string; source_id: string; name: string }>
+  tags: Array<{ id: number; provider: string; source_id: string; name: string; name_zht?: string }>
   scrape_status: 'pending' | 'done' | 'failed'
 }
 

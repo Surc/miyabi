@@ -136,6 +136,22 @@ test('six cached pages mount images and rating UI only for the current twenty wo
   expect(html).toContain('破解')
 })
 
+test.each([false, true])(
+  'localized subtitle tags show one badge with magnet subtitle flag %s',
+  hasSubtitle => {
+    const [row] = makeRows(1)
+    row!.movie.tags = [{ id: 'subtitle', name: '字幕汉化', name_zht: '', category_id: '' }]
+    row!.resources!.data.has_subtitle = hasSubtitle
+    const html = renderToStaticMarkup(
+      <MovieDetailDialogContext.Provider value={() => {}}>
+        <CurrentBrowsePage rows={[row!]} page={1} />
+      </MovieDetailDialogContext.Provider>
+    )
+    expect(html.match(/>字幕<\/span>/g)).toHaveLength(1)
+    expect(html).not.toContain('>中文字幕</span>')
+  }
+)
+
 test.each([
   { count: 120, page: 4, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },
   { count: 120, page: 6, exhausted: false, pages: [1, 2, 3, 4, 5, 6], hasMore: true },

@@ -2,6 +2,7 @@ import { useRecordMovieView } from '@/api/browse-history'
 import { describeApiError, isJavDBLoginRequired } from '@/api/client'
 import { useDiscoverMagnets, useDiscoverMovie, useResolveDiscoverMovie } from '@/api/discover'
 import { useLibraryMovie } from '@/api/library'
+import { useMovieState } from '@/api/movie-states'
 import { ErrorState, InlineError } from '@/components/error-state'
 import type { MovieDetailTarget } from './dialog-context'
 import { MovieHero } from './hero'
@@ -13,6 +14,7 @@ import { MovieDetailSkeleton } from './skeleton'
 import { MovieEmbyPlayback } from './extensions/emby-playback'
 import { MovieSynopsis } from './extensions/synopsis'
 import { MovieTopRankings } from './extensions/top-rankings'
+import { LibrarySubtitles } from './extensions/library-subtitles'
 
 export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
   if ('libraryId' in movie) return <LibraryMovieDetail movieId={movie.libraryId} />
@@ -49,6 +51,7 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
+      <LibrarySubtitles movieId={movieId} />
       <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
       <MovieMediaPreviews
         key={`library:${movieId}`}
@@ -131,6 +134,7 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
+      <CatalogueLibrarySubtitles movie={detail.data} />
       <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
       <MovieMediaPreviews
         key={movieId}
@@ -144,4 +148,11 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
       <MovieRecommendations title="你可能也喜欢" movies={detail.data.related_movies} />
     </div>
   )
+}
+
+function CatalogueLibrarySubtitles({ movie }: { movie: { id: string; code: string } }) {
+  const { state, library_id, isPlaceholderData } = useMovieState(movie)
+  return !isPlaceholderData && state === 'in_library' && library_id ? (
+    <LibrarySubtitles movieId={library_id} />
+  ) : null
 }

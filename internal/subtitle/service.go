@@ -7,15 +7,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ppxb/miyabi/internal/atomicfile"
+	"github.com/ppxb/miyabi/internal/database"
+	"github.com/ppxb/miyabi/internal/domain"
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
+	"github.com/ppxb/miyabi/internal/export"
 )
 
 const (
-	// MaxTracks bounds the subtitles exported per movie, one of each subtitlemeta.Kind.
+	// MaxTracks bounds online subtitle tracks per video, one of each subtitlemeta.Kind.
 	MaxTracks = 3
 	// maxDownloads bounds the subtitles downloaded per export: a candidate
 	// without a language hint may turn out to repeat an exported kind.
@@ -24,12 +28,42 @@ const (
 
 // Service exports movie subtitles beside their Emby .strm files.
 type Service struct {
-	db     *ent.Client
-	finder *Finder
+	db      *ent.Client
+	finder  *Finder
+	exports *export.Manager
 }
 
 func NewService(db *ent.Client, finder *Finder) *Service {
 	return &Service{db: db, finder: finder}
+}
+
+// SetExportManager coordinates subtitle writes with media publication and local scans.
+func (s *Service) SetExportManager(manager *export.Manager) { s.exports = manager }
+
+func (s *Service) withExportTarget(ctx context.Context, target subtitlemeta.Target, run func() error) error {
+	return s.exports.WithConfig(func(cfg export.Config) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if s.exports != nil {
+			if cfg.EmbyDir == "" || target.FileID == "" {
+				return nil
+			}
+			directory := export.EmbyMovieDir(cfg.EmbyDir, target.Code)
+			rel, err := filepath.Rel(directory, target.Dir)
+			if err != nil || !filepath.IsLocal(rel) {
+				return nil
+			}
+			body, err := os.ReadFile(filepath.Join(target.Dir, target.Stem+".strm"))
+			if os.IsNotExist(err) || err == nil && export.ParseSTRMFileID(string(body)) != target.FileID {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return run()
+	})
 }
 
 // Export writes a movie's subtitles beside its .strm file and returns how many
@@ -41,13 +75,48 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 		return 0, err
 	}
 	autoDownload := config.Enabled && config.Sources.Any()
+	var exported map[subtitlemeta.Kind]bool
+	err = s.withExportTarget(ctx, target, func() error {
+		var err error
+		exported, err = s.reconcileTracks(ctx, movieID, target, autoDownload)
+		return err
+	})
+	if err != nil || exported == nil || !autoDownload || target.HardSubtitled {
+		return 0, err
+	}
+	return s.downloadOnline(ctx, target, exported, config, func(track subtitlemeta.Track, body []byte) (bool, error) {
+		var saved bool
+		err := s.withExportTarget(ctx, target, func() error {
+			destination := target.Path(track.Kind)
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				return err
+			}
+			if err := writeFile(destination, body); err != nil {
+				return err
+			}
+			if err := ent.WithTx(ctx, s.db, func(tx *ent.Tx) error {
+				return database.RecordSubtitle(ctx, tx, movieID, destination, track)
+			}); err != nil {
+				return errors.Join(err, os.Remove(destination))
+			}
+			saved = true
+			return nil
+		})
+		return saved, err
+	})
+}
+
+func (s *Service) reconcileTracks(ctx context.Context, movieID int, target subtitlemeta.Target, autoDownload bool) (map[subtitlemeta.Kind]bool, error) {
 	tracks, err := s.db.Subtitle.Query().Where(subtitle.MovieIDEQ(movieID)).Order(ent.Asc(subtitle.FieldID)).All(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("list movie subtitles: %w", err)
+		return nil, fmt.Errorf("list movie subtitles: %w", err)
 	}
 	exported := make(map[subtitlemeta.Kind]bool)
 	var pending []*ent.Subtitle
 	for _, track := range tracks {
+		if target.Version != "" && trackKind(track).Version != target.Version {
+			continue
+		}
 		if !autoDownload && fileExists(track.StoragePath) {
 			continue
 		}
@@ -63,31 +132,21 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 			}
 			// Media export moved this video's subtitle along with its STRM.
 			if err := s.db.Subtitle.UpdateOne(track).SetStoragePath(destination).SetName(filepath.Base(destination)).Exec(ctx); err != nil {
-				return 0, err
+				return nil, err
 			}
 			exported[trackKind(track)] = true
 		} else {
+			if target.Version != "" && filepath.Base(track.StoragePath) != filepath.Base(destination) {
+				continue
+			}
 			pending = append(pending, track)
 		}
 	}
-	written := 0
 	var errs []error
 	for _, track := range pending {
-		if track.SourceURL != "" {
-			// The exported file was removed, or predates exports beside the .strm.
-			// Drop the record and any stale copy; the online search replaces it.
-			if kind := trackKind(track); kind.Format != "" && !exported[kind] {
-				_ = os.Remove(target.Path(kind))
-			}
-		}
 		errs = append(errs, s.db.Subtitle.DeleteOne(track).Exec(ctx))
 	}
-	if autoDownload && !target.HardSubtitled && len(exported) < MaxTracks {
-		count, err := s.exportOnline(ctx, movieID, target, exported, config)
-		written += count
-		errs = append(errs, err)
-	}
-	return written, errors.Join(errs...)
+	return exported, errors.Join(errs...)
 }
 
 type download struct {
@@ -96,14 +155,39 @@ type download struct {
 	err      error
 }
 
-// exportOnline fills the remaining kinds in two passes: first a language or
+// DownloadMissing uses the configured sources even when automatic downloads are disabled.
+func (s *Service) DownloadMissing(ctx context.Context, target subtitlemeta.Target, existing map[subtitlemeta.Kind]bool, save func(subtitlemeta.Track, []byte) (bool, error)) (int, error) {
+	config, err := s.Config(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !config.Sources.Any() {
+		return 0, domain.E(domain.KindInvalid, "请在设置中至少启用一个字幕源", nil)
+	}
+	config.Enabled = true
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	return s.downloadOnline(ctx, target, existing, config, save)
+}
+
+// downloadOnline fills the remaining kinds in two passes: first a language or
 // cut the movie lacks, then another format of one it has.
-func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitlemeta.Target, exported map[subtitlemeta.Kind]bool, config Config) (int, error) {
-	candidates, _ := s.finder.SearchWithConfig(ctx, target.Code, target.Uncensored, config)
+func (s *Service) downloadOnline(ctx context.Context, target subtitlemeta.Target, exported map[subtitlemeta.Kind]bool, config Config, save func(subtitlemeta.Track, []byte) (bool, error)) (int, error) {
+	if len(exported) >= MaxTracks {
+		return 0, nil
+	}
+	candidates, searchErr := s.finder.SearchWithConfig(ctx, target.Code, target.Uncensored, config)
 	downloads := make(map[string]download)
 	written := make(map[[sha256.Size]byte]bool)
+	var downloadErrors []error
 	for _, distinctLanguage := range []bool{true, false} {
 		for _, candidate := range candidates {
+			if err := ctx.Err(); err != nil {
+				if len(written) > 0 {
+					return len(written), nil
+				}
+				return 0, domain.E(domain.KindUpstream, "字幕检索或下载超时，请稍后重试", err)
+			}
 			if target.Version != "" && candidate.Version != target.Version {
 				continue
 			}
@@ -120,6 +204,9 @@ func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitle
 				}
 				result.body, result.language, result.err = s.finder.Download(ctx, candidate)
 				downloads[candidate.URL] = result
+				if result.err != nil {
+					downloadErrors = append(downloadErrors, result.err)
+				}
 			}
 			if result.err != nil {
 				continue
@@ -129,17 +216,20 @@ func (s *Service) exportOnline(ctx context.Context, movieID int, target subtitle
 			if !wanted(candidate.Kind(), exported, distinctLanguage) || written[digest] {
 				continue
 			}
-			destination := target.Path(candidate.Kind())
-			if err := writeFile(destination, result.body); err != nil {
+			track := subtitlemeta.Track{Kind: candidate.Kind(), Source: candidate.Provider, SourceURL: candidate.URL}
+			saved, err := save(track, result.body)
+			if err != nil {
 				return len(written), err
 			}
 			exported[candidate.Kind()] = true
-			written[digest] = true
-			if err := s.db.Subtitle.Create().SetMovieID(movieID).SetName(filepath.Base(destination)).
-				SetLanguage(string(candidate.Language)).SetFormat(candidate.Format).SetVersionTag(string(candidate.Version)).
-				SetSource(candidate.Provider).SetSourceURL(candidate.URL).SetStoragePath(destination).Exec(ctx); err != nil {
-				return len(written), fmt.Errorf("record online subtitle: %w", err)
+			if saved {
+				written[digest] = true
 			}
+		}
+	}
+	if len(written) == 0 {
+		if err := errors.Join(searchErr, errors.Join(downloadErrors...), ctx.Err()); err != nil {
+			return 0, domain.E(domain.KindUpstream, "字幕检索或下载失败，请稍后重试", err)
 		}
 	}
 	return len(written), nil

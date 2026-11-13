@@ -109,7 +109,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	exportMgr := export.NewManager(export.Config{
 		EmbyDir: cfg.EmbyDir, PublicURL: cfg.PublicURL, STRMToken: cfg.STRMToken,
 	})
-	libSvc := library.New(store.Client, driveSvc, taskSvc, images, library.Options{ExportManager: exportMgr})
+	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()))
+	subtitleSvc.SetExportManager(exportMgr)
+	libSvc := library.New(store.Client, driveSvc, taskSvc, images, library.Options{ExportManager: exportMgr, Subtitles: subtitleSvc})
 	javbusClient, err := javbus.New(javbus.Options{Proxy: networkSvc.ProxyManager()})
 	if err != nil {
 		driveSvc.Close()
@@ -149,7 +151,6 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 	offlineSvc := offline.New(store.Client, catalogueSvc, driveSvc, taskSvc, libSvc, offlineSubmitTimeout)
 	monitorSvc := monitor.New(store.Client, catalogueSvc, offlineSvc, taskSvc)
-	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()))
 	gfriendsClient := gfriends.New(cfg.DataDir, &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: netx.NewTransport(networkSvc.ProxyManager()),

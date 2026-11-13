@@ -187,6 +187,15 @@ func (d *Drive) Commit(ctx context.Context, fn func(tx *ent.Tx) error) error {
 	return ent.WithTx(ctx, d.database, fn)
 }
 
+// WithCurrentSource keeps the mounted source stable during a local operation.
+func (d *Drive) WithCurrentSource(ctx context.Context, fn func(*domain.LibrarySource) error) error {
+	if err := d.commit.Lock(ctx); err != nil {
+		return err
+	}
+	defer d.commit.Unlock()
+	return fn(d.Source())
+}
+
 // OpenMedia streams media from 115 CDN directly.
 func (d *Drive) OpenMedia(ctx context.Context, method, address string, headers http.Header) (*http.Response, error) {
 	return d.client.OpenMedia(ctx, method, address, headers)

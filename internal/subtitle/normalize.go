@@ -8,10 +8,15 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
+
+	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 )
 
-// maxSize bounds a subtitle download or 115 read; real subtitles are far smaller.
-const maxSize = 10 << 20
+const maxSize = subtitlemeta.MaxFileSize
+
+func (s *Service) Normalize(raw []byte, format string) ([]byte, string, error) {
+	return Normalize(raw, format)
+}
 
 var (
 	utf8BOM = []byte{0xEF, 0xBB, 0xBF}

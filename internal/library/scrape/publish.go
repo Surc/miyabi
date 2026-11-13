@@ -176,6 +176,7 @@ func (service *Service) subtitleTask(input MetadataPayload, videos []pan.File) *
 			Dir:           filepath.Join(export.EmbyMovieDir(service.exportConfig().EmbyDir, input.Code), video.Dir),
 			Stem:          video.Stem,
 			Code:          input.Code,
+			FileID:        video.File.ID,
 			Uncensored:    subtitlemeta.IsUncensored(video.File.Name),
 			HardSubtitled: subtitlemeta.HasHardSubtitle(video.File.Name),
 		}

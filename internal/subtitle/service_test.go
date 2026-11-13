@@ -147,6 +147,33 @@ func TestExportSkipsOnlineSearchForHardSubtitledVideos(t *testing.T) {
 	}
 }
 
+func TestDownloadMissingUsesEnabledSourcesWhenAutomaticDownloadIsOff(t *testing.T) {
+	service, _, _, target := exportFixture(t, map[string]string{"/traditional.srt": traditionalSRT},
+		Candidate{Name: "ABP-123.chs.srt", URL: "/existing.srt", Format: "srt", Language: subtitlemeta.LangSimplifiedChinese, Version: subtitlemeta.VersionStandard},
+		Candidate{Name: "ABP-123.cht.srt", URL: "/traditional.srt", Format: "srt", Language: subtitlemeta.LangTraditionalChinese, Version: subtitlemeta.VersionStandard})
+	ctx := t.Context()
+	config := DefaultConfig()
+	config.Enabled = false
+	if _, err := service.UpdateConfig(ctx, config); err != nil {
+		t.Fatal(err)
+	}
+	existing := map[subtitlemeta.Kind]bool{
+		{Language: subtitlemeta.LangSimplifiedChinese, Version: subtitlemeta.VersionStandard, Format: "srt"}: true,
+	}
+	count, err := service.DownloadMissing(ctx, target, existing, func(candidate subtitlemeta.Track, body []byte) (bool, error) {
+		if candidate.Language != subtitlemeta.LangTraditionalChinese || string(body) != "\uFEFF"+traditionalSRT {
+			t.Fatalf("unexpected subtitle: %+v %q", candidate, body)
+		}
+		return true, nil
+	})
+	if count != 1 || err != nil {
+		t.Fatalf("download = %d, %v", count, err)
+	}
+	if current, err := service.Config(ctx); err != nil || current.Enabled {
+		t.Fatalf("manual download changed automatic settings: %+v, %v", current, err)
+	}
+}
+
 func TestTargetPathNamesVersionAndLanguageForEmby(t *testing.T) {
 	target := subtitlemeta.Target{Dir: "emby", Stem: "ABP-123"}
 	for kind, want := range map[subtitlemeta.Kind]string{

@@ -78,6 +78,25 @@ test('configurable targets refill only when entering the next display batch', as
   expect(read).toEqual([1, 2, 3, 4])
   expect(loader.getSnapshot().ready).toBe(80)
 })
+
+test('preloading keeps subtitle localization tags from list and detail metadata', async () => {
+  const tag = { id: 'subtitle', name: '字幕汉化', name_zht: '字幕漢化', category_id: '' }
+  const otherTag = { ...tag, id: 'other', name: '其他', name_zht: '' }
+  const loader = new BrowsePreloader(
+    {
+      page: async page =>
+        page === 1 ? [{ ...movie(1), tags: [otherTag, tag] }, movie(2), movie(3)] : [],
+      resources: async id => {
+        const result = resources(id, false)
+        result.data.movie.tags = id === '2' ? [otherTag, tag] : [otherTag]
+        return result
+      }
+    },
+    false
+  )
+  await loader.start()
+  expect(loader.getSnapshot().rows.map(row => row.movie.tags)).toEqual([[tag], [tag], []])
+})
 test('a short nonempty source page is not EOF; only a successful empty page ends the scan', async () => {
   const read: number[] = []
   const loader = new BrowsePreloader(

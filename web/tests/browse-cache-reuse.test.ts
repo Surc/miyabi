@@ -78,3 +78,27 @@ test('preloaded snapshots reuse original detail keys and bound idle memory witho
   unsubscribe()
   client.clear()
 })
+
+test('seeding detail from a resource snapshot preserves a list subtitle localization tag', () => {
+  const client = new QueryClient()
+  const item = movie('one')
+  const subtitleTag = { id: 'subtitle', name: '字幕汉化', name_zht: '', category_id: '' }
+  const detailTag = { id: 'detail', name: '其他', name_zht: '', category_id: '' }
+  client.setQueryData(discoverKeys.movies({ page: 1 }), [{ ...item, tags: [subtitleTag] }])
+  seedBrowseMagnets(client, item.id, {
+    data: {
+      movie: { ...item, tags: [detailTag] },
+      magnets: [],
+      complete: true,
+      has_subtitle: false,
+      has_cracked: false
+    },
+    updated_at: '2026-10-21T00:00:00Z',
+    stale: false
+  })
+  expect(client.getQueryData<DiscoverMovieDetail>(discoverKeys.movie(item.id))?.tags).toEqual([
+    detailTag,
+    subtitleTag
+  ])
+  client.clear()
+})

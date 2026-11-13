@@ -3,11 +3,30 @@ import type { DiscoverMovie } from '@/api/discover'
 import type { MovieIdentity } from '@/api/movie-states'
 import { useMovieState } from '@/api/movie-states'
 import { Badge } from '@/components/ui/badge'
+import { isSubtitleLocalizationTag } from '@/lib/subtitle-tags'
 
-export function MovieResourceBadges({ movie }: { movie: DiscoverMovie }) {
+export function MovieSubtitleBadge({
+  movie,
+  label = '字幕'
+}: {
+  movie: { has_subtitle?: boolean; tags: readonly { name: string; name_zht?: string }[] }
+  label?: string
+}) {
+  return movie.has_subtitle || movie.tags?.some(isSubtitleLocalizationTag) ? (
+    <Badge variant="outline">{label}</Badge>
+  ) : null
+}
+
+export function MovieResourceBadges({
+  movie,
+  subtitleLabel
+}: {
+  movie: DiscoverMovie
+  subtitleLabel?: string
+}) {
   return (
     <>
-      {movie.has_subtitle ? <Badge variant="outline">字幕</Badge> : null}
+      <MovieSubtitleBadge movie={movie} label={subtitleLabel} />
       {movie.has_preview ? <Badge variant="outline">有预览</Badge> : null}
       {movie.magnets_count > 0 ? <Badge variant="outline">含磁力</Badge> : null}
       {movie.release_status === 'upcoming' ? <Badge variant="outline">即将发行</Badge> : null}

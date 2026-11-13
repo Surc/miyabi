@@ -34,6 +34,7 @@ type Tag struct {
 	Provider string `json:"provider"`
 	SourceID string `json:"source_id"`
 	Name     string `json:"name"`
+	NameZHT  string `json:"name_zht,omitempty"`
 }
 
 type Movie struct {
@@ -64,17 +65,20 @@ type Page struct {
 }
 
 type Service struct {
-	database     *ent.Client
-	drive        *drive.Drive
-	tasks        *tasks.Service
-	scanner      *scan.Scanner
-	localScanner *scan.LocalScanner
-	exportMgr    *export.Manager
-	scanLock     syncx.ContextLock
+	database      *ent.Client
+	drive         *drive.Drive
+	tasks         *tasks.Service
+	scanner       *scan.Scanner
+	localScanner  *scan.LocalScanner
+	exportMgr     *export.Manager
+	subtitles     SubtitleProvider
+	mediaNotifier export.MediaNotifier
+	scanLock      syncx.ContextLock
 }
 
 type Options struct {
 	ExportManager *export.Manager
+	Subtitles     SubtitleProvider
 	// Pacing defaults to scan.DefaultPacing; tests can provide a no-op.
 	Pacing func(context.Context) error
 }
@@ -87,6 +91,7 @@ func New(database *ent.Client, d *drive.Drive, tasks *tasks.Service, images *med
 		scanner:      scan.New(d, database, images, tasks, options.ExportManager, options.Pacing),
 		localScanner: scan.NewLocalScanner(database, images),
 		exportMgr:    options.ExportManager,
+		subtitles:    options.Subtitles,
 	}
 	svc.localScanner.SetExportManager(options.ExportManager)
 	if d != nil && tasks != nil {
@@ -154,6 +159,7 @@ func (s *Service) MatchingMovies(ctx context.Context, javdbIDs []string, codes [
 
 // SetMediaNotifier binds the library/Emby cycle before task workers start.
 func (s *Service) SetMediaNotifier(notifier export.MediaNotifier) {
+	s.mediaNotifier = notifier
 	s.scanner.SetMediaNotifier(notifier)
 	s.localScanner.SetMediaNotifier(notifier)
 }
@@ -246,7 +252,8 @@ func (s *Service) Movies(ctx context.Context, page, limit int) (Page, error) {
 			query.Select(actor.FieldID, actor.FieldProvider, actor.FieldSourceID, actor.FieldName).Order(ent.Asc(actor.FieldName), ent.Asc(actor.FieldID))
 		}).
 		WithTags(func(query *ent.TagQuery) {
-			query.Select(tag.FieldID, tag.FieldProvider, tag.FieldSourceID, tag.FieldName).Order(ent.Asc(tag.FieldName), ent.Asc(tag.FieldID))
+			query.Select(tag.FieldID, tag.FieldProvider, tag.FieldSourceID, tag.FieldName, tag.FieldNameZht).
+				Order(ent.Asc(tag.FieldName), ent.Asc(tag.FieldID))
 		}).All(ctx)
 	if err != nil {
 		return result, fmt.Errorf("list library movies: %w", err)
@@ -271,7 +278,10 @@ func (s *Service) Movies(ctx context.Context, page, limit int) (Page, error) {
 			item.Actors = append(item.Actors, Entity{Provider: person.Provider, ID: person.SourceID, Name: person.Name})
 		}
 		for _, label := range record.Edges.Tags {
-			item.Tags = append(item.Tags, Tag{ID: label.ID, Provider: label.Provider, SourceID: label.SourceID, Name: label.Name})
+			item.Tags = append(item.Tags, Tag{
+				ID: label.ID, Provider: label.Provider, SourceID: label.SourceID,
+				Name: label.Name, NameZHT: domain.ValueOrZero(label.NameZht),
+			})
 		}
 		result.Movies = append(result.Movies, item)
 	}

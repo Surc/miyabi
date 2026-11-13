@@ -14,6 +14,7 @@ import { InlineError } from '@/components/error-state'
 import { ListPagination } from '@/components/list-pagination'
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
 import { MovieSubscribeButton } from '@/features/discover/movie-subscribe-button'
+import { isSubtitleLocalizationTag } from '@/lib/subtitle-tags'
 import { useBrowsePreloader } from './use-preloader'
 import { BrowseCacheSettingsButton } from './cache-settings'
 import type { PreloadRow, PreloadState } from './preloader'
@@ -225,7 +226,9 @@ function CachedMovieCard({ row, phase }: { row: PreloadRow; phase: PreloadState[
           </>
         }
       >
-        {resource?.data.has_subtitle ? (
+        {movie.tags?.some(isSubtitleLocalizationTag) ? (
+          <Badge variant="outline">字幕</Badge>
+        ) : resource?.data.has_subtitle ? (
           <Badge variant="outline" title={ready ? '磁力包含中文字幕标记' : '来自旧缓存，等待更新'}>
             中文字幕
           </Badge>

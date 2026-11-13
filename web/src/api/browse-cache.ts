@@ -9,6 +9,7 @@ import type {
 import type { ExternalRating } from './movie-extras'
 import { discoverKeys, findCachedMovieCard } from './movie-detail-cache'
 import { RequestSlots } from '@/features/discover/extensions/request-slots'
+import { isSubtitleLocalizationTag } from '@/lib/subtitle-tags'
 
 export type Cached<T> = { data: T; updated_at: string; stale: boolean; refresh_failed?: boolean }
 export type ResourceSnapshot = {
@@ -202,15 +203,22 @@ export function seedBrowseMagnets(
 ) {
   if (!result.stale && result.data.complete) {
     const base = findCachedMovieCard(client, id)
+    const movie = result.data.movie
     client.setQueryData(discoverKeys.magnets(id), result.data.magnets, {
       updatedAt: new Date(result.updated_at).getTime()
     })
-    if (base)
+    if (base) {
+      const subtitleTag = base.tags?.find(isSubtitleLocalizationTag)
+      const tags =
+        subtitleTag && !movie.tags?.some(isSubtitleLocalizationTag)
+          ? [...(movie.tags ?? []), subtitleTag]
+          : movie.tags
       client.setQueryData(
         discoverKeys.movie(id),
         {
           ...base,
-          ...result.data.movie,
+          ...movie,
+          tags,
           rating: base.rating,
           rating_source: base.rating_source,
           rating_max: base.rating_max,
@@ -220,6 +228,7 @@ export function seedBrowseMagnets(
         },
         { updatedAt: new Date(result.updated_at).getTime() }
       )
+    }
     for (const key of [discoverKeys.movie(id), discoverKeys.magnets(id)]) {
       const query = client.getQueryCache().find({ queryKey: key, exact: true })
       if (query) snapshotAccess.set(query, ++snapshotSequence)
