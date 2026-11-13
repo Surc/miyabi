@@ -19,4 +19,6 @@
 
 ## 后续升级检查
 
+2026-11-13 对照的 Miyabi 上游版本为 `ppxb/miyabi v0.2.2`，标签指向提交 `69aebae3c9b5a1ab6ce82bae378055998119500d`。本条记录用于后续同步时对照。 [上游发布记录](https://github.com/ppxb/miyabi/releases/tag/v0.2.2)
+
 分别更新 Miyabi 和 MDCz，按扩展文档复核契约。更新 Node、fnpack 或字体时重新核验官方来源、SHA-256 和许可证；Node 主版本改变需重建全部原生依赖。保留启动 smoke，不能只检查产物文件存在。发布时核对镜像架构、revision、Release 标签和附件校验和，保存运行链接与最终 SHA 到维护 skill。
