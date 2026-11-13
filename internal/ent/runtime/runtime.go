@@ -9,6 +9,7 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/actor"
 	"github.com/ppxb/miyabi/internal/ent/embynotification"
 	"github.com/ppxb/miyabi/internal/ent/file"
+	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/metadatacache"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/offlinedownload"
@@ -142,6 +143,20 @@ func init() {
 	fileDescScanID := fileFields[9].Descriptor()
 	// file.DefaultScanID holds the default value on creation for the scan_id field.
 	file.DefaultScanID = fileDescScanID.Default.(string)
+	localscanentryFields := schema.LocalScanEntry{}.Fields()
+	_ = localscanentryFields
+	// localscanentryDescRoot is the schema descriptor for root field.
+	localscanentryDescRoot := localscanentryFields[0].Descriptor()
+	// localscanentry.RootValidator is a validator for the "root" field. It is called by the builders before save.
+	localscanentry.RootValidator = localscanentryDescRoot.Validators[0].(func(string) error)
+	// localscanentryDescPath is the schema descriptor for path field.
+	localscanentryDescPath := localscanentryFields[1].Descriptor()
+	// localscanentry.PathValidator is a validator for the "path" field. It is called by the builders before save.
+	localscanentry.PathValidator = localscanentryDescPath.Validators[0].(func(string) error)
+	// localscanentryDescFingerprint is the schema descriptor for fingerprint field.
+	localscanentryDescFingerprint := localscanentryFields[2].Descriptor()
+	// localscanentry.FingerprintValidator is a validator for the "fingerprint" field. It is called by the builders before save.
+	localscanentry.FingerprintValidator = localscanentryDescFingerprint.Validators[0].(func(string) error)
 	metadatacacheFields := schema.MetadataCache{}.Fields()
 	_ = metadatacacheFields
 	// metadatacacheDescProvider is the schema descriptor for provider field.

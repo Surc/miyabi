@@ -29,6 +29,9 @@ export function scanStage(task: ScanTask): ScanTask['scan']['stage'] {
 }
 
 export function scanCount(task: ScanTask) {
+  if (task.source.account_id === 'local' && task.scan.metadata_total === 0) {
+    return `已处理 ${task.scan.video_files} 个视频文件`
+  }
   const count =
     task.scan.metadata_total > 0
       ? `${task.scan.metadata_completed} / ${task.scan.metadata_total} 部`

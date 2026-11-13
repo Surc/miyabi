@@ -100,6 +100,40 @@ var (
 			},
 		},
 	}
+	// LocalScanEntriesColumns holds the columns for the "local_scan_entries" table.
+	LocalScanEntriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "root", Type: field.TypeString},
+		{Name: "path", Type: field.TypeString},
+		{Name: "fingerprint", Type: field.TypeString},
+		{Name: "file_id", Type: field.TypeInt},
+	}
+	// LocalScanEntriesTable holds the schema information for the "local_scan_entries" table.
+	LocalScanEntriesTable = &schema.Table{
+		Name:       "local_scan_entries",
+		Columns:    LocalScanEntriesColumns,
+		PrimaryKey: []*schema.Column{LocalScanEntriesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "local_scan_entries_files_file",
+				Columns:    []*schema.Column{LocalScanEntriesColumns[4]},
+				RefColumns: []*schema.Column{FilesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "localscanentry_root_path",
+				Unique:  true,
+				Columns: []*schema.Column{LocalScanEntriesColumns[1], LocalScanEntriesColumns[2]},
+			},
+			{
+				Name:    "localscanentry_file_id",
+				Unique:  false,
+				Columns: []*schema.Column{LocalScanEntriesColumns[4]},
+			},
+		},
+	}
 	// MetadataCachesColumns holds the columns for the "metadata_caches" table.
 	MetadataCachesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
@@ -437,6 +471,7 @@ var (
 		ActorsTable,
 		EmbyNotificationsTable,
 		FilesTable,
+		LocalScanEntriesTable,
 		MetadataCachesTable,
 		MoviesTable,
 		OfflineDownloadsTable,
@@ -453,6 +488,7 @@ var (
 
 func init() {
 	FilesTable.ForeignKeys[0].RefTable = MoviesTable
+	LocalScanEntriesTable.ForeignKeys[0].RefTable = FilesTable
 	SubtitlesTable.ForeignKeys[0].RefTable = MoviesTable
 	MovieActorsTable.ForeignKeys[0].RefTable = MoviesTable
 	MovieActorsTable.ForeignKeys[1].RefTable = ActorsTable

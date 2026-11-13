@@ -18,6 +18,7 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/actor"
 	"github.com/ppxb/miyabi/internal/ent/embynotification"
 	"github.com/ppxb/miyabi/internal/ent/file"
+	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/metadatacache"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/offlinedownload"
@@ -40,6 +41,8 @@ type Client struct {
 	EmbyNotification *EmbyNotificationClient
 	// File is the client for interacting with the File builders.
 	File *FileClient
+	// LocalScanEntry is the client for interacting with the LocalScanEntry builders.
+	LocalScanEntry *LocalScanEntryClient
 	// MetadataCache is the client for interacting with the MetadataCache builders.
 	MetadataCache *MetadataCacheClient
 	// Movie is the client for interacting with the Movie builders.
@@ -72,6 +75,7 @@ func (c *Client) init() {
 	c.Actor = NewActorClient(c.config)
 	c.EmbyNotification = NewEmbyNotificationClient(c.config)
 	c.File = NewFileClient(c.config)
+	c.LocalScanEntry = NewLocalScanEntryClient(c.config)
 	c.MetadataCache = NewMetadataCacheClient(c.config)
 	c.Movie = NewMovieClient(c.config)
 	c.OfflineDownload = NewOfflineDownloadClient(c.config)
@@ -176,6 +180,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Actor:            NewActorClient(cfg),
 		EmbyNotification: NewEmbyNotificationClient(cfg),
 		File:             NewFileClient(cfg),
+		LocalScanEntry:   NewLocalScanEntryClient(cfg),
 		MetadataCache:    NewMetadataCacheClient(cfg),
 		Movie:            NewMovieClient(cfg),
 		OfflineDownload:  NewOfflineDownloadClient(cfg),
@@ -207,6 +212,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Actor:            NewActorClient(cfg),
 		EmbyNotification: NewEmbyNotificationClient(cfg),
 		File:             NewFileClient(cfg),
+		LocalScanEntry:   NewLocalScanEntryClient(cfg),
 		MetadataCache:    NewMetadataCacheClient(cfg),
 		Movie:            NewMovieClient(cfg),
 		OfflineDownload:  NewOfflineDownloadClient(cfg),
@@ -245,7 +251,7 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.Actor, c.EmbyNotification, c.File, c.MetadataCache, c.Movie,
+		c.Actor, c.EmbyNotification, c.File, c.LocalScanEntry, c.MetadataCache, c.Movie,
 		c.OfflineDownload, c.Setting, c.Subscription, c.Subtitle, c.Tag, c.Task,
 		c.ViewedMovie,
 	} {
@@ -257,7 +263,7 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.Actor, c.EmbyNotification, c.File, c.MetadataCache, c.Movie,
+		c.Actor, c.EmbyNotification, c.File, c.LocalScanEntry, c.MetadataCache, c.Movie,
 		c.OfflineDownload, c.Setting, c.Subscription, c.Subtitle, c.Tag, c.Task,
 		c.ViewedMovie,
 	} {
@@ -274,6 +280,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.EmbyNotification.mutate(ctx, m)
 	case *FileMutation:
 		return c.File.mutate(ctx, m)
+	case *LocalScanEntryMutation:
+		return c.LocalScanEntry.mutate(ctx, m)
 	case *MetadataCacheMutation:
 		return c.MetadataCache.mutate(ctx, m)
 	case *MovieMutation:
@@ -725,6 +733,155 @@ func (c *FileClient) mutate(ctx context.Context, m *FileMutation) (Value, error)
 		return (&FileDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown File mutation op: %q", m.Op())
+	}
+}
+
+// LocalScanEntryClient is a client for the LocalScanEntry schema.
+type LocalScanEntryClient struct {
+	config
+}
+
+// NewLocalScanEntryClient returns a client for the LocalScanEntry from the given config.
+func NewLocalScanEntryClient(c config) *LocalScanEntryClient {
+	return &LocalScanEntryClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `localscanentry.Hooks(f(g(h())))`.
+func (c *LocalScanEntryClient) Use(hooks ...Hook) {
+	c.hooks.LocalScanEntry = append(c.hooks.LocalScanEntry, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `localscanentry.Intercept(f(g(h())))`.
+func (c *LocalScanEntryClient) Intercept(interceptors ...Interceptor) {
+	c.inters.LocalScanEntry = append(c.inters.LocalScanEntry, interceptors...)
+}
+
+// Create returns a builder for creating a LocalScanEntry entity.
+func (c *LocalScanEntryClient) Create() *LocalScanEntryCreate {
+	mutation := newLocalScanEntryMutation(c.config, OpCreate)
+	return &LocalScanEntryCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of LocalScanEntry entities.
+func (c *LocalScanEntryClient) CreateBulk(builders ...*LocalScanEntryCreate) *LocalScanEntryCreateBulk {
+	return &LocalScanEntryCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *LocalScanEntryClient) MapCreateBulk(slice any, setFunc func(*LocalScanEntryCreate, int)) *LocalScanEntryCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &LocalScanEntryCreateBulk{err: fmt.Errorf("calling to LocalScanEntryClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*LocalScanEntryCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &LocalScanEntryCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for LocalScanEntry.
+func (c *LocalScanEntryClient) Update() *LocalScanEntryUpdate {
+	mutation := newLocalScanEntryMutation(c.config, OpUpdate)
+	return &LocalScanEntryUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *LocalScanEntryClient) UpdateOne(_m *LocalScanEntry) *LocalScanEntryUpdateOne {
+	mutation := newLocalScanEntryMutation(c.config, OpUpdateOne, withLocalScanEntry(_m))
+	return &LocalScanEntryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *LocalScanEntryClient) UpdateOneID(id int) *LocalScanEntryUpdateOne {
+	mutation := newLocalScanEntryMutation(c.config, OpUpdateOne, withLocalScanEntryID(id))
+	return &LocalScanEntryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for LocalScanEntry.
+func (c *LocalScanEntryClient) Delete() *LocalScanEntryDelete {
+	mutation := newLocalScanEntryMutation(c.config, OpDelete)
+	return &LocalScanEntryDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *LocalScanEntryClient) DeleteOne(_m *LocalScanEntry) *LocalScanEntryDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *LocalScanEntryClient) DeleteOneID(id int) *LocalScanEntryDeleteOne {
+	builder := c.Delete().Where(localscanentry.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &LocalScanEntryDeleteOne{builder}
+}
+
+// Query returns a query builder for LocalScanEntry.
+func (c *LocalScanEntryClient) Query() *LocalScanEntryQuery {
+	return &LocalScanEntryQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeLocalScanEntry},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a LocalScanEntry entity by its id.
+func (c *LocalScanEntryClient) Get(ctx context.Context, id int) (*LocalScanEntry, error) {
+	return c.Query().Where(localscanentry.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *LocalScanEntryClient) GetX(ctx context.Context, id int) *LocalScanEntry {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryFile queries the file edge of a LocalScanEntry.
+func (c *LocalScanEntryClient) QueryFile(_m *LocalScanEntry) *FileQuery {
+	query := (&FileClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(localscanentry.Table, localscanentry.FieldID, id),
+			sqlgraph.To(file.Table, file.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, localscanentry.FileTable, localscanentry.FileColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *LocalScanEntryClient) Hooks() []Hook {
+	return c.hooks.LocalScanEntry
+}
+
+// Interceptors returns the client interceptors.
+func (c *LocalScanEntryClient) Interceptors() []Interceptor {
+	return c.inters.LocalScanEntry
+}
+
+func (c *LocalScanEntryClient) mutate(ctx context.Context, m *LocalScanEntryMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&LocalScanEntryCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&LocalScanEntryUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&LocalScanEntryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&LocalScanEntryDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown LocalScanEntry mutation op: %q", m.Op())
 	}
 }
 
@@ -2025,11 +2182,13 @@ func (c *ViewedMovieClient) mutate(ctx context.Context, m *ViewedMovieMutation) 
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Actor, EmbyNotification, File, MetadataCache, Movie, OfflineDownload, Setting,
-		Subscription, Subtitle, Tag, Task, ViewedMovie []ent.Hook
+		Actor, EmbyNotification, File, LocalScanEntry, MetadataCache, Movie,
+		OfflineDownload, Setting, Subscription, Subtitle, Tag, Task,
+		ViewedMovie []ent.Hook
 	}
 	inters struct {
-		Actor, EmbyNotification, File, MetadataCache, Movie, OfflineDownload, Setting,
-		Subscription, Subtitle, Tag, Task, ViewedMovie []ent.Interceptor
+		Actor, EmbyNotification, File, LocalScanEntry, MetadataCache, Movie,
+		OfflineDownload, Setting, Subscription, Subtitle, Tag, Task,
+		ViewedMovie []ent.Interceptor
 	}
 )

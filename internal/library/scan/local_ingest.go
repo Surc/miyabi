@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/file"
+	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/export"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
@@ -28,20 +30,24 @@ type localMedia struct {
 	size                            int64
 	nfoPath, posterPath, fanartPath string
 	subPaths                        []string
+	info                            map[string]fs.FileInfo
 	rel, fileID                     string
+	fingerprint                     string
+	importIncomplete                bool
 	document                        *nfo.Movie
 	artwork                         mediaimage.Artwork
 }
 
 // Prepare sidecars and artwork before taking SQLite's writer lock. Only one
 // bounded batch is prepared at a time; decoded images are not kept in memory.
-func (s *LocalScanner) prepareMedia(ctx context.Context, rootDir string, media *localMedia) error {
+func (s *LocalScanner) prepareMedia(ctx context.Context, media *localMedia, cfg export.Config) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if media.nfoPath != "" {
 		body, err := os.ReadFile(media.nfoPath)
 		if err != nil {
+			media.importIncomplete = true
 			slog.WarnContext(ctx, "failed to read local NFO", "path", media.nfoPath, "error", err)
 		} else if doc, err := nfo.Decode(body); err != nil {
 			slog.WarnContext(ctx, "failed to decode local NFO", "path", media.nfoPath, "error", err)
@@ -54,14 +60,15 @@ func (s *LocalScanner) prepareMedia(ctx context.Context, rootDir string, media *
 		}
 	}
 	if s.images != nil && media.posterPath != "" {
-		poster, _ := os.ReadFile(media.posterPath)
+		poster, err := os.ReadFile(media.posterPath)
+		media.importIncomplete = media.importIncomplete || err != nil
 		if len(poster) > 0 {
 			var fanart []byte
 			if media.fanartPath != "" {
-				fanart, _ = os.ReadFile(media.fanartPath)
+				fanart, err = os.ReadFile(media.fanartPath)
+				media.importIncomplete = media.importIncomplete || err != nil
 			}
 			var artwork mediaimage.Artwork
-			var err error
 			if len(fanart) > 0 {
 				artwork, err = s.images.Restore(poster, fanart)
 			} else {
@@ -69,30 +76,45 @@ func (s *LocalScanner) prepareMedia(ctx context.Context, rootDir string, media *
 			}
 			if err == nil {
 				media.artwork = artwork
+			} else {
+				media.importIncomplete = true
 			}
 		}
 	}
 	if domain.IsSTRM(media.name) {
-		body, _ := os.ReadFile(media.path)
-		media.fileID = export.ParseSTRMFileID(string(body))
+		info, err := os.Stat(media.path)
+		if err != nil {
+			return err
+		}
+		fileID, rewritten, err := export.RewriteSTRMFile(media.path, cfg)
+		if err != nil {
+			return err
+		}
+		media.fileID = fileID
+		if rewritten {
+			info, err = os.Stat(media.path)
+			if err != nil {
+				return err
+			}
+		}
+		media.size = info.Size()
+		media.fingerprint = localFingerprint(*media, info)
 	}
-	rel, err := filepath.Rel(rootDir, media.path)
-	if err != nil {
-		return fmt.Errorf("compute relative path for %s: %w", media.path, err)
-	}
-	media.rel = rel
 	if media.fileID == "" {
-		// Scan normalizes the root first, so the absolute path distinguishes
-		// identical relative names in different libraries without aliasing rescans.
-		hash := sha256.Sum256([]byte(media.path))
-		media.fileID = "local-" + hex.EncodeToString(hash[:16])
+		media.fileID = localFileID(media.path)
 	}
 	return ctx.Err()
 }
 
+// The canonical absolute path distinguishes identical names in different libraries.
+func localFileID(path string) string {
+	hash := sha256.Sum256([]byte(path))
+	return "local-" + hex.EncodeToString(hash[:16])
+}
+
 func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult) error {
 	if s.exports == nil {
-		return s.importBatch(ctx, rootDir, batch, result)
+		return s.importBatch(ctx, rootDir, batch, result, export.Config{})
 	}
 	return s.exports.WithConfig(func(cfg export.Config) error {
 		current, err := filepath.Abs(cfg.EmbyDir)
@@ -105,11 +127,11 @@ func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, batch []
 		if current != rootDir {
 			return domain.E(domain.KindConflict, "Emby 本地目录已变更，请扫描当前目录", nil)
 		}
-		return s.importBatch(ctx, rootDir, batch, result)
+		return s.importBatch(ctx, rootDir, batch, result, cfg)
 	})
 }
 
-func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult) error {
+func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult, cfg export.Config) error {
 	if s.images != nil {
 		for _, media := range batch {
 			if media.posterPath != "" {
@@ -126,7 +148,7 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 	}
 	codes, fileIDs := make([]string, len(batch)), make([]string, len(batch))
 	for i := range batch {
-		if err := s.prepareMedia(ctx, rootDir, &batch[i]); err != nil {
+		if err := s.prepareMedia(ctx, &batch[i], cfg); err != nil {
 			return fmt.Errorf("prepare %s: %w", batch[i].path, err)
 		}
 		codes[i], fileIDs[i] = batch[i].code, batch[i].fileID
@@ -156,6 +178,13 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 			}
 		}
 		directories := make(map[string]bool)
+		entries := make([]*ent.LocalScanEntryCreate, 0, len(batch))
+		remember := func(media localMedia, id int) {
+			if !media.importIncomplete {
+				entries = append(entries, tx.LocalScanEntry.Create().SetRoot(rootDir).
+					SetPath(media.rel).SetFingerprint(media.fingerprint).SetFileID(id))
+			}
+		}
 		for _, media := range batch {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -171,6 +200,7 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 			}
 			// A stale exported NFO must not undo a manual correction or reassign its files.
 			if existing != nil && existing.MovieID != nil && manualMovies[*existing.MovieID] {
+				remember(media, existing.ID)
 				continue
 			}
 			record := matcher.find(media.code)
@@ -187,6 +217,7 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 				nfoRead++
 				var current *ent.Movie
 				if err := scrape.SaveMovieMetadata(ctx, tx, record.ID, *media.document); err != nil {
+					media.importIncomplete = true
 					slog.WarnContext(ctx, "failed to save movie metadata from local NFO", "path", media.nfoPath, "error", err)
 					// Even a rejected NFO may have changed fields before a later write failed.
 					current, err = tx.Movie.Get(ctx, record.ID)
@@ -229,7 +260,14 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 					return err
 				}
 			}
+			remember(media, files[media.fileID].ID)
 			directories[filepath.Dir(media.path)] = true
+		}
+		if len(entries) > 0 {
+			if err := tx.LocalScanEntry.CreateBulk(entries...).OnConflictColumns(localscanentry.FieldRoot, localscanentry.FieldPath).
+				UpdateNewValues().UpdateFileID().Exec(ctx); err != nil {
+				return fmt.Errorf("save local scan index: %w", err)
+			}
 		}
 		if s.notifier != nil {
 			for dir := range directories {

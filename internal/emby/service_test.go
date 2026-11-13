@@ -96,6 +96,48 @@ func TestSwitchLocalDirectoryRewritesSTRMWithoutChangingPublicURL(t *testing.T) 
 	}
 }
 
+func TestSTRMBulkRewriteSkipsUnchangedConfigurationAndRetriesFailures(t *testing.T) {
+	ctx, root := t.Context(), t.TempDir()
+	store, err := database.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := export.Config{EmbyDir: root, PublicURL: "http://current.example", STRMToken: "first"}
+	mgr := export.NewManager(cfg)
+	svc := &Service{db: store.Client}
+	path := filepath.Join(root, "TEST-001.strm")
+	if err := os.WriteFile(path, export.STRMContent("http://old.example", "123", "old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, count, err := svc.rewriteSTRMIfNeeded(ctx, mgr); err != nil || count != 1 {
+		t.Fatalf("initial rewrite: %d files, %v", count, err)
+	}
+	// A dangling link would fail if the same configuration still triggered a walk.
+	missing := filepath.Join(root, "000-missing.strm")
+	if err := os.Symlink(filepath.Join(root, "missing"), missing); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, count, err := svc.rewriteSTRMIfNeeded(ctx, mgr); err != nil || count != 0 {
+		t.Fatalf("unchanged configuration triggered a walk: %d files, %v", count, err)
+	}
+	cfg.STRMToken = "second"
+	mgr.Set(cfg)
+	if _, _, err := svc.rewriteSTRMIfNeeded(ctx, mgr); err == nil {
+		t.Fatal("rewrite unexpectedly succeeded with an unreadable STRM")
+	}
+	if err := os.Remove(missing); err != nil {
+		t.Fatal(err)
+	}
+	if _, count, err := svc.rewriteSTRMIfNeeded(ctx, mgr); err != nil || count != 1 {
+		t.Fatalf("retry after failed rewrite: %d files, %v", count, err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(body, export.STRMContent(cfg.PublicURL, "123", cfg.STRMToken)) {
+		t.Fatalf("token change was not applied: %v", err)
+	}
+}
+
 func TestEmbyConfig_Normalize(t *testing.T) {
 	cfg := Config{
 		Enabled:   true,

@@ -18,6 +18,8 @@ type Tx struct {
 	EmbyNotification *EmbyNotificationClient
 	// File is the client for interacting with the File builders.
 	File *FileClient
+	// LocalScanEntry is the client for interacting with the LocalScanEntry builders.
+	LocalScanEntry *LocalScanEntryClient
 	// MetadataCache is the client for interacting with the MetadataCache builders.
 	MetadataCache *MetadataCacheClient
 	// Movie is the client for interacting with the Movie builders.
@@ -170,6 +172,7 @@ func (tx *Tx) init() {
 	tx.Actor = NewActorClient(tx.config)
 	tx.EmbyNotification = NewEmbyNotificationClient(tx.config)
 	tx.File = NewFileClient(tx.config)
+	tx.LocalScanEntry = NewLocalScanEntryClient(tx.config)
 	tx.MetadataCache = NewMetadataCacheClient(tx.config)
 	tx.Movie = NewMovieClient(tx.config)
 	tx.OfflineDownload = NewOfflineDownloadClient(tx.config)

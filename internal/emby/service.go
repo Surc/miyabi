@@ -2,6 +2,9 @@ package emby
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -177,16 +180,49 @@ func (s *Service) startSTRMRewrite(mgr *export.Manager) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		count, err := mgr.RewriteSTRM(s.ctx)
+		root, count, err := s.rewriteSTRMIfNeeded(s.ctx, mgr)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("failed to rewrite STRM files", "error", err)
 		} else if count > 0 {
 			slog.Info("rewrote STRM files", "count", count)
-			if err := s.NotifyUpdated(s.ctx, mgr.Config().EmbyDir); err != nil {
+			if err := s.NotifyUpdated(s.ctx, root); err != nil {
 				slog.Error("persist Emby notification", "error", err)
 			}
 		}
 	}()
+}
+
+func (s *Service) rewriteSTRMIfNeeded(ctx context.Context, mgr *export.Manager) (string, int, error) {
+	const setting = "emby.strm_rewrite_config"
+	var root string
+	var count int
+	err := mgr.WithConfig(func(cfg export.Config) error {
+		resolved, err := filepath.EvalSymlinks(cfg.EmbyDir)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		root, err = filepath.Abs(resolved)
+		if err != nil {
+			return err
+		}
+		// Store a digest so the playback token stays out of the database.
+		value, _ := json.Marshal([3]string{root, cfg.PublicURL, cfg.STRMToken})
+		digest := sha256.Sum256(value)
+		fingerprint := hex.EncodeToString(digest[:])
+		previous, _, err := database.LoadSetting[string](ctx, s.db, setting)
+		if err != nil || previous == fingerprint {
+			return err
+		}
+		count, err = export.RewriteSTRM(ctx, root, cfg.PublicURL, cfg.STRMToken)
+		if err != nil {
+			return err
+		}
+		return database.SaveSetting(ctx, s.db, setting, fingerprint)
+	})
+	return root, count, err
 }
 
 // Test validates connection parameters by querying /System/Info.

@@ -49,6 +49,26 @@ func STRMContent(publicURL, fileID, strmToken string) []byte {
 	return []byte(content + "\n")
 }
 
+// RewriteSTRMFile reads the relay ID and updates its link when an export URL is configured.
+func RewriteSTRMFile(path string, cfg Config) (fileID string, rewritten bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, fmt.Errorf("read STRM %s: %w", path, err)
+	}
+	fileID = ParseSTRMFileID(string(data))
+	if fileID == "" || cfg.PublicURL == "" {
+		return fileID, false, nil
+	}
+	newContent := STRMContent(cfg.PublicURL, fileID, cfg.STRMToken)
+	if bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(newContent)) {
+		return fileID, false, nil
+	}
+	if err := atomicfile.WriteFile(path, newContent, 0o644); err != nil {
+		return "", false, fmt.Errorf("rewrite STRM %s: %w", path, err)
+	}
+	return fileID, true, nil
+}
+
 // RewriteSTRM walks the Emby export directory and updates all existing .strm files
 // to use the active publicURL and strmToken. It respects cancellation via ctx.
 // It returns the count of rewritten files.
@@ -71,19 +91,11 @@ func RewriteSTRM(ctx context.Context, embyDir, publicURL, strmToken string) (int
 		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".strm") {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		_, changed, err := RewriteSTRMFile(path, Config{PublicURL: publicURL, STRMToken: strmToken})
 		if err != nil {
-			return fmt.Errorf("read STRM %s: %w", path, err)
+			return err
 		}
-		fileID := ParseSTRMFileID(string(data))
-		if fileID == "" {
-			return nil
-		}
-		newContent := STRMContent(publicURL, fileID, strmToken)
-		if !bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(newContent)) {
-			if err := atomicfile.WriteFile(path, newContent, 0o644); err != nil {
-				return fmt.Errorf("rewrite STRM %s: %w", path, err)
-			}
+		if changed {
 			rewritten++
 		}
 		return nil

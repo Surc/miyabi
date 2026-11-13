@@ -151,14 +151,14 @@ func TestLocalScannerBatchesQueriesAndPreservesRemoteFileIdentity(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if movieQueries != 3 || fileQueries != 3 {
-			t.Fatalf("run %d: movie queries=%d file queries=%d, want 3 each for %d files", run, movieQueries, fileQueries, count)
-		}
-		wantAdded := count
+		wantQueries, wantImported := 3, count
 		if run == 1 {
-			wantAdded = 0
+			wantQueries, wantImported = 0, 0
 		}
-		if result.MediaFiles != count || result.MoviesAdded != wantAdded || result.FilesScanned != count {
+		if movieQueries != wantQueries || fileQueries != wantQueries {
+			t.Fatalf("run %d: movie queries=%d file queries=%d, want %d each", run, movieQueries, fileQueries, wantQueries)
+		}
+		if result.MediaFiles != wantImported || result.MoviesAdded != wantImported || result.FilesScanned != count {
 			t.Fatalf("run %d: result=%+v", run, result)
 		}
 		got := scanner.db.File.GetX(ctx, remote.ID)
@@ -170,6 +170,96 @@ func TestLocalScannerBatchesQueriesAndPreservesRemoteFileIdentity(t *testing.T) 
 		if got := scanner.db.File.Query().CountX(ctx); got != count {
 			t.Fatalf("file count=%d, want %d", got, count)
 		}
+	}
+}
+
+func TestLocalScanImportsChangesToExistingMediaAndSidecars(t *testing.T) {
+	scanner := localScannerFixture(t)
+	ctx, root := t.Context(), t.TempDir()
+	writeLocalFile(t, root, "AAA-001.mp4", []byte("video"))
+	writeLocalFile(t, root, "BBB-002.mp4", []byte("other video"))
+	writeLocalFile(t, root, "BBB-002.nfo", []byte("<movie><title>other</title></movie>"))
+	writeNFO := func(title string) {
+		t.Helper()
+		body, err := nfo.Encode(nfo.Movie{Code: "AAA-001", Title: title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeLocalFile(t, root, "AAA-001.nfo", body)
+	}
+	writeNFO("old")
+	// Simulate an existing library whose file row predates the scan index.
+	legacy := scanner.db.Movie.Create().SetCode("AAA-001").SaveX(ctx)
+	legacyPath, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID := localFileID(filepath.Join(legacyPath, "AAA-001.mp4"))
+	scanner.db.File.Create().SetFileID(legacyID).SetName("AAA-001.mp4").SetSize(5).
+		SetAccountID(domain.LocalAccountID).SetRootID(domain.LocalAccountID).
+		SetPath("AAA-001.mp4").SetMovieID(legacy.ID).ExecX(ctx)
+	assertScan := func(want int) {
+		t.Helper()
+		result, err := scanner.Scan(ctx, root)
+		if err != nil || result.MediaFiles != want {
+			t.Fatalf("scan processed %+v, want %d media files: %v", result, want, err)
+		}
+	}
+	assertScan(2)
+	assertScan(0)
+	writeNFO("new") // Same size, changed modification time.
+	stamp := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(root, "AAA-001.nfo"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	assertScan(1)
+	if got := scanner.db.Movie.GetX(ctx, legacy.ID); got.Title != "new" {
+		t.Fatalf("NFO change was not imported into the existing movie: %q", got.Title)
+	}
+	writeLocalFile(t, root, "AAA-001-poster.jpg", testJPEG(t))
+	assertScan(1)
+	if got := scanner.db.Movie.GetX(ctx, legacy.ID); got.Poster == nil {
+		t.Fatal("new artwork was not imported")
+	}
+	writeLocalFile(t, root, "AAA-001.zh-CN.srt", []byte("subtitle"))
+	assertScan(1)
+	if got := scanner.db.Subtitle.Query().OnlyX(ctx); got.MovieID != legacy.ID {
+		t.Fatalf("new subtitle was associated with the wrong movie: %+v", got)
+	}
+	writeLocalFile(t, root, "AAA-001.mp4", []byte("longer video"))
+	newDir := filepath.Join(root, "new")
+	if err := os.Mkdir(newDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeLocalFile(t, newDir, "CCC-003.mp4", []byte("new video"))
+	assertScan(2)
+	assertScan(0)
+	entry := scanner.db.File.Query().Where(file.NameEQ("AAA-001.mp4")).OnlyX(ctx)
+	if entry.Size != int64(len("longer video")) {
+		t.Fatalf("changed video size was not indexed: %d", entry.Size)
+	}
+	scanner.db.File.DeleteOneID(entry.ID).ExecX(ctx)
+	assertScan(1)
+}
+
+func TestLocalScanRepairsNewSTRMLinksOnce(t *testing.T) {
+	scanner := localScannerFixture(t)
+	ctx, root := t.Context(), t.TempDir()
+	cfg := export.Config{EmbyDir: root, PublicURL: "http://current.example", STRMToken: "current"}
+	scanner.SetExportManager(export.NewManager(cfg))
+	name := "TEST-001.strm"
+	writeLocalFile(t, root, name, export.STRMContent("http://old.example", "remote-1", "old"))
+	result, err := scanner.Scan(ctx, root)
+	if err != nil || result.MediaFiles != 1 {
+		t.Fatalf("first scan: %+v, %v", result, err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil || string(body) != string(export.STRMContent(cfg.PublicURL, "remote-1", cfg.STRMToken)) {
+		t.Fatalf("new STRM kept the old relay link: %v", err)
+	}
+	result, err = scanner.Scan(ctx, root)
+	if err != nil || result.MediaFiles != 0 {
+		t.Fatalf("rewritten STRM was reimported: %+v, %v", result, err)
 	}
 }
 
@@ -308,8 +398,9 @@ func TestLocalBatchCommitRollbackAndCancellation(t *testing.T) {
 					want = localScanBatchSize
 				}
 			}
-			if files, movies, subs := scanner.db.File.Query().CountX(t.Context()), scanner.db.Movie.Query().CountX(t.Context()), scanner.db.Subtitle.Query().CountX(t.Context()); files != want || movies != want || subs != want {
-				t.Fatalf("partial batch: files=%d movies=%d subtitles=%d, want %d each", files, movies, subs, want)
+			if files, movies, subs, indexed := scanner.db.File.Query().CountX(t.Context()), scanner.db.Movie.Query().CountX(t.Context()),
+				scanner.db.Subtitle.Query().CountX(t.Context()), scanner.db.LocalScanEntry.Query().CountX(t.Context()); files != want || movies != want || subs != want || indexed != want {
+				t.Fatalf("partial batch: files=%d movies=%d subtitles=%d scan entries=%d, want %d each", files, movies, subs, indexed, want)
 			}
 			wantNotifications := 0
 			if want > 0 {

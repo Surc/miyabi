@@ -2,6 +2,8 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -15,6 +17,8 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 	"github.com/ppxb/miyabi/internal/ent"
+	"github.com/ppxb/miyabi/internal/ent/file"
+	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
 	"github.com/ppxb/miyabi/internal/export"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
@@ -59,9 +63,10 @@ type dirGroup struct {
 	nfoFiles   []string
 	imageFiles []string
 	subFiles   []string
+	info       map[string]fs.FileInfo
 }
 
-// Scan walks rootDir and imports any found media (.strm, .mp4, etc.) into the SQLite database.
+// Scan checks file metadata under rootDir and imports new or changed media.
 func (s *LocalScanner) Scan(ctx context.Context, rootDir string) (*LocalScanResult, error) {
 	return s.ScanWithProgress(ctx, rootDir, LocalScanResult{}, nil)
 }
@@ -88,6 +93,17 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, pre
 		return nil, fmt.Errorf("local path %s is not a directory", rootDir)
 	}
 
+	entries, err := s.db.LocalScanEntry.Query().Where(localscanentry.RootEQ(rootDir),
+		localscanentry.HasFileWith(file.HasMovie())).
+		Select(localscanentry.FieldPath, localscanentry.FieldFingerprint).All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load local scan index: %w", err)
+	}
+	indexed := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		indexed[entry.Path] = entry.Fingerprint
+	}
+
 	result := previous
 	result.FilesScanned = 0
 	dirs := make(map[string]*dirGroup)
@@ -112,24 +128,32 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, pre
 		}
 		result.FilesScanned++
 		dir := filepath.Dir(path)
-		group := dirs[dir]
-		if group == nil {
-			group = &dirGroup{}
-			dirs[dir] = group
-		}
 		name := d.Name()
+		media := domain.IsMedia(name)
+		nfo := strings.EqualFold(filepath.Ext(name), ".nfo")
+		image := isImageFile(name)
+		sub := domain.IsSubtitle(name)
+		if !media && !nfo && !image && !sub {
+			return nil
+		}
 		info, infoErr := d.Info()
 		if infoErr != nil {
 			return nil
 		}
-
-		if domain.IsMedia(name) {
+		group := dirs[dir]
+		if group == nil {
+			group = &dirGroup{info: make(map[string]fs.FileInfo)}
+			dirs[dir] = group
+		}
+		group.info[path] = info
+		switch {
+		case media:
 			group.mediaFiles = append(group.mediaFiles, info)
-		} else if strings.EqualFold(filepath.Ext(name), ".nfo") {
+		case nfo:
 			group.nfoFiles = append(group.nfoFiles, path)
-		} else if isImageFile(name) {
+		case image:
 			group.imageFiles = append(group.imageFiles, path)
-		} else if domain.IsSubtitle(name) {
+		case sub:
 			group.subFiles = append(group.subFiles, path)
 		}
 		return nil
@@ -179,12 +203,23 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, pre
 				continue
 			}
 			posterPath, fanartPath := findMatchingArtwork(dir, stem, group.imageFiles)
-			batch = append(batch, localMedia{
+			rel, err := filepath.Rel(rootDir, mediaPath)
+			if err != nil {
+				return nil, fmt.Errorf("compute relative media path: %w", err)
+			}
+			candidate := localMedia{
 				path: mediaPath, name: media.Name(), size: media.Size(), code: code,
 				nfoPath:    findMatchingNFO(dir, stem, code, group.nfoFiles),
 				posterPath: posterPath, fanartPath: fanartPath,
 				subPaths: findMatchingSubtitles(stem, group.subFiles, len(group.mediaFiles) == 1),
-			})
+				rel:      rel,
+				info:     group.info,
+			}
+			candidate.fingerprint = localFingerprint(candidate, media)
+			if candidate.fingerprint == indexed[rel] {
+				continue
+			}
+			batch = append(batch, candidate)
 			if len(batch) == localScanBatchSize {
 				if err := flush(); err != nil {
 					return nil, err
@@ -200,6 +235,24 @@ func (s *LocalScanner) ScanWithProgress(ctx context.Context, rootDir string, pre
 		}
 	}
 	return &result, nil
+}
+
+func localFingerprint(media localMedia, mediaInfo fs.FileInfo) string {
+	hash := sha256.New()
+	write := func(path string, entry fs.FileInfo) {
+		if entry != nil {
+			fmt.Fprintf(hash, "%q %d %d", filepath.Base(path), entry.Size(), entry.ModTime().UnixNano())
+		}
+		_, _ = hash.Write([]byte{'\n'})
+	}
+	write(media.path, mediaInfo)
+	for _, path := range []string{media.nfoPath, media.posterPath, media.fanartPath} {
+		write(path, media.info[path])
+	}
+	for _, path := range media.subPaths {
+		write(path, media.info[path])
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func isImageFile(name string) bool {

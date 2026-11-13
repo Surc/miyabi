@@ -45,6 +45,18 @@ func (f FileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error)
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.FileMutation", m)
 }
 
+// The LocalScanEntryFunc type is an adapter to allow the use of ordinary
+// function as LocalScanEntry mutator.
+type LocalScanEntryFunc func(context.Context, *ent.LocalScanEntryMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f LocalScanEntryFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.LocalScanEntryMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.LocalScanEntryMutation", m)
+}
+
 // The MetadataCacheFunc type is an adapter to allow the use of ordinary
 // function as MetadataCache mutator.
 type MetadataCacheFunc func(context.Context, *ent.MetadataCacheMutation) (ent.Value, error)
