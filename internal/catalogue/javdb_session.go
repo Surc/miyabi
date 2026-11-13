@@ -10,9 +10,12 @@ import (
 	"github.com/ppxb/miyabi/internal/javdb"
 )
 
-func (service *Service) JavDBSessionConfigured() bool {
+func (service *Service) JavDBSessionStatus(ctx context.Context) javdb.SessionStatus {
 	client, ok := service.javdb.(*javdb.Client)
-	return ok && client.HasSession()
+	if !ok {
+		return javdb.SessionSignedOut
+	}
+	return client.SessionStatus(ctx)
 }
 
 func (service *Service) LoginJavDB(ctx context.Context, username, password string) error {

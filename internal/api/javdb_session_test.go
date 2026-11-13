@@ -8,22 +8,29 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javdb"
 )
 
 type javdbSessionStub struct {
 	CatalogueManager
-	configured bool
+	status   javdb.SessionStatus
+	loginErr error
 }
 
-func (s *javdbSessionStub) JavDBSessionConfigured() bool { return s.configured }
+func (s *javdbSessionStub) JavDBSessionStatus(context.Context) javdb.SessionStatus { return s.status }
 
 func (s *javdbSessionStub) LoginJavDB(context.Context, string, string) error {
-	s.configured = true
+	if s.loginErr != nil {
+		return s.loginErr
+	}
+	s.status = javdb.SessionSignedIn
 	return nil
 }
 
 func (s *javdbSessionStub) LogoutJavDB(context.Context) error {
-	s.configured = false
+	s.status = javdb.SessionSignedOut
 	return nil
 }
 
@@ -33,28 +40,35 @@ func TestJavDBSessionRoutesRequireAppLoginAndExposeOnlyStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := &javdbSessionStub{}
+	service := &javdbSessionStub{status: javdb.SessionSignedOut}
 	router := NewRouter(Dependencies{Access: gate, Catalogue: service, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	const path = "/api/settings/javdb/session"
 	const credentials = `{"username":"account","password":"test password"}`
 	unauthorized := httptest.NewRecorder()
 	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, path, strings.NewReader(credentials)))
-	if unauthorized.Code != http.StatusUnauthorized || service.configured {
+	if unauthorized.Code != http.StatusUnauthorized || service.status != javdb.SessionSignedOut {
 		t.Fatal("unauthenticated requests must not install a session")
 	}
-	for _, tc := range []struct{ method, body, want string }{
-		{http.MethodGet, "", `{"configured":false}`},
-		{http.MethodPost, credentials, `{"configured":true}`},
-		{http.MethodGet, "", `{"configured":true}`},
-		{http.MethodDelete, "", `{"configured":false}`},
-	} {
-		request := httptest.NewRequest(tc.method, path, strings.NewReader(tc.body))
+	check := func(method, body string, status int, want string) {
+		t.Helper()
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		request.AddCookie(&http.Cookie{Name: cookieAuthToken, Value: cookie})
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || response.Body.String() != tc.want || response.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("%s response: status=%d body=%q", tc.method, response.Code, response.Body)
+		if response.Code != status || response.Body.String() != want || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s response: status=%d body=%q", method, response.Code, response.Body)
 		}
 	}
+	check(http.MethodGet, "", http.StatusOK, `{"configured":false,"status":"signed_out"}`)
+	check(http.MethodPost, credentials, http.StatusOK, `{"configured":true,"status":"signed_in"}`)
+	check(http.MethodGet, "", http.StatusOK, `{"configured":true,"status":"signed_in"}`)
+	service.loginErr = domain.E(domain.KindUpstream, "JavDB 登录失败", nil)
+	check(http.MethodPost, credentials, http.StatusBadGateway, `{"error":"JavDB 登录失败"}`)
+	check(http.MethodGet, "", http.StatusOK, `{"configured":true,"status":"signed_in"}`)
+	service.status = javdb.SessionExpired
+	check(http.MethodGet, "", http.StatusOK, `{"configured":true,"status":"expired"}`)
+	service.status = javdb.SessionUnverified
+	check(http.MethodGet, "", http.StatusOK, `{"configured":true,"status":"unverified"}`)
+	check(http.MethodDelete, "", http.StatusOK, `{"configured":false,"status":"signed_out"}`)
 }

@@ -16,6 +16,15 @@ var ErrLoginRequired = errors.New("JavDB login required")
 
 const loginRequiredMessage = "JavDB 需要登录或会话已失效，请在设置中登录 JavDB"
 
+type SessionStatus string
+
+const (
+	SessionSignedOut  SessionStatus = "signed_out"
+	SessionSignedIn   SessionStatus = "signed_in"
+	SessionExpired    SessionStatus = "expired"
+	SessionUnverified SessionStatus = "unverified"
+)
+
 func trustedSessionHost(host string) bool {
 	return strings.HasPrefix(host, "https://") && slices.Contains(bootstrapHosts, host)
 }
@@ -43,6 +52,32 @@ func (c *Client) SetSessionToken(token string) {
 		return
 	}
 	c.sessionToken.Store(&token)
+}
+
+func (c *Client) SessionStatus(ctx context.Context) SessionStatus {
+	token := c.sessionToken.Load()
+	if token == nil {
+		return SessionSignedOut
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	var data struct {
+		User *struct{} `json:"user"`
+	}
+	err := c.getJSON(ctx, "/api/v1/users", nil, &data)
+	current := c.sessionToken.Load()
+	switch {
+	case current == nil:
+		return SessionSignedOut
+	case current != token:
+		return SessionUnverified
+	case errors.Is(err, ErrLoginRequired):
+		return SessionExpired
+	case err == nil && data.User != nil:
+		return SessionSignedIn
+	default:
+		return SessionUnverified
+	}
 }
 
 // Login submits credentials once and returns the session token without installing it.

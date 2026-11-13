@@ -122,13 +122,14 @@ func TestNewRestoresAndRemovesJavDBSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	if !service.JavDBSessionConfigured() {
+	client := service.javdb.(*javdb.Client)
+	if !client.HasSession() {
 		t.Fatal("saved JavDB session was not restored")
 	}
 	if err := service.LogoutJavDB(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) || service.JavDBSessionConfigured() {
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) || service.JavDBSessionStatus(ctx) != javdb.SessionSignedOut {
 		t.Fatalf("JavDB session was not removed: %v", err)
 	}
 }

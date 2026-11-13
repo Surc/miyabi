@@ -5,12 +5,17 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ppxb/miyabi/internal/javdb"
 )
 
 type javdbSessionManager interface {
-	JavDBSessionConfigured() bool
+	JavDBSessionStatus(context.Context) javdb.SessionStatus
 	LoginJavDB(context.Context, string, string) error
 	LogoutJavDB(context.Context) error
+}
+
+func javdbSessionResponse(status javdb.SessionStatus) gin.H {
+	return gin.H{"configured": status != javdb.SessionSignedOut, "status": status}
 }
 
 func registerJavDBSession(settings *gin.RouterGroup, catalogue CatalogueManager) {
@@ -20,7 +25,7 @@ func registerJavDBSession(settings *gin.RouterGroup, catalogue CatalogueManager)
 	}
 	group := settings.Group("/javdb/session")
 	group.GET("", func(c *gin.Context) {
-		respond(c, gin.H{"configured": service.JavDBSessionConfigured()}, nil)
+		respond(c, javdbSessionResponse(service.JavDBSessionStatus(c.Request.Context())), nil)
 	})
 	group.POST("", func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
@@ -32,10 +37,10 @@ func registerJavDBSession(settings *gin.RouterGroup, catalogue CatalogueManager)
 			return
 		}
 		err := service.LoginJavDB(c.Request.Context(), variables.Username, variables.Password)
-		respond(c, gin.H{"configured": true}, err)
+		respond(c, javdbSessionResponse(javdb.SessionSignedIn), err)
 	})
 	group.DELETE("", func(c *gin.Context) {
 		err := service.LogoutJavDB(c.Request.Context())
-		respond(c, gin.H{"configured": false}, err)
+		respond(c, javdbSessionResponse(javdb.SessionSignedOut), err)
 	})
 }

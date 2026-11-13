@@ -1,16 +1,26 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRoundIcon } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { browseKeys } from '@/api/browse-cache'
 import { apiDelete, apiGet, apiPost, describeApiError } from '@/api/client'
 import { discoverKeys } from '@/api/movie-detail-cache'
 import { InlineError } from '@/components/error-state'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SettingsSection } from '../shared'
 
-type JavDBSession = { configured: boolean }
+const sessionStatuses = {
+  signed_out: { label: '未登录', variant: 'outline' },
+  signed_in: { label: '已登录', variant: 'success' },
+  expired: { label: '登录已失效', variant: 'destructive' },
+  unverified: { label: '暂无法确认', variant: 'outline' }
+} as const
+
+type JavDBSession = { configured: boolean; status: keyof typeof sessionStatuses }
+type SessionAction = 'login' | 'logout'
 const path = '/api/settings/javdb/session'
 const queryKey = ['settings', 'javdb-session'] as const
 
@@ -18,13 +28,16 @@ export function JavDBSessionSection() {
   const queryClient = useQueryClient()
   const session = useQuery({
     queryKey,
-    queryFn: ({ signal }) => apiGet<JavDBSession>(path, undefined, signal)
+    queryFn: ({ signal }) => apiGet<JavDBSession>(path, undefined, signal),
+    refetchOnWindowFocus: true
   })
-  const [pending, setPending] = useState(false)
+  const [pending, setPending] = useState<SessionAction | null>(null)
   const [error, setError] = useState('')
+  const status = session.isError ? 'unverified' : (session.data?.status ?? 'unverified')
+  const { label, variant } = sessionStatuses[status]
 
-  async function updateSession(send: () => Promise<JavDBSession>) {
-    setPending(true)
+  async function updateSession(action: SessionAction, send: () => Promise<JavDBSession>) {
+    setPending(action)
     setError('')
     try {
       const next = await send()
@@ -32,10 +45,12 @@ export function JavDBSessionSection() {
       queryClient.setQueryData(queryKey, next)
       void queryClient.invalidateQueries({ queryKey: discoverKeys.all })
       void queryClient.invalidateQueries({ queryKey: [...browseKeys.all, 'rating', 'javdb'] })
+      toast.success(action === 'login' ? 'JavDB 登录成功' : '已退出 JavDB 登录')
     } catch (error) {
       setError(describeApiError(error))
+      toast.error(action === 'login' ? 'JavDB 登录失败' : '退出 JavDB 登录失败')
     } finally {
-      setPending(false)
+      setPending(null)
     }
   }
 
@@ -46,12 +61,30 @@ export function JavDBSessionSection() {
     const username = String(fields.get('username') ?? '').trim()
     const password = String(fields.get('password') ?? '')
     form.reset()
-    void updateSession(() => apiPost<JavDBSession>(path, { username, password }))
+    void updateSession('login', () => apiPost<JavDBSession>(path, { username, password }))
   }
 
   return (
     <SettingsSection icon={<KeyRoundIcon className="size-4" />} title="JavDB 登录">
-      {session.isPending ? <p role="status">正在读取 JavDB 会话…</p> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          登录状态
+          <Badge variant={session.isFetching ? 'outline' : variant}>
+            {session.isFetching ? '正在检查…' : label}
+          </Badge>
+        </p>
+        {session.data?.configured && !session.isError ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={pending !== null || session.isFetching}
+            onClick={() => void session.refetch()}
+          >
+            检查登录状态
+          </Button>
+        ) : null}
+      </div>
       {session.isError ? (
         <InlineError onRetry={() => void session.refetch()} retrying={session.isFetching}>
           {describeApiError(session.error)}
@@ -59,12 +92,7 @@ export function JavDBSessionSection() {
       ) : null}
       {session.data ? (
         <form method="post" onSubmit={login}>
-          <fieldset className="space-y-3" disabled={pending}>
-            <p role="status" className="text-sm text-muted-foreground">
-              {session.data.configured
-                ? '已保存 JavDB 会话。会话失效时可重新登录。'
-                : '登录后可从 JavDB 查询影片详情和评分。'}
-            </p>
+          <fieldset className="space-y-3" disabled={pending !== null}>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-sm">
                 <span>JavDB 账号</span>
@@ -87,17 +115,25 @@ export function JavDBSessionSection() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => void updateSession(() => apiDelete<JavDBSession>(path))}
+                  onClick={() => void updateSession('logout', () => apiDelete<JavDBSession>(path))}
                 >
-                  移除会话
+                  退出登录
                 </Button>
               ) : null}
             </div>
           </fieldset>
         </form>
       ) : null}
-      {pending ? <p role="status">正在更新 JavDB 会话…</p> : null}
-      {error ? <InlineError>{error}</InlineError> : null}
+      {pending ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {pending === 'login' ? '正在登录 JavDB…' : '正在退出登录…'}
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </SettingsSection>
   )
 }
