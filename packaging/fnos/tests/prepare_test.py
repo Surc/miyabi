@@ -92,6 +92,24 @@ class ArtifactChecks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 prepare.verify_bridge_source(bridge, lock)
 
+    def test_native_stage_requires_official_webui_assets_and_matching_entry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bridge = Path(folder)
+            files = ("fnos.js", "web/index.html", "persistence/drizzle/meta/_journal.json",
+                     "resources/mapping_table/mapping_info.json")
+            for name in files:
+                file = bridge / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text("fixture")
+            manifest = {"fnos_sha256": prepare.sha256_file(bridge / "fnos.js")}
+            prepare.verify_mdcz_webui(bridge, manifest)
+            (bridge / "fnos.js").write_text("changed")
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                prepare.verify_mdcz_webui(bridge, manifest)
+            (bridge / "web/index.html").unlink()
+            with self.assertRaisesRegex(ValueError, "web/index.html"):
+                prepare.verify_mdcz_webui(bridge, manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

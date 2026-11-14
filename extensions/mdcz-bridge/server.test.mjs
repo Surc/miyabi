@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createBridge } from "./server.mjs";
+import { createProfileAdapter } from "./profile.mjs";
 import { health, incompleteSources } from "./contract.mjs";
 
 const key = "fixture-key-with-at-least-24-characters";
@@ -164,4 +165,49 @@ test("health advertises the snapshot capability and exact bridge version", async
   const response = await (await call("/v1/health")).json();
   assert.equal(response.bridge_version, "1.1.0");
   assert.ok(response.capabilities.includes("attempt-snapshot"));
+});
+
+test("MDCz WebUI profile edits affect the next scrape and keep an in-flight scrape consistent", async (t) => {
+  let profile = { timeout: 30, proxy_url: "http://fixture:secret@proxy.test" };
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const adapter = createProfileAdapter(
+    key,
+    async () => profile,
+    async (current) => ({
+      defaults: current,
+      sites: ["dmm"],
+      runtime: {
+        async metadata() {
+          started.resolve();
+          await release.promise;
+          return { timeout: current.timeout };
+        },
+      },
+    }),
+  );
+  const call = await fixture(t, adapter);
+  const config = () => call("/v1/configuration").then((response) => response.json());
+  const first = await config();
+  assert.equal(first.secrets.proxy_url, true);
+  assert.equal(first.values.proxy_url, undefined);
+  const headers = {
+    "X-Miyabi-MDCz-Configuration-ID": first.configuration_id,
+    "X-Miyabi-MDCz-Engine-Revision": health.revision,
+  };
+  const input = { code: "TEST-001", translate: false };
+  const inFlight = call("/v1/metadata", input, true, undefined, headers);
+  await started.promise;
+  profile = { ...profile, timeout: 45 };
+  const updated = await config();
+  release.resolve();
+  const result = await (await inFlight).json();
+  assert.equal(result.configuration_id, first.configuration_id);
+  assert.equal(result.timeout, 30);
+  assert.notEqual(updated.configuration_id, first.configuration_id);
+  assert.equal((await call("/v1/metadata", input, true, undefined, headers)).status, 409);
+  headers["X-Miyabi-MDCz-Configuration-ID"] = updated.configuration_id;
+  const next = await (await call("/v1/metadata", input, true, undefined, headers)).json();
+  assert.equal(next.configuration_id, updated.configuration_id);
+  assert.equal(next.timeout, 45);
 });

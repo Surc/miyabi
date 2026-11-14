@@ -21,6 +21,7 @@ import { CrawlerProvider } from "@mdcz/runtime/crawler/CrawlerProvider";
 import { listRegisteredCrawlerSites } from "@mdcz/runtime/crawler/registry";
 import { AggregationService } from "@mdcz/runtime/scrape/aggregation";
 import { TranslateService } from "@mdcz/runtime/scrape/TranslateService";
+import { applyScrapeNetworkPolicy } from "@mdcz/runtime/scrape/executionPolicy";
 import { prepareOnlineMetadata } from "@mdcz/runtime/scrape/prepareOnlineMetadata";
 import { PosterWatermarkService } from "@mdcz/runtime/scrape/PosterWatermarkService";
 import { resolvePosterBadgeDefinitions } from "@mdcz/runtime/scrape/posterBadges";
@@ -94,24 +95,33 @@ export function configurationBoundary(directory: string, configuration: unknown)
       : rawProxy && !rawProxy.includes("://")
         ? `${base.network.proxyType}://${rawProxy}`
         : rawProxy;
+  const profile = (values: Record<string, unknown>) => {
+    const next = structuredClone(base);
+    for (const [key, [section, field]] of Object.entries(managedFields))
+      (next[section] as unknown as Record<string, unknown>)[field] = values[key];
+    next.network.proxy = String(values.proxy_url);
+    next.network.proxyType = (
+      next.network.proxy ? new URL(next.network.proxy).protocol.slice(0, -1) : "none"
+    ) as typeof next.network.proxyType;
+    return configurationSchema.parse(next);
+  };
   return {
     defaults,
     sites: listRegisteredCrawlerSites(),
     baseDigest: hash(JSON.stringify(base)),
-    create(values: Record<string, unknown>) {
-      const next = structuredClone(base);
-      for (const [key, [section, field]] of Object.entries(managedFields))
-        (next[section] as unknown as Record<string, unknown>)[field] = values[key];
-      next.network.proxy = String(values.proxy_url);
-      next.network.proxyType = (
-        next.network.proxy ? new URL(next.network.proxy).protocol.slice(0, -1) : "none"
-      ) as typeof next.network.proxyType;
-      return createAdapter(directory, configurationSchema.parse(next));
-    },
+    profile,
+    create: (values: Record<string, unknown>) => createAdapter(directory, profile(values)),
   };
 }
 
-export async function createAdapter(directory: string, configuration: unknown) {
+export async function createAdapter(
+  directory: string,
+  configuration: unknown,
+  { useProfileTranslation = false, mappingStore }: {
+    useProfileTranslation?: boolean;
+    mappingStore?: NonNullable<ConstructorParameters<typeof TranslateService>[1]>["mappingStore"];
+  } = {},
+) {
   const config = parseBridgeConfiguration(configuration);
   const computed = buildComputedConfiguration(config);
   const network = new NetworkClient({
@@ -119,12 +129,13 @@ export async function createAdapter(directory: string, configuration: unknown) {
     getTimeoutMs: () => computed.networkTimeoutMs,
     getRetryCount: () => computed.networkRetryCount,
   });
+  if (useProfileTranslation) applyScrapeNetworkPolicy(network, config);
   const provider = new CrawlerProvider({
     fetchGateway: new FetchGateway(network),
     siteRequestConfigRegistrar: network,
     getSiteNetworkKey: (site) => siteNetworkKey(computed, site),
   });
-  const translator = new TranslateService(network);
+  const translator = new TranslateService(network, { mappingStore });
   const watermark = new PosterWatermarkService({ dataDir: directory });
   const assets = join(directory, "assets");
   await mkdir(assets, { recursive: true });
@@ -148,7 +159,7 @@ export async function createAdapter(directory: string, configuration: unknown) {
   return {
     async metadata(input: { code: string; translate: boolean }, signal: AbortSignal) {
       const current = structuredClone(config);
-      current.translate.enableTranslation = input.translate;
+      if (!useProfileTranslation) current.translate.enableTranslation = input.translate;
       // Request-scoped aggregation avoids retaining a permanent stale cache
       // and propagates cancellation to every crawler owned by this request.
       const aggregation = new AggregationService(provider, { config: current, signal });

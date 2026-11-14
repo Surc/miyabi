@@ -2,7 +2,7 @@ import { open, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readJSON, writeJSON, childEnvironment, bridgeConnection, syncBridgeConnection } from "./configuration.mjs";
+import { readJSON, writeJSON, childEnvironment, bridgeConnection, mdczWebPort, syncBridgeConnection } from "./configuration.mjs";
 
 import { bridgePreflight } from "./preflight.mjs";
 import { engineRevision, protocol, configurationVersion, bridgeVersion, requiredCapabilities } from "./compatibility.mjs";
@@ -163,7 +163,8 @@ export async function supervise(paths, config) {
       try {
         if (controller.signal.aborted) return null;
         const child = spawn(program, args, {
-          cwd: paths.app, env: env[name], stdio: ["ignore", output.fd, output.fd],
+          cwd: name === "bridge" ? join(paths.app, "bridge") : paths.app,
+          env: env[name], stdio: ["ignore", output.fd, output.fd],
         });
         const started = Promise.withResolvers();
         const ended = Promise.withResolvers();
@@ -214,7 +215,8 @@ export async function supervise(paths, config) {
         await persist();
         await bridgePreflight(paths, config, controller.signal);
         if (controller.signal.aborted) return;
-        worker = await launch("bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, "bridge/bridge.js")]);
+        const entry = mdczWebPort(config) ? "bridge/fnos.js" : "bridge/bridge.js";
+        worker = await launch("bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, entry)]);
         if (!worker || controller.signal.aborted) return;
         reason = "health";
         const deadline = Date.now() + 25_000;

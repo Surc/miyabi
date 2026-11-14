@@ -38,6 +38,10 @@ export function validate(value) {
     if (!Number.isInteger(value[key]) || value[key] < 1024 || value[key] > 65535)
       throw new Error("端口必须为 1024–65535 的整数");
   if (value.port === value.bridgePort) throw new Error("网页端口与内部刮削端口不能相同");
+  if (value.mdczWebPort !== undefined &&
+      (!Number.isInteger(value.mdczWebPort) || value.mdczWebPort < 1024 || value.mdczWebPort > 65535 ||
+        value.mdczWebPort === value.port || value.mdczWebPort === value.bridgePort))
+    throw new Error("MDCz 网页端口必须为 1024–65535，并与 Miyabi 和内部桥接端口不同");
   if (value.externalMDCz) {
     let endpoint;
     try { endpoint = new URL(value.externalMDCz.serverURL); } catch { throw new Error("外部 MDCz 地址无效"); }
@@ -116,10 +120,13 @@ export async function initialize(paths, env = process.env) {
   if (!current) {
     const shares = (env.TRIM_DATA_SHARE_PATHS || "").split(":");
     const share = (name) => shares.find((path) => path.endsWith(`/miyabi-native/${name}`));
+    const port = Number(env.wizard_port || 18080);
+    const mdczPort = env.wizard_mdcz_web_port || (port === 3838 ? 3839 : 3838);
     current = validate({
       version: 1,
       mdczConnectionMode: "managed",
-      port: Number(env.wizard_port || 18080),
+      port,
+      mdczWebPort: Number(mdczPort),
       bridgePort: 3840,
       publicURL: (env.wizard_public_url || "").trim().replace(/\/$/, ""),
       password: env.wizard_password || "",
@@ -148,9 +155,20 @@ export async function initialize(paths, env = process.env) {
 }
 
 export function bridgeConnection(config) {
+  const webPort = mdczWebPort(config);
   return config.externalMDCz
     ? { server_url: config.externalMDCz.serverURL.replace(/\/$/, ""), api_key: config.externalMDCz.apiKey }
-    : { server_url: `http://127.0.0.1:${config.bridgePort}`, api_key: config.bridgeKey };
+    : {
+        server_url: `http://127.0.0.1:${config.bridgePort}`,
+        api_key: config.bridgeKey,
+        ...(webPort ? { web_port: webPort } : {}),
+      };
+}
+
+export function mdczWebPort(config) {
+  return config.mdczConnectionMode === "managed" && !config.externalMDCz
+    ? config.mdczWebPort
+    : undefined;
 }
 
 export async function syncBridgeConnection(paths, config) {
@@ -170,7 +188,7 @@ export async function syncBridgeConnection(paths, config) {
 }
 
 export function patchConfiguration(current, env) {
-  return validate({
+  const next = {
     ...current,
     ...(env.wizard_password
       ? {
@@ -184,7 +202,13 @@ export function patchConfiguration(current, env) {
     ...(env.wizard_public_url
       ? { publicURL: env.wizard_public_url.trim().replace(/\/$/, "") }
       : {}),
-  });
+  };
+  if (env.wizard_mdcz_web_port) {
+    next.mdczConnectionMode = "managed";
+    next.mdczWebPort = Number(env.wizard_mdcz_web_port);
+    delete next.externalMDCz;
+  }
+  return validate(next);
 }
 
 // Copy only while both processes are stopped. The manifest is written last;
@@ -207,6 +231,7 @@ export async function backup(paths, config, reason) {
 }
 
 export function childEnvironment(paths, config) {
+  const webPort = mdczWebPort(config);
   // Do not pass wizard secrets, inherited proxies or unrelated MIYABI_* values
   // to child processes. Credentials never appear in command-line arguments.
   const common = {
@@ -243,6 +268,12 @@ export function childEnvironment(paths, config) {
       MIYABI_MDCZ_DATA: join(paths.data, "mdcz"),
       MIYABI_MDCZ_CONFIG: join(paths.etc, "mdcz.json"),
       MIYABI_MDCZ_KEY: config.bridgeKey,
+      ...(webPort ? {
+        MIYABI_MDCZ_WEB_PORT: String(webPort),
+        MIYABI_MDCZ_LEGACY_DATABASE: join(paths.data, "miyabi/miyabi.db"),
+        MDCZ_HOME: join(paths.data, "mdcz/webui"),
+        MDCZ_ADMIN_PASSWORD: config.password,
+      } : {}),
     },
   };
 }

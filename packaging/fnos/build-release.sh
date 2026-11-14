@@ -40,7 +40,12 @@ cd "$root"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
   go build -mod=readonly -trimpath -ldflags='-s -w' -o "$build/miyabi" ./cmd
 
-engine=$(node --input-type=module -e 'import {revision} from "./extensions/mdcz-bridge/contract.mjs"; console.log(revision)')
+read -r engine mdcz_version webui_sha256 < <(node -p '
+  const lock = require("./extensions/mdcz-bridge/source-lock.json");
+  [lock.engine_revision, lock.engine_version, lock.webui_archive_sha256].join(" ")
+')
+download "https://github.com/ShotHeadman/mdcz/releases/download/v${mdcz_version}/mdcz-${mdcz_version}.tar.gz" \
+  "$build/mdcz-webui.tar.gz" "$webui_sha256"
 git init "$build/mdcz"
 git -C "$build/mdcz" remote add origin https://github.com/ShotHeadman/mdcz.git
 git -C "$build/mdcz" fetch --depth 1 origin "$engine"
@@ -50,7 +55,10 @@ cd "$build/mdcz"
 CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 SKIP_INSTALL_SIMPLE_GIT_HOOKS=1 \
   corepack pnpm@10.28.2 --filter @mdcz/server... install --frozen-lockfile
 corepack pnpm@10.28.2 --filter @mdcz/server exec vite build --config ../miyabi-bridge/vite.config.ts
-node apps/miyabi-bridge/stage.mjs
+MIYABI_MDCZ_FNOS=1 corepack pnpm@10.28.2 --filter @mdcz/server exec vite build --config ../miyabi-bridge/vite.config.ts
+mkdir -p apps/server/dist
+tar -xzf "$build/mdcz-webui.tar.gz" -C apps/server/dist --strip-components=1 "mdcz-${mdcz_version}/web"
+node apps/miyabi-bridge/stage.mjs --fnos
 # Install the standalone lock outside MDCz's workspace; otherwise pnpm prunes
 # the workspace and the delivered directory never receives its dependencies.
 mv bridge-staging "$build/bridge-runtime"

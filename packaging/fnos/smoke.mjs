@@ -1,9 +1,9 @@
 // Exercise the actual packaged executables without touching a NAS or user data.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -21,9 +21,10 @@ async function port() {
   await new Promise((resolve) => server.close(resolve));
   return number;
 }
-function start(file, args, env) {
+function start(file, args, env, cwd) {
   const child = spawn(file, args, {
     env: { ...process.env, ...env },
+    cwd,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -59,13 +60,31 @@ try {
     env: { ...process.env, TRIM_APPDEST: app },
   });
   const bridgePort = await port();
-  const bridge = start(node, [join(app, "bridge/bridge.js")], {
-    HOST: "127.0.0.1",
+  let mdczPort;
+  do {
+    mdczPort = await port();
+  } while (mdczPort === bridgePort);
+  const legacyDatabase = join(directory, "legacy-miyabi.db");
+  execFileSync(node, [
+    "--input-type=module",
+    "--eval",
+    `import { DatabaseSync } from "node:sqlite";
+     const db = new DatabaseSync(process.argv[1]);
+     db.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value BLOB)");
+     db.prepare("INSERT INTO settings VALUES (?, ?)").run("extensions.mdcz.v1", Buffer.from('{"translate":true}'));
+     db.close();`,
+    legacyDatabase,
+  ]);
+  const bridge = start(node, [join(app, "bridge/fnos.js")], {
     PORT: String(bridgePort),
     MIYABI_MDCZ_KEY: key,
     MIYABI_MDCZ_DATA: join(directory, "mdcz"),
     MIYABI_MDCZ_CONFIG: join(app, "defaults/mdcz.json"),
-  });
+    MIYABI_MDCZ_WEB_PORT: String(mdczPort),
+    MIYABI_MDCZ_LEGACY_DATABASE: legacyDatabase,
+    MDCZ_HOME: join(directory, "mdcz/webui"),
+    MDCZ_ADMIN_PASSWORD: key,
+  }, join(app, "bridge"));
   const base = `http://127.0.0.1:${bridgePort}`;
   const headers = { Authorization: `Bearer ${key}` };
   const health = await (await ready(bridge, base + "/v1/health", headers)).json();
@@ -74,8 +93,40 @@ try {
   assert.equal((await fetch(base + "/v1/health")).status, 401);
   assert.equal((await fetch(base + "/v1/configuration", { headers })).status, 200);
 
+  const mdczBase = `http://127.0.0.1:${mdczPort}`;
+  const officialSettings = await fetch(mdczBase + "/settings");
+  assert.equal(officialSettings.status, 200);
+  const officialAsset = (await officialSettings.text()).match(/<script type="module"[^>]+src="(\/assets\/[^"]+)"/)?.[1];
+  assert.ok(officialAsset);
+  const script = await fetch(mdczBase + officialAsset);
+  assert.equal(script.status, 200);
+  assert.match(script.headers.get("Content-Type"), /javascript/);
+  const mdczAPI = (procedure, input, token) => fetch(`${mdczBase}/trpc/${procedure}`, {
+    method: input === undefined ? "GET" : "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+  });
+  assert.equal((await mdczAPI("config.read")).status, 401);
+  const mdczLogin = await mdczAPI("auth.login", { password: key });
+  assert.equal(mdczLogin.status, 200);
+  const mdczToken = (await mdczLogin.json()).result.data.token;
+  assert.ok(mdczToken);
+  const initialProfile = await (await mdczAPI("config.read", undefined, mdczToken)).json();
+  assert.equal(initialProfile.result.data.translate.enableTranslation, true);
+
   const webPort = await port();
   const webBase = `http://127.0.0.1:${webPort}`;
+  const managedConnection = join(directory, "mdcz-connection.json");
+  await writeFile(managedConnection, JSON.stringify({
+    server_url: base,
+    api_key: key,
+    generation: createHash("sha256").update(base).digest("hex"),
+    web_port: mdczPort,
+  }), { mode: 0o600 });
+  await mkdir(join(directory, "emby"));
   const miyabi = start(join(app, "bin/miyabi"), [], {
     MIYABI_LISTEN: `127.0.0.1:${webPort}`,
     MIYABI_DATA_DIR: join(directory, "miyabi"),
@@ -84,6 +135,7 @@ try {
     MIYABI_ACCESS_PASSWORD: key,
     MIYABI_JWT_SECRET: key,
     MIYABI_EMBY_ENABLED: "false",
+    MIYABI_MDCZ_MANAGED: managedConnection,
   });
   const auth = await ready(miyabi, webBase + "/api/auth/config");
   assert.equal((await auth.json()).enabled, true);
@@ -113,6 +165,36 @@ try {
     headers: { "Content-Type": "application/json", Cookie: cookie, Origin: webBase },
     ...(value === undefined ? {} : { body: JSON.stringify(value) }),
   });
+  const mdczPath = "/api/extensions/mdcz";
+  const mdczSettings = await (await request(mdczPath + "/settings")).json();
+  assert.equal(mdczSettings.web_port, mdczPort);
+  const newTimeout = 47;
+  const edit = await mdczAPI("config.update", { network: { timeout: newTimeout } }, mdczToken);
+  assert.equal(edit.status, 200);
+  const fromMiyabi = await (await request(mdczPath + "/configuration")).json();
+  assert.equal(fromMiyabi.values.timeout, newTimeout);
+  assert.notEqual(fromMiyabi.configuration_id, health.configuration_id);
+  const stale = await fetch(base + "/v1/metadata", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+      "X-Miyabi-MDCz-Configuration-ID": health.configuration_id,
+      "X-Miyabi-MDCz-Engine-Revision": revision,
+    },
+    body: JSON.stringify({ code: "TEST-001", translate: false }),
+  });
+  assert.equal(stale.status, 409);
+  const profileImport = await mdczAPI("config.profiles.import", {
+    name: "imported",
+    fileName: "imported.toml",
+    content: "[network]\ntimeout = 61\n",
+  }, mdczToken);
+  assert.equal(profileImport.status, 200);
+  assert.equal((await mdczAPI("config.profiles.switch", { name: "imported" }, mdczToken)).status, 200);
+  const imported = await (await request(mdczPath + "/configuration")).json();
+  assert.equal(imported.values.timeout, 61);
+  assert.notEqual(imported.configuration_id, fromMiyabi.configuration_id);
   const settingsPath = "/api/settings/subtitles";
   const defaults = await request(settingsPath);
   assert.equal(defaults.status, 200);
@@ -138,7 +220,7 @@ try {
   })).status, 400);
   assert.deepEqual(await (await request(settingsPath)).json(), saved);
   console.log(
-    "Packaged Miyabi, current settings UI, subtitle configuration/test API, bridge auth and native dependencies passed.",
+    "Packaged Miyabi, MDCz WebUI login and settings handoff, bridge auth, subtitle API and native dependencies passed.",
   );
 } finally {
   await Promise.all(

@@ -7,6 +7,8 @@ import { resolve } from "node:path";
 export async function generate(root, check = false) {
   const lock = JSON.parse(await readFile(resolve(root, "extensions/mdcz-bridge/source-lock.json"), "utf8"));
   if (lock.schema !== 1 || !/^[a-f0-9]{40}$/.test(lock.engine_revision) ||
+      !/^\d+\.\d+\.\d+$/.test(lock.engine_version) ||
+      !/^[a-f0-9]{64}$/.test(lock.webui_archive_sha256) ||
       lock.repository !== "https://github.com/ShotHeadman/mdcz.git" ||
       !/^\d+\.\d+\.\d+$/.test(lock.bridge_version) ||
       !Number.isInteger(lock.protocol) || lock.protocol < 1 ||

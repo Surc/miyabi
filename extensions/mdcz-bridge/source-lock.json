@@ -3,6 +3,7 @@
   "repository": "https://github.com/ShotHeadman/mdcz.git",
   "engine_version": "0.22.0",
   "engine_revision": "e869dc74e44d7e21d5ad5ed33ad9e40e5abed9be",
+  "webui_archive_sha256": "597c1b71f85ffc081d364337c1891c87da995f45a0573e74e862319ae899df4f",
   "bridge_version": "1.1.0",
   "protocol": 1,
   "configuration_version": 1,

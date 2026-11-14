@@ -18,9 +18,11 @@
 
 一个飞牛应用入口，两个业务服务：Miyabi 负责界面、任务、数据和 Emby 导出，MDCz 桥接提供聚合资料、介绍、翻译和图片处理。另有一个只负责两服务生命周期的 Node 管理进程。无需 Docker、Electron 或安装时联网下载依赖；准备产物时仍需完整构建环境。
 
-安装向导只要求网页端口（默认 18080）、Emby 可访问的 Miyabi 根地址、访问密码。访问地址例如 `http://192.168.1.10:18080`，须填写实际可达地址，不能填桥接地址；反向代理用户填写对应公开根地址。网页端口在本版安装时确定，配置向导只更新访问地址和密码，避免改变已导出 STRM 的访问约定。
+安装向导要求 Miyabi 网页端口（默认 18080）、Emby 可访问的 Miyabi 根地址和访问密码。MDCz 官方 WebUI 使用独立的 HTTP 端口（默认 3838），可在向导中调整。Miyabi 公开地址例如 `http://192.168.1.10:18080`。升级时继续使用已导出 STRM 依赖的 Miyabi 地址和令牌。
 
-桥接绑定 `127.0.0.1:3840`，连接密钥自动生成。新安装使用受管连接，但增强开关保持关闭；用户在 Miyabi 设置中启用。旧安装未设置 `mdczConnectionMode` 时保留 bootstrap 行为，不自动替换已保存的外部地址。明确迁移到 `managed` 后，以包内连接文件为唯一权威，旧数据库地址仅保留给回退，不参与自动选源。来源、代理、翻译和角标仍在原来的 Miyabi 设置界面管理。
+桥接绑定 `127.0.0.1:3840`，连接密钥自动生成。新安装会启动包内官方 WebUI。通过「刮削设置 → 打开 MDCz 配置」进入，登录使用安装向导设置的 Miyabi 访问密码。MDCz 的来源、代理和翻译随当前配置方案生效；Miyabi 在每次增强刮削开始时读取该方案。刮削模式和 Miyabi 封面角标在 Miyabi 设置中选择。
+
+旧安装沿用已保存的连接。迁移时在飞牛应用配置中填写 MDCz 官方设置页端口，以启用包内 WebUI 和受管连接。在 MDCz 的配置方案中导入旧实例使用的 TOML 文件并切换到该方案。已有包内官方配置保存在 `${TRIM_PKGVAR}/mdcz/webui/config`，首次启动可从旧包内桥接配置初始化。独立 Docker MDCz 的配置方案应单独导入，以取得该实例实际使用的来源、代理和翻译配置。WebUI 和内部桥接共享同一个进程及活动配置，后台媒体监控随包禁用。
 
 桌面入口以独立页面打开，保留 Miyabi 自己的访问密码；本版没有接入飞牛统一登录/网关。Emby 仍是已有的独立应用，FPK 只打包对接能力。管理员须将导出目录授权给 Emby；Emby 若运行于 Docker，仍须配置主机目录挂载，并在 Miyabi 中填写 Emby 看到的准确媒体路径。不会为所有用户或任意容器放宽整个应用数据目录权限。
 
@@ -82,7 +84,7 @@
 本版已获构建/发布授权，可执行独立 `build-release.sh`；源码检查和纯脚本测试本身不生成 FPK。
 
 1. 在干净的固定 Miyabi 提交上完成 Go、前端及桥接 runtime 回归。Miyabi 原生编译固定 `GOOS=linux GOARCH=amd64 GOAMD64=v1 CGO_ENABLED=0`，先生成内嵌前端；在完整 Git checkout 编译，使 Go 产物保留可核验的 VCS 信息。
-2. 按 `extensions/mdcz-bridge` 的固定 MDCz SHA 和 lock 生成 bridge.js 与完整生产 node_modules，保持 pnpm 相对链接。包含 `NOTICE` 和 `MDCz-LICENSE`。原生包不需要 Electron 桌面程序。当前 stage 脚本仍保留上游服务器生产依赖集合，尚未进一步裁剪包体。
+2. 按 `extensions/mdcz-bridge` 的固定 MDCz SHA 和 lock 构建 bridge.js、fnos.js 和生产 node_modules。用 `stage.mjs --fnos` 加入上游 SQLite 迁移文件、映射字典和同版本官方 WebUI 静态资源。发布脚本用 source lock 的 SHA-256 核验官方 WebUI 压缩包。保留 pnpm 相对链接、`NOTICE` 和 `MDCz-LICENSE`。
 3. 准备官方 Linux x64 Node 24 的完整解包目录（含 LICENSE）、NotoSansCJK-Regular.ttc 与字体 LICENSE、CA 根证书。构建者应固定并核对下载来源及校验和；Node 小版本和每项产物哈希写入 bundle.json，不能混用另一 Node ABI 的原生模块。
 4. 运行如下准备命令；`--os-min-version` 必须按实际测试目标选择，当前不虚构最低已验证飞牛版本。输出必须是不存在的目录。prepare 会核对 x64 ELF、Node 24、Miyabi GOAMD64=v1/无 CGO/VCS SHA/干净构建标记、桥接 NOTICE、依赖和包内链接。
 

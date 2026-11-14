@@ -21,7 +21,7 @@ func TestManagedConnectionDoesNotFallBackToLegacyDatabase(t *testing.T) {
 	if err == nil || cfg.ServerURL != "" || cfg.APIKey != "" || !cfg.Managed {
 		t.Fatal("missing managed file fell back")
 	}
-	connection := map[string]string{"server_url": "http://127.0.0.1:3840", "api_key": key, "generation": digest([]byte("http://127.0.0.1:3840"))}
+	connection := map[string]any{"server_url": "http://127.0.0.1:3840", "api_key": key, "generation": digest([]byte("http://127.0.0.1:3840")), "web_port": 3838}
 	body, _ := json.Marshal(connection)
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
@@ -29,6 +29,12 @@ func TestManagedConnectionDoesNotFallBackToLegacyDatabase(t *testing.T) {
 	cfg, err = s.effective(s.config())
 	if err != nil || cfg.APIKey != key || cfg.ServerURL != connection["server_url"] {
 		t.Fatalf("managed connection not authoritative: %v", err)
+	}
+	if settings := s.ExtensionSettings(); settings.WebPort != 3838 || settings.APIKey != "" {
+		t.Fatal("expected the managed WebUI port without its bridge key")
+	}
+	if _, err := s.UpdateConfiguration(t.Context(), ConfigurationUpdate{Version: ConfigurationVersion, ID: "current", Values: map[string]json.RawMessage{}}); !domain.IsKind(err, domain.KindConflict) {
+		t.Fatalf("managed WebUI is not the sole settings editor: %v", err)
 	}
 	public, _ := json.Marshal(s.ExtensionSettings())
 	if strings.Contains(string(public), key) || strings.Contains(string(public), "old-private") {

@@ -44,6 +44,9 @@ func (s *Service) configuration(ctx context.Context, method string, input any) (
 		return Configuration{}, err
 	}
 	if change, ok := input.(ConfigurationUpdate); ok {
+		if cfg.WebPort != 0 {
+			return Configuration{}, domain.E(domain.KindConflict, "请在 MDCz 官方设置页保存配置", nil)
+		}
 		if change.ConnectionGeneration == "" || change.ConnectionGeneration != cfg.Generation {
 			return Configuration{}, domain.E(domain.KindConflict, "MDCz 连接已变化，请重新读取来源配置后再保存", nil)
 		}

@@ -3,6 +3,7 @@ import {
   locations,
   initialize,
   load,
+  mdczWebPort,
   patchConfiguration,
   writeJSON,
   backup,
@@ -36,6 +37,9 @@ async function main(action, paths) {
   }
   if (action === "configure") {
     const next = patchConfiguration(config, process.env);
+    const nextWebPort = mdczWebPort(next);
+    if (nextWebPort && nextWebPort !== mdczWebPort(config))
+      await freePort(nextWebPort, "0.0.0.0");
     const wasRunning = await status(paths, config);
     await stop(paths);
     await writeJSON(paths.config, next);

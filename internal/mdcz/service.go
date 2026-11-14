@@ -35,6 +35,7 @@ type Settings struct {
 	Mode       string `json:"mode,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Generation string `json:"generation,omitempty"`
+	WebPort    int    `json:"web_port,omitempty"`
 	Enabled    bool   `json:"enabled"`
 	ServerURL  string `json:"server_url"`
 	APIKey     string `json:"api_key,omitempty"`
@@ -142,6 +143,7 @@ func (s *Service) candidate(change Update) Settings {
 	}
 	cfg.HasAPIKey = false
 	cfg.Managed, cfg.Mode, cfg.Status, cfg.Generation = false, "", "", ""
+	cfg.WebPort = 0
 	return cfg
 }
 

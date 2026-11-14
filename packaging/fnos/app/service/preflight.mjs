@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer } from "node:net";
-import { childEnvironment } from "./configuration.mjs";
+import { childEnvironment, mdczWebPort } from "./configuration.mjs";
 
 const exec = promisify(execFile);
 export async function freePort(port, host) {
@@ -27,6 +27,8 @@ const xml = (value) =>
 // settings offline. Run this probe in the separately supervised bridge branch.
 export async function bridgePreflight(paths, config, signal) {
   await freePort(config.bridgePort, "127.0.0.1");
+  const webPort = mdczWebPort(config);
+  if (webPort) await freePort(webPort, "0.0.0.0");
   await access(join(paths.app, "fonts/NotoSansCJK-Regular.ttc"));
   await writeFile(
     join(paths.etc, "fonts.conf"),

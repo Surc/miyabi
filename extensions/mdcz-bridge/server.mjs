@@ -22,10 +22,15 @@ export function createBridge(adapter, token) {
     const expected = Buffer.from(`Bearer ${token}`);
     if (provided.length !== expected.length || !timingSafeEqual(provided, expected))
       return send(401, { error: "Unauthorized" });
-    if (req.method === "GET" && req.url === "/v1/health")
-      return send(200, { ...health, ...adapter.information?.() });
-    if (req.method === "GET" && req.url === "/v1/configuration" && adapter.configuration)
-      return send(200, { ...health, ...adapter.configuration() });
+    if (req.method === "GET" && (req.url === "/v1/health" || req.url === "/v1/configuration")) {
+      try {
+        const current = adapter.snapshot ? await adapter.snapshot() : adapter;
+        if (req.url === "/v1/health") return send(200, { ...health, ...current.information?.() });
+        if (current.configuration) return send(200, { ...health, ...current.configuration() });
+      } catch {
+        return send(502, { error: "MDCz operation failed" });
+      }
+    }
     const imageID =
       req.method === "GET" && req.url?.startsWith("/v1/images/") ? req.url.slice(11) : "";
     const metadata = req.method === "POST" && req.url === "/v1/metadata";
@@ -52,19 +57,18 @@ export function createBridge(adapter, token) {
     };
     res.on("close", disconnected);
     try {
-      // Check while holding the same slot used for configure and execution.
-      // Legacy clients omit both headers; a snapshot-aware request must provide
-      // both and cannot execute against a changed profile or engine.
+      // Check and execute against the same snapshot, even if the official
+      // WebUI saves a new profile while the operation is running.
+      const current = adapter.snapshot ? await adapter.snapshot() : adapter;
       const expectedID = req.headers["x-miyabi-mdcz-configuration-id"];
       const expectedRevision = req.headers["x-miyabi-mdcz-engine-revision"];
       if (expectedID !== undefined || expectedRevision !== undefined) {
-        const current = adapter.information?.();
         if (typeof expectedID !== "string" || !expectedID ||
-            expectedID !== current?.configuration_id || expectedRevision !== health.revision)
+            expectedID !== current.information?.().configuration_id || expectedRevision !== health.revision)
           return send(409, { error: "Attempt configuration changed" });
       }
       if (imageID) {
-        const image = await adapter.image(imageID, abort.signal);
+        const image = await current.image(imageID, abort.signal);
         return send(200, image, "image/jpeg");
       }
       const chunks = [];
@@ -83,12 +87,12 @@ export function createBridge(adapter, token) {
         throw Object.assign(new Error("Invalid JSON"), { statusCode: 400 });
       }
       const result = configure
-        ? await adapter.configure(input)
+        ? await current.configure(input)
         : metadata
-          ? await adapter.metadata(metadataInput(input), abort.signal)
-          : await adapter.poster(posterInput(input), abort.signal);
+          ? await current.metadata(metadataInput(input), abort.signal)
+          : await current.poster(posterInput(input), abort.signal);
       if (abort.signal.aborted) return send(504, { error: "Canceled or timed out" });
-      send(200, { ...result, ...adapter.information?.(), ...health });
+      send(200, { ...result, ...current.information?.(), ...health });
     } catch (error) {
       // Site exceptions may contain proxy URLs or cookies; expose only category.
       const status = [400, 404, 409, 413].includes(error?.statusCode)

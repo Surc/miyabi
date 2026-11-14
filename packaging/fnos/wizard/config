@@ -2,9 +2,10 @@
   {
     "stepTitle": "访问设置",
     "items": [
-      { "type": "tips", "helpText": "留空保留原设置。保存会重启正在运行的应用。来源、代理、翻译和角标在 Miyabi 网页设置中调整。" },
+      { "type": "tips", "helpText": "留空保留原设置。保存会重启正在运行的应用。MDCz 官方设置页使用 Miyabi 的访问密码。" },
       { "type": "text", "field": "wizard_public_url", "label": "新的 Emby 可访问地址" },
-      { "type": "password", "field": "wizard_password", "label": "新的访问密码", "rules": [ { "min": 8, "max": 256, "message": "新密码长度为 8–256 个字符" } ] }
+      { "type": "password", "field": "wizard_password", "label": "新的访问密码", "rules": [ { "min": 8, "max": 256, "message": "新密码长度为 8–256 个字符" } ] },
+      { "type": "text", "field": "wizard_mdcz_web_port", "label": "MDCz 官方设置页端口", "helpText": "填写端口将切换到包内 MDCz。默认端口为 3838。已有独立 MDCz 配置可在切换后导入。" }
     ]
   }
 ]

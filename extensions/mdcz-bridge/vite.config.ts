@@ -2,10 +2,15 @@ import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 const root = resolve(import.meta.dirname, "../..");
+const entry = process.env.MIYABI_MDCZ_FNOS === "1" ? "fnos" : "bridge";
 const external = [
   "@trpc/server",
+  "@trpc/server/adapters/fastify",
   "better-sqlite3",
   "drizzle-orm",
+  "drizzle-orm/better-sqlite3",
+  "drizzle-orm/better-sqlite3/migrator",
+  "drizzle-orm/sqlite-core",
   "fastify",
   "impit",
   "mediainfo.js",
@@ -14,19 +19,19 @@ const external = [
 export default defineConfig({
   build: {
     lib: {
-      entry: resolve(import.meta.dirname, "main.ts"),
+      entry: resolve(import.meta.dirname, entry === "fnos" ? "fnos.ts" : "main.ts"),
       formats: ["es"],
-      fileName: () => "bridge.js",
+      fileName: () => `${entry}.js`,
     },
     outDir: resolve(import.meta.dirname, "dist"),
-    emptyOutDir: true,
+    emptyOutDir: entry === "bridge",
     target: "node24",
     ssr: true,
     // SSR builds use Rollup's entry naming, not build.lib.fileName.
-    // Docker and the native package share this stable launch path.
+    // Keep stable entry names for the standalone bridge and the native WebUI.
     rollupOptions: {
       external: [/^node:/, ...external],
-      output: { entryFileNames: "bridge.js" },
+      output: { entryFileNames: `${entry}.js` },
     },
   },
   resolve: {

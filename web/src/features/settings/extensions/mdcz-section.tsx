@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LoaderCircleIcon, SparklesIcon } from 'lucide-react'
+import { ExternalLinkIcon, LoaderCircleIcon, SparklesIcon } from 'lucide-react'
 import { describeApiError } from '@/api/client'
 import { useMDCzSettings, useUpdateMDCz, useTestMDCz, type MDCzUpdate } from '@/api/mdcz'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,12 @@ export function MDCzSection() {
   const [configurationDirty, setConfigurationDirty] = useState(false)
   const [connectionGeneration, setConnectionGeneration] = useState(0)
   const current: MDCzUpdate | undefined = draft ?? query.data
+  const webPort = query.data?.web_port
+  const editingLegacyConfig = !webPort && configurationDirty
+  const webUI =
+    webPort && typeof window !== 'undefined'
+      ? new URL(`http://${window.location.hostname}:${webPort}/settings`).href
+      : undefined
   const busy = save.isPending || test.isPending
   const update = (change: Partial<MDCzUpdate>) => {
     if (!current) return
@@ -54,7 +60,7 @@ export function MDCzSection() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
-              disabled={!draft || configurationDirty}
+              disabled={!draft || editingLegacyConfig}
               onClick={() =>
                 save.mutate(current, {
                   onSuccess: () => {
@@ -71,7 +77,7 @@ export function MDCzSection() {
               {saved ? '已保存。已有影片可在媒体库中重新刮削。' : draft ? '有未保存的修改' : ''}
             </span>
           </div>
-          {configurationDirty ? (
+          {editingLegacyConfig ? (
             <p className="text-xs text-muted-foreground">
               MDCz 来源配置有未保存的修改，请先保存或放弃，再保存刮削设置。
             </p>
@@ -81,7 +87,21 @@ export function MDCzSection() {
               {describeApiError(save.error)}
             </p>
           ) : null}
-          <details open={current.enabled || configurationDirty} className="rounded-md border p-3">
+          {webPort ? (
+            <SettingRow
+              title="MDCz 配置"
+              description="来源、代理和翻译在 MDCz 中保存，下一次刮削生效。"
+              inline
+            >
+              <Button asChild variant="outline">
+                <a href={webUI} target="_blank" rel="noreferrer">
+                  打开 MDCz 配置
+                  <ExternalLinkIcon aria-hidden />
+                </a>
+              </Button>
+            </SettingRow>
+          ) : null}
+          <details open={current.enabled || editingLegacyConfig} className="rounded-md border p-3">
             <summary className="cursor-pointer text-sm font-medium">MDCz 增强设置</summary>
             <div className="mt-4 space-y-5">
               <p className="text-xs leading-5 text-muted-foreground">
@@ -138,17 +158,19 @@ export function MDCzSection() {
                   {describeApiError(test.error)}
                 </p>
               ) : null}
-              <SettingRow
-                title="翻译标题与介绍"
-                description="使用桥接服务中配置的翻译来源。关闭时保留原文。"
-                inline
-              >
-                <Switch
-                  aria-label="翻译标题与介绍"
-                  checked={current.translate}
-                  onCheckedChange={translate => update({ translate })}
-                />
-              </SettingRow>
+              {webPort ? null : (
+                <SettingRow
+                  title="翻译标题与介绍"
+                  description="使用桥接服务中配置的翻译来源。关闭时保留原文。"
+                  inline
+                >
+                  <Switch
+                    aria-label="翻译标题与介绍"
+                    checked={current.translate}
+                    onCheckedChange={translate => update({ translate })}
+                  />
+                </SettingRow>
+              )}
               <SettingRow
                 title="生成封面角标"
                 description="按实际文件标记显示中字、破解等信息并导出至 Emby。多分集只显示共同属性。"
@@ -183,9 +205,11 @@ export function MDCzSection() {
               <details className="rounded-md border p-3 text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer font-medium text-foreground">使用说明</summary>
                 <p className="mt-2">
-                  {current.managed
-                    ? '包内连接无需手工填写。在下方配置来源、代理和翻译服务。'
-                    : '保存桥接地址与密钥后，可以在下方配置来源、代理和翻译服务。'}
+                  {webPort
+                    ? '来源、代理及翻译在 MDCz 官方设置页调整。'
+                    : current.managed
+                      ? '包内连接无需手工填写。在下方配置来源、代理和翻译服务。'
+                      : '保存桥接地址与密钥后，可以在下方配置来源、代理和翻译服务。'}
                 </p>
                 <a
                   className="underline underline-offset-4"
@@ -200,12 +224,14 @@ export function MDCzSection() {
                   的内嵌字幕和分辨率需要可信的文件名标记。可先重新刮削单部影片确认效果。
                 </p>
               </details>
-              <MDCzConfigurationSection
-                key={connectionGeneration}
-                connected={!!query.data?.server_url && !!query.data?.has_api_key}
-                disabled={busy}
-                onDirtyChange={setConfigurationDirty}
-              />
+              {webPort ? null : (
+                <MDCzConfigurationSection
+                  key={connectionGeneration}
+                  connected={!!query.data?.server_url && !!query.data?.has_api_key}
+                  disabled={busy}
+                  onDirtyChange={setConfigurationDirty}
+                />
+              )}
             </div>
           </details>
         </fieldset>
