@@ -19,7 +19,8 @@ import (
 
 // RescrapeMovie queues a fresh metadata workflow for the indexed files of one movie.
 // A supplied code persists the user's correction before the recoverable job starts.
-func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code string) (*ent.Task, error) {
+// A selected JavDB entry is published only after its metadata and export succeed.
+func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code, javdbID string) (*ent.Task, error) {
 	if code != "" && !codeid.Valid(code) {
 		return nil, domain.E(domain.KindInvalid, "请输入有效的影片番号", nil)
 	}
@@ -55,7 +56,7 @@ func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code string) (*ent.
 				if err != nil {
 					return err
 				}
-				if !correcting && input.Rebuild && input.Source == sess.Source() {
+				if !correcting && input.Rebuild && input.Source == sess.Source() && input.SelectedJavDBID == javdbID {
 					parent, err = tx.Task.Get(ctx, input.ScanTaskID)
 					return err
 				}
@@ -71,6 +72,15 @@ func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code string) (*ent.
 			}
 			if busy {
 				return domain.E(domain.KindConflict, "媒体库正在扫描，请完成后再操作", nil)
+			}
+			if javdbID != "" {
+				owned, err := tx.Movie.Query().Where(movie.JavdbIDEQ(javdbID), movie.IDNEQ(id)).Exist(ctx)
+				if err != nil {
+					return err
+				}
+				if owned {
+					return domain.E(domain.KindConflict, "此 JavDB 条目已关联到媒体库中的另一部影片", nil)
+				}
 			}
 			if correcting {
 				matches, err := MatchMovies(ctx, tx, []string{code})
@@ -111,7 +121,7 @@ func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code string) (*ent.
 			}
 			body, err = tasks.EncodePayload(scrape.MetadataPayload{
 				Rebuild: true, Source: sess.Source(), ScanTaskID: parent.ID, MovieID: id,
-				Code: record.Code, JavDBID: domain.ValueOrZero(record.JavdbID), ManualCode: record.ManualCode,
+				Code: record.Code, JavDBID: domain.ValueOrZero(record.JavdbID), SelectedJavDBID: javdbID, ManualCode: record.ManualCode,
 			})
 			if err != nil {
 				return err

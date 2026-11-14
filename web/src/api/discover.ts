@@ -118,6 +118,7 @@ export type SearchMoviesParams = {
   query: string
   page?: number
   limit?: number
+  sameCode?: true
 }
 
 const movieDetails = createMovieDetailLoader((id, signal) =>
@@ -210,7 +211,8 @@ export function useSearchMovies(params: SearchMoviesParams) {
         {
           q: query,
           page: params.page,
-          limit: params.limit
+          limit: params.limit,
+          same_code: params.sameCode ? 1 : undefined
         },
         signal
       ),

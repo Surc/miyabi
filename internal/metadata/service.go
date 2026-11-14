@@ -191,8 +191,12 @@ func (s *Service) Resolve(ctx context.Context, ref domain.MovieRef) (domain.Movi
 		}
 	}
 	if len(failures) > 0 {
+		cause := errors.Join(failures...)
+		if errors.Is(cause, ErrAmbiguousJavDB) {
+			return domain.MovieMetadata{}, domain.E(domain.KindConflict, "JavDB 有多个同番号条目，请选择对应的 JavDB 条目后重新刮削", cause)
+		}
 		message := "刮削来源查询失败: " + strings.Join(failedSources, "、") + "，请检查网络和代理设置"
-		return domain.MovieMetadata{}, domain.E(domain.KindUpstream, message, errors.Join(failures...))
+		return domain.MovieMetadata{}, domain.E(domain.KindUpstream, message, cause)
 	}
 	return domain.MovieMetadata{}, domain.E(domain.KindNotFound, "已启用的来源未找到可确认的影片资料", ErrNotFound)
 }
@@ -261,6 +265,9 @@ func (s *Service) Fallback(ctx context.Context, ref domain.MovieRef) (domain.Mov
 	}
 	ref.Code = codeid.Normalize(ref.Code)
 	result, err := s.fetch(ctx, source, ref)
+	if errors.Is(err, ErrNotFound) {
+		return domain.MovieMetadata{}, domain.E(domain.KindNotFound, "JavDB 未找到与影片番号匹配的条目", err)
+	}
 	if err != nil {
 		return domain.MovieMetadata{}, err
 	}
@@ -270,11 +277,13 @@ func (s *Service) Fallback(ctx context.Context, ref domain.MovieRef) (domain.Mov
 func (s *Service) fetch(ctx context.Context, source Source, ref domain.MovieRef) (domain.MovieMetadata, error) {
 	code := codeid.Normalize(ref.Code)
 	ref.Code = code
-	key := source.ID() + ":" + code
-	knownJavDB := source.ID() == "javdb" && ref.JavDBID != ""
-	if knownJavDB {
-		key += ":" + ref.JavDBID
+	cacheCode := code
+	if source.ID() == "javdb" {
+		// Legacy rows could contain either a number search or an explicit ID lookup.
+		// Give both lookups distinct keys, including when the ID is empty.
+		cacheCode += ":" + ref.JavDBID
 	}
+	key := source.ID() + ":" + cacheCode
 	if ref.Refresh {
 		key += ":refresh"
 	}
@@ -290,16 +299,11 @@ func (s *Service) fetch(ctx context.Context, source Source, ref domain.MovieRef)
 		// Bound shared requests independently of one caller leaving a detail dialog.
 		queryCtx, cancel := context.WithTimeout(s.ctx, 25*time.Second)
 		defer cancel()
-		entry, err := s.db.MetadataCache.Query().Where(metadatacache.ProviderEQ(source.ID()), metadatacache.CodeEQ(code)).Only(queryCtx)
+		entry, err := s.db.MetadataCache.Query().Where(metadatacache.ProviderEQ(source.ID()), metadatacache.CodeEQ(cacheCode)).Only(queryCtx)
 		if err != nil && !ent.IsNotFound(err) {
 			return nil, err
 		}
 		cacheMatches := !ref.Refresh && entry != nil && time.Now().Before(entry.ExpiresAt)
-		// A known ID can retrieve a film absent from search. A cached miss or a
-		// different catalogue ID must not suppress that more precise lookup.
-		if cacheMatches && knownJavDB {
-			cacheMatches = entry.Result != nil && entry.Result.Detail.ID == ref.JavDBID
-		}
 		if cacheMatches {
 			if entry.Result == nil {
 				return nil, ErrNotFound
@@ -330,7 +334,7 @@ func (s *Service) fetch(ctx context.Context, source Source, ref domain.MovieRef)
 		} else {
 			ttl = 10 * time.Minute
 		}
-		if saveErr := s.db.MetadataCache.Create().SetProvider(source.ID()).SetCode(code).SetResult(cached).
+		if saveErr := s.db.MetadataCache.Create().SetProvider(source.ID()).SetCode(cacheCode).SetResult(cached).
 			SetExpiresAt(time.Now().Add(ttl)).OnConflictColumns(metadatacache.FieldProvider, metadatacache.FieldCode).UpdateNewValues().Exec(queryCtx); saveErr != nil {
 			return nil, saveErr
 		}

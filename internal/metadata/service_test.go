@@ -3,11 +3,13 @@ package metadata
 import (
 	"context"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
@@ -99,6 +101,26 @@ func TestSourceFailuresExposeOnlySourceNamesAndKeepDiagnosticCauses(t *testing.T
 				t.Fatal("simplified message changed retry classification")
 			}
 		})
+	}
+}
+
+func TestJavDBAmbiguityRequiresASelectionEvenWhenFANZAFails(t *testing.T) {
+	primary := &sourceStub{id: "fanza", fetch: func(context.Context, string) (domain.MovieMetadata, error) {
+		return domain.MovieMetadata{}, io.EOF
+	}}
+	catalogue := &sourceStub{id: "javdb", fetch: func(context.Context, string) (domain.MovieMetadata, error) {
+		return domain.MovieMetadata{}, ErrAmbiguousJavDB
+	}}
+	s := newTestService(t, primary, catalogue)
+	_, err := s.Resolve(t.Context(), domain.MovieRef{Code: "ABF-027", Refresh: true})
+	if !domain.IsKind(err, domain.KindConflict) || !errors.Is(err, ErrAmbiguousJavDB) || !errors.Is(err, io.EOF) {
+		t.Fatalf("wrong failure classification or lost diagnostics: %v", err)
+	}
+	if !strings.Contains(domain.PublicMessage(err), "请选择对应的 JavDB 条目") {
+		t.Fatalf("missing actionable error: %v", err)
+	}
+	if _, retry := domain.RetryDelay(err); retry {
+		t.Fatal("choosing a catalogue entry requires user input")
 	}
 }
 
@@ -300,6 +322,31 @@ func TestKnownJavDBIDCanRecoverFromCachedSearchMiss(t *testing.T) {
 		t.Fatal("known identity was not cached")
 	}
 }
+
+func TestKnownJavDBIDDoesNotResolveUnlinkedSameNumber(t *testing.T) {
+	source := &sourceStub{id: "javdb"}
+	source.fetch = func(_ context.Context, code string) (domain.MovieMetadata, error) {
+		if source.calls.Load() > 1 {
+			return domain.MovieMetadata{}, ErrAmbiguousJavDB
+		}
+		m := completeFixture("javdb", code)
+		m.Detail.ID, m.Detail.Sources[0].ID = "known", "known"
+		return m, nil
+	}
+	s := newTestService(t, source)
+	ref := domain.MovieRef{Code: "ABF-027", JavDBID: "known", Refresh: true}
+	legacy := completeFixture("javdb", ref.Code)
+	legacy.Detail.ID, legacy.Detail.Sources[0].ID = "legacy", "legacy"
+	s.db.MetadataCache.Create().SetProvider("javdb").SetCode(ref.Code).
+		SetResult(&legacy).SetExpiresAt(time.Now().Add(time.Hour)).ExecX(t.Context())
+	if m, err := s.Fallback(t.Context(), ref); err != nil || m.Detail.ID != "known" {
+		t.Fatalf("selected identity was not resolved: %+v, %v", m, err)
+	}
+	if _, err := s.Resolve(t.Context(), domain.MovieRef{Code: ref.Code}); !errors.Is(err, ErrAmbiguousJavDB) {
+		t.Fatalf("selected identity leaked into number search: %v", err)
+	}
+}
+
 func newTestService(t *testing.T, sources ...Source) *Service {
 	t.Helper()
 	store, err := database.Open(t.Context(), t.TempDir())

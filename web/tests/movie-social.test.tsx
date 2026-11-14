@@ -111,9 +111,7 @@ test.each([
   [new ApiError('JavLibrary 需要在已连接的浏览器中完成人工验证', 502), '需要验证'],
   [new ApiError('断开', 502, 'JAVLIBRARY_BROWSER_DISCONNECTED'), '请先启动本机验证服务']
 ])('rating recovery opens the local verification page for %s', (error, label) => {
-  vi.mocked(useJavLibraryRating).mockReturnValue({ isError: true, error } as ReturnType<
-    typeof useJavLibraryRating
-  >)
+  vi.mocked(useJavLibraryRating, { partial: true }).mockReturnValue({ isError: true, error })
   const html = renderToStaticMarkup(<JavLibraryRating code="ABP-123" />)
   expect(html).toContain(label)
   expect(html).toContain('href="http://127.0.0.1:18082/" target="_blank" rel="noopener noreferrer"')

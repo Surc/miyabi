@@ -12,6 +12,9 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 )
 
+// ValidMovieID checks the format of a JavDB catalogue entry ID.
+func ValidMovieID(id string) bool { return javdbMovieID.MatchString(id) }
+
 // MovieDetail fetches a movie and its graph metadata.
 func (c *Client) MovieDetail(ctx context.Context, movieID string) (domain.MovieDetail, error) {
 	movieID = strings.TrimSpace(movieID)
@@ -26,7 +29,7 @@ func (c *Client) MovieDetail(ctx context.Context, movieID string) (domain.MovieD
 		nil,
 		&data,
 	); err != nil {
-		if ctx.Err() == nil && requiresWebFallback(err) && javdbMovieID.MatchString(movieID) {
+		if ctx.Err() == nil && requiresWebFallback(err) && ValidMovieID(movieID) {
 			return c.movieDetailFromWeb(ctx, movieID, err)
 		}
 		return domain.MovieDetail{}, err

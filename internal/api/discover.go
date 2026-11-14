@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ppxb/miyabi/internal/catalogue"
@@ -28,9 +29,10 @@ type ViewedManager interface {
 }
 
 type discoverSearchQuery struct {
-	Query string `form:"q" binding:"required"`
-	Page  int    `form:"page,default=1" binding:"min=1"`
-	Limit int    `form:"limit,default=20" binding:"min=1,max=100"`
+	Query    string `form:"q" binding:"required"`
+	Page     int    `form:"page,default=1" binding:"min=1"`
+	Limit    int    `form:"limit,default=20" binding:"min=1,max=100"`
+	SameCode bool   `form:"same_code"`
 }
 
 type discoverBrowseQuery struct {
@@ -84,6 +86,11 @@ func discoverSearchHandler(discover CatalogueManager) gin.HandlerFunc {
 			Page:  query.Page,
 			Limit: query.Limit,
 		})
+		if err == nil && query.SameCode {
+			movies = slices.DeleteFunc(slices.Clone(movies), func(candidate catalogue.Movie) bool {
+				return !codeid.IsFormatEquivalent(candidate.Code, query.Query)
+			})
+		}
 		respond(c, movies, err)
 	}
 }

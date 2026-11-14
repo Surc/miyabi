@@ -81,9 +81,10 @@ export function useStartLibraryScan() {
 export function useRescrapeLibraryMovie(id: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (code?: string) => apiPost<ScanTask>(`/api/library/movies/${id}/scrape`, { code }),
+    mutationFn: (input?: { code?: string; javdb_id?: string }) =>
+      apiPost<ScanTask>(`/api/library/movies/${id}/scrape`, input ?? {}),
     onMutate: () => queryClient.getQueryData<Task[]>(taskKeys.all),
-    onSuccess: (task, _code, previous) => {
+    onSuccess: (task, _input, previous) => {
       cacheScanTask(queryClient, task, previous)
       return refreshQueries(queryClient, libraryKeys.all, taskKeys.all, movieStateKeys.all)
     }
