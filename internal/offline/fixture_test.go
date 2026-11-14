@@ -282,6 +282,11 @@ func offlineFixture(t testing.TB) (*Service, *ent.OfflineDownload, ent.OfflineDo
 type stubCatalogue struct {
 	movies  map[string]domain.MovieDetail
 	magnets map[string][]domain.Magnet
+	ed2k    map[string][]domain.ED2KResource
+}
+
+func (s *stubCatalogue) ED2KResources(_ context.Context, movieID string, page int) (domain.ED2KPage, error) {
+	return domain.ED2KPage{Items: s.ed2k[movieID], Page: page}, nil
 }
 
 func (s *stubCatalogue) CatalogueMagnets(ctx context.Context, movieID string) ([]domain.Magnet, error) {

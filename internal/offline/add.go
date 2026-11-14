@@ -22,6 +22,23 @@ func (service *Service) Add(ctx context.Context, movieID, hash string) (domain.O
 	if !has {
 		return domain.OfflineSubmission{}, ErrMagnetNotFound
 	}
+	return service.add(ctx, movieID, hash, "")
+}
+
+func (service *Service) AddED2K(ctx context.Context, movieID, resourceID string, page int) (domain.OfflineSubmission, error) {
+	resources, err := service.catalogue.ED2KResources(ctx, movieID, page)
+	if err != nil {
+		return domain.OfflineSubmission{}, err
+	}
+	for _, resource := range resources.Items {
+		if resource.ID == resourceID {
+			return service.add(ctx, movieID, resource.ID, resource.URI)
+		}
+	}
+	return domain.OfflineSubmission{}, domain.E(domain.KindInvalid, "ED2K 资源已变化，请刷新后重试", nil)
+}
+
+func (service *Service) add(ctx context.Context, movieID, hash, ed2kURI string) (domain.OfflineSubmission, error) {
 	rawCode, err := service.catalogue.MovieCode(ctx, movieID)
 	if err != nil {
 		return domain.OfflineSubmission{}, err
@@ -50,7 +67,7 @@ func (service *Service) Add(ctx context.Context, movieID, hash string) (domain.O
 		offlinedownload.StatusEQ(offlinedownload.StatusRunning)).First(ctx)
 	if err == nil {
 		if existing.DirectoryID != directory.ID {
-			return domain.OfflineSubmission{}, domain.E(domain.KindConflict, "该磁力正在下载到另一个目录，请先在 115 中处理该任务", nil)
+			return domain.OfflineSubmission{}, domain.E(domain.KindConflict, "该资源正在下载到另一个目录，请先在 115 中处理该任务", nil)
 		}
 		return service.submission(ctx, existing, &source)
 	}
@@ -87,12 +104,16 @@ func (service *Service) Add(ctx context.Context, movieID, hash string) (domain.O
 	submitContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), service.submitTimeout)
 	defer cancel()
 	state := &download.Recovery{Preferences: prefs, CurrentHash: hash, Action: actionSubmit, SubmissionStarted: true,
-		Attempts: []download.Attempt{{Hash: hash, StartedAt: service.now()}}}
+		ED2KURI: ed2kURI, Attempts: []download.Attempt{{Hash: hash, StartedAt: service.now()}}}
+	infoHash := hash
+	if ed2kURI != "" {
+		infoHash = ""
+	}
 	var created *ent.OfflineDownload
 	if err := service.drive.Commit(submitContext, func(tx *ent.Tx) error {
 		var err error
 		created, err = tx.OfflineDownload.Create().
-			SetCode(code).SetJavdbID(movieID).SetHash(hash).SetInfoHash(hash).SetRecovery(state).
+			SetCode(code).SetJavdbID(movieID).SetHash(hash).SetInfoHash(infoHash).SetRecovery(state).
 			SetAccountID(source.AccountID).SetDirectoryID(directory.ID).
 			Save(submitContext)
 		if err != nil {
@@ -102,7 +123,7 @@ func (service *Service) Add(ctx context.Context, movieID, hash string) (domain.O
 	}); err != nil {
 		return domain.OfflineSubmission{}, fmt.Errorf("record 115 offline download: %w", err)
 	}
-	remote, err := service.submit(submitContext, sess, hash)
+	remote, err := service.submit(submitContext, sess, hash, ed2kURI)
 	if err != nil {
 		return domain.OfflineSubmission{}, service.deferAction(submitContext, created, state, fmt.Errorf("submit 115 offline download: %w", err))
 	}

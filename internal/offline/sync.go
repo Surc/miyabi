@@ -116,6 +116,15 @@ func (service *Service) UpdateTask(ctx context.Context, sess drive.Session, reco
 		return err
 	}
 	defer unlock()
+	ed2kLocationUnresolved := false
+	if remote.Status == 2 && record.Recovery != nil && record.Recovery.ED2KURI != "" && record.ScanTaskID == 0 {
+		location := remote.FileID
+		remote, err = resolveED2KCompletion(ctx, sess, remote, record.Recovery.ED2KURI)
+		if err != nil {
+			return err
+		}
+		ed2kLocationUnresolved = location != "" && remote.FileID == ""
+	}
 	_, prefs, err := service.config(ctx)
 	if err != nil {
 		return err
@@ -141,11 +150,19 @@ func (service *Service) UpdateTask(ctx context.Context, sess drive.Session, reco
 		case 0, 1:
 		case 2:
 			if current.Status == offlinedownload.StatusDone && (current.ScanTaskID != 0 ||
-				current.FileID == "" && remote.FileID == "") {
+				current.FileID == "" && remote.FileID == "" && (!ed2kLocationUnresolved || current.Error != nil)) {
 				return nil
 			}
 			notify = true
-			return service.completeTask(ctx, tx, current, remote.FileID)
+			if err := service.completeTask(ctx, tx, current, remote.FileID); err != nil {
+				return err
+			}
+			if ed2kLocationUnresolved {
+				return tx.OfflineDownload.UpdateOneID(current.ID).
+					SetError("115 已完成 ED2K 下载，暂未在目标目录确认文件").
+					Exec(ctx)
+			}
+			return nil
 		case -1:
 			status = offlinedownload.StatusFailed
 		default:

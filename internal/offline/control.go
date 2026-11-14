@@ -48,6 +48,9 @@ func (s *Service) advance(ctx context.Context, id int, requested string) (domain
 		return domain.OfflineSubmission{}, err
 	}
 	state := recovery(record, prefs)
+	if state.ED2KURI != "" && (requested == actionSwitch || requested == "next") {
+		return s.submission(ctx, record, source)
+	}
 	if requested == actionSwitch && !cfg.AutoSwitch {
 		return s.submission(ctx, record, source)
 	}
@@ -138,14 +141,21 @@ func (s *Service) advance(ctx context.Context, id int, requested string) (domain
 
 func (s *Service) removeCurrent(ctx context.Context, sess drive.Session, record *ent.OfflineDownload, state *download.Recovery) error {
 	hash := record.InfoHash
-	if hash == "" {
+	if hash == "" && state.ED2KURI == "" {
 		hash = currentHash(record)
 	}
-	remote, found, err := s.lookupRemoteTask(ctx, sess, hash)
+	remote, found, err := s.lookupRemoteTask(ctx, sess, hash, state.ED2KURI)
 	if err != nil {
 		return err
 	}
+	if found && hash == "" && remote.DirectoryID != record.DirectoryID {
+		found = false
+	}
 	if found && remote.Status == 2 {
+		remote, err = resolveED2KCompletion(ctx, sess, remote, state.ED2KURI)
+		if err != nil {
+			return err
+		}
 		return sess.Commit(ctx, func(tx *ent.Tx) error { return s.completeTask(ctx, tx, record, remote.FileID) })
 	}
 	if found && remote.Status != 0 && remote.Status != 1 && remote.Status != -1 {
@@ -187,7 +197,7 @@ func (s *Service) removeCurrent(ctx context.Context, sess drive.Session, record 
 		if err := sess.Commit(ctx, func(tx *ent.Tx) error { return tx.OfflineDownload.UpdateOneID(record.ID).SetRecovery(state).Exec(ctx) }); err != nil {
 			return err
 		}
-		if err := sess.RemoveOffline(ctx, hash); err != nil {
+		if err := sess.RemoveOffline(ctx, remote.Hash); err != nil {
 			return err
 		}
 	}
@@ -222,13 +232,23 @@ func (s *Service) resumeSubmission(ctx context.Context, sess drive.Session, reco
 		return domain.E(domain.KindConflict, "该磁力已有下载任务", nil)
 	}
 	if state.SubmissionStarted {
-		remote, found, err := s.lookupRemoteTask(ctx, sess, hash)
+		infoHash := hash
+		if state.ED2KURI != "" {
+			infoHash = record.InfoHash
+		}
+		remote, found, err := s.lookupRemoteTask(ctx, sess, infoHash, state.ED2KURI)
 		if err != nil {
 			return err
 		}
 		if found && (remote.Status == 0 || remote.Status == 1 || remote.Status == 2) {
 			if remote.DirectoryID != record.DirectoryID {
 				return domain.E(domain.KindConflict, "115 任务位于其他目录", nil)
+			}
+			if remote.Status == 2 {
+				remote, err = resolveED2KCompletion(ctx, sess, remote, state.ED2KURI)
+				if err != nil {
+					return err
+				}
 			}
 			return s.recordSubmission(ctx, record, state, remote)
 		}
@@ -237,7 +257,7 @@ func (s *Service) resumeSubmission(ctx context.Context, sess drive.Session, reco
 	if err := sess.Commit(ctx, func(tx *ent.Tx) error { return tx.OfflineDownload.UpdateOneID(record.ID).SetRecovery(state).Exec(ctx) }); err != nil {
 		return err
 	}
-	remote, err := s.submit(ctx, sess, hash)
+	remote, err := s.submit(ctx, sess, hash, state.ED2KURI)
 	if err != nil {
 		return err
 	}

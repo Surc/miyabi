@@ -153,6 +153,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected.GET("/discover/movies/:id", discoverMovieHandler(deps.Catalogue))
 	protected.GET("/discover/movies/resolve", discoverResolveMovieHandler(deps.Catalogue))
 	protected.GET("/discover/movies/:id/magnets", discoverMagnetsHandler(deps.Catalogue))
+	protected.GET("/discover/movies/:id/ed2k", noStore(), discoverED2KHandler(deps.Catalogue))
 	protected.POST("/discover/movies/:id/offline", offlineAddHandler(deps.Offline))
 	if deps.BrowseExtension != nil {
 		protected.GET("/image", imageHandler(deps.BrowseExtension))
