@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ppxb/miyabi/internal/atomicfile"
-	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 	"github.com/ppxb/miyabi/internal/ent"
@@ -28,9 +28,12 @@ const (
 
 // Service exports movie subtitles beside their Emby .strm files.
 type Service struct {
-	db      *ent.Client
-	finder  *Finder
-	exports *export.Manager
+	db                   *ent.Client
+	finder               *Finder
+	exports              *export.Manager
+	recoveryMu           sync.Mutex
+	afterSubtitleInstall func() error         // test fault after durable file installation, before DB registration
+	syncSubtitleFile     func(*os.File) error // test fault for file or directory durability
 }
 
 func NewService(db *ent.Client, finder *Finder) *Service {
@@ -70,6 +73,9 @@ func (s *Service) withExportTarget(ctx context.Context, target subtitlemeta.Targ
 // files it wrote. Existing exports are reused; online subtitles fill the
 // remaining kinds up to MaxTracks.
 func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.Target) (int, error) {
+	if err := s.recoverPending(ctx, movieID); err != nil {
+		return 0, err
+	}
 	config, err := s.Config(ctx)
 	if err != nil {
 		return 0, err
@@ -87,20 +93,9 @@ func (s *Service) Export(ctx context.Context, movieID int, target subtitlemeta.T
 	return s.downloadOnline(ctx, target, exported, config, func(track subtitlemeta.Track, body []byte) (bool, error) {
 		var saved bool
 		err := s.withExportTarget(ctx, target, func() error {
-			destination := target.Path(track.Kind)
-			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
-				return err
-			}
-			if err := writeFile(destination, body); err != nil {
-				return err
-			}
-			if err := ent.WithTx(ctx, s.db, func(tx *ent.Tx) error {
-				return database.RecordSubtitle(ctx, tx, movieID, destination, track)
-			}); err != nil {
-				return errors.Join(err, os.Remove(destination))
-			}
-			saved = true
-			return nil
+			var err error
+			saved, err = s.saveTrack(ctx, movieID, target, track, body)
+			return err
 		})
 		return saved, err
 	})

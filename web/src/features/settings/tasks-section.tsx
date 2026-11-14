@@ -1,9 +1,11 @@
 import { ListChecksIcon } from 'lucide-react'
 
-import { isScanTask, isTaskActive, useTasks } from '@/api/tasks'
+import { isScanTask, isSubtitleTask, isTaskActive, useTasks } from '@/api/tasks'
 import { InlineError } from '@/components/error-state'
 import { SettingRow, SettingsSection } from '@/features/settings/shared'
+import { PublicationRecoveryStatus } from '@/features/tasks/publication-status'
 import { LibraryPauseButton } from '@/features/tasks/library-pause-button'
+import { SubtitleProgressView } from '@/features/tasks/subtitle-progress'
 import { ScanProgressView } from '@/features/tasks/scan-progress'
 import { useTaskConnection } from '@/features/tasks/task-events'
 
@@ -11,13 +13,15 @@ export function TasksSection() {
   const tasks = useTasks()
   const connection = useTaskConnection()
   const scans = tasks.data?.filter(isScanTask)
-  const activeScan = scans?.find(isTaskActive)
+  const subtitles = tasks.data?.filter(isSubtitleTask)
+  const activeScan = scans?.find(isTaskActive) ?? subtitles?.find(isTaskActive)
 
   return (
     <SettingsSection icon={<ListChecksIcon className="size-4" />} title="任务">
+      <PublicationRecoveryStatus />
       <SettingRow
         title="媒体库进度"
-        description="查看同步与重建进度，暂停会作用于所有扫描与刮削任务并保留进度"
+        description="查看同步与重建进度，暂停会作用于所有扫描、刮削与字幕任务并保留进度"
       >
         {activeScan ? <LibraryPauseButton paused={!!activeScan.paused} /> : null}
       </SettingRow>
@@ -45,6 +49,17 @@ export function TasksSection() {
           </div>
         ))}
       </div>
+      {subtitles?.length ? (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">字幕后续任务</p>
+          <p className="text-xs text-muted-foreground">
+            影片已入库，字幕任务单独重试，不会重新刮削影片。
+          </p>
+          {subtitles.map(task => (
+            <SubtitleProgressView key={task.id} task={task} />
+          ))}
+        </div>
+      ) : null}
     </SettingsSection>
   )
 }

@@ -15,7 +15,7 @@ import (
 func TestBusinessPackagesDoNotImportEachOther(t *testing.T) {
 	const module = "github.com/ppxb/miyabi/internal/"
 	business := []string{
-		"catalogue", "metadata", "metadata/providers",
+		"catalogue", "metadata", "metadata/providers", "mdcz",
 		"library", "library/scan", "library/scrape",
 		"offline", "monitor", "strm", "maintenance", "emby", "subtitle", "network",
 	}
@@ -25,6 +25,7 @@ func TestBusinessPackagesDoNotImportEachOther(t *testing.T) {
 		"library":            {"library/scan"},
 		"library/scan":       {"library/scrape"},
 		"metadata/providers": {"metadata", "catalogue"},
+		"mdcz":               {"metadata"},
 	}
 	forbidden := func(pkg string) []string {
 		var list []string

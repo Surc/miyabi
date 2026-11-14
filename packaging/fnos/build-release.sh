@@ -31,6 +31,8 @@ tar --no-same-owner -xJf "$build/node.tar.xz" -C "$build"
 chmod +x "$build/fnpack"
 export PATH="$build/node-v24.19.0-linux-x64/bin:$PATH"
 
+cd "$root"
+node extensions/mdcz-bridge/generate-compatibility.mjs --check
 cd "$root/web"
 CI=true corepack pnpm@10.33.0 install --frozen-lockfile
 corepack pnpm@10.33.0 build

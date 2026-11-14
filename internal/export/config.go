@@ -29,8 +29,11 @@ func (c Config) Validate() error {
 
 // Manager coordinates atomic access to the export configuration and serializes STRM rewrites.
 type Manager struct {
-	cfg     atomic.Pointer[Config]
-	writeMu sync.Mutex
+	cfg                 atomic.Pointer[Config]
+	writeMu             sync.Mutex
+	publications        atomic.Pointer[publicationRecovery]
+	publicationStatus   atomic.Pointer[PublicationStatus]
+	beforeWriteRecovery func(Config) error
 }
 
 // NewManager creates an export Manager initialized with the given Config.
@@ -69,7 +72,20 @@ func (m *Manager) WithConfig(fn func(Config) error) error {
 	}
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
-	return fn(m.Config())
+	if err := m.recoverPublications(); err != nil {
+		return err
+	}
+	if m.beforeWriteRecovery != nil {
+		if err := m.beforeWriteRecovery(m.Config()); err != nil {
+			status := m.PublicationStatus()
+			status.Blocked = true
+			m.publicationStatus.Store(&status)
+			return err
+		}
+	}
+	err := fn(m.Config())
+	m.refreshPublicationStatus()
+	return err
 }
 
 // RewriteSTRM rewrites with the latest configuration while excluding exports.
@@ -81,4 +97,13 @@ func (m *Manager) RewriteSTRM(ctx context.Context) (int, error) {
 		return err
 	})
 	return count, err
+}
+
+// SetBeforeWriteRecovery installs app-owned recovery for other durable export
+// operations (subtitle registration). The callback runs with the write lock
+// held after scrape recovery and must not re-enter this Manager.
+func (m *Manager) SetBeforeWriteRecovery(recover func(Config) error) {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	m.beforeWriteRecovery = recover
 }

@@ -58,7 +58,11 @@ func (v *taskViews) list(ctx context.Context) ([]domain.TaskInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := append(scans, batches...)
+	subtitles, err := v.listSubtitleTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := append(append(scans, batches...), subtitles...)
 	slices.SortFunc(result, func(a, b domain.TaskInfo) int {
 		aActive := a.Status == "queued" || a.Status == "running"
 		bActive := b.Status == "queued" || b.Status == "running"
@@ -88,6 +92,8 @@ func (v *taskViews) Retry(ctx context.Context, id int) (domain.TaskInfo, error) 
 	switch tasks.Kind(record.Type) {
 	case tasks.KindScan:
 		return v.library.RetryTask(ctx, id)
+	case tasks.KindSubtitle:
+		return v.retrySubtitle(ctx, id)
 	case tasks.KindSubscriptionBatch:
 		return v.monitor.RetryTask(ctx, id)
 	default:

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/ppxb/miyabi/internal/library"
 	"github.com/ppxb/miyabi/internal/library/scrape"
 	"github.com/ppxb/miyabi/internal/maintenance"
-	"github.com/ppxb/miyabi/internal/mdcz"
 	"github.com/ppxb/miyabi/internal/metadata"
 	"github.com/ppxb/miyabi/internal/metadata/providers"
 	"github.com/ppxb/miyabi/internal/monitor"
@@ -109,8 +109,18 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	exportMgr := export.NewManager(export.Config{
 		EmbyDir: cfg.EmbyDir, PublicURL: cfg.PublicURL, STRMToken: cfg.STRMToken,
 	})
+	exportMgr.EnablePublicationRecovery(filepath.Join(cfg.DataDir, "export-publications"), func(publication *export.Publication) (bool, error) {
+		checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return scrape.PublicationCommitted(checkCtx, store.Client, publication)
+	})
 	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()))
 	subtitleSvc.SetExportManager(exportMgr)
+	exportMgr.SetBeforeWriteRecovery(func(cfg export.Config) error {
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return subtitleSvc.RecoverLocked(recoveryCtx, cfg)
+	})
 	libSvc := library.New(store.Client, driveSvc, taskSvc, images, library.Options{ExportManager: exportMgr, Subtitles: subtitleSvc})
 	javbusClient, err := javbus.New(javbus.Options{Proxy: networkSvc.ProxyManager()})
 	if err != nil {
@@ -141,7 +151,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	mdczSvc, err := mdcz.New(ctx, store.Client, cfg.DataDir, metadataSvc)
+	mdczSvc, err := newMDCzExtension(ctx, store.Client, cfg.DataDir, metadataSvc)
 	if err != nil {
 		metadataSvc.Close()
 		catalogueSvc.Close()
@@ -182,6 +192,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	libSvc.SetMediaNotifier(embySvc)
 	scrapeSvc := scrape.New(store.Client, driveSvc, mdczSvc, images, taskSvc, scrape.Dependencies{
 		ArtworkDecorator: mdczSvc,
+		BeginAttempt:     mdczSvc.BeginAttempt,
 		ExportManager:    exportMgr, MediaNotifier: embySvc, Subtitles: subtitleSvc,
 	})
 	maintenanceSvc, err := maintenance.New(cfg.DataDir, store.Client, images, scrapeSvc)
@@ -195,6 +206,12 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("initialize maintenance service: %w", err)
 	}
 
+	// Resolve interrupted publications before any scan/STRM/background writer.
+	// Unverifiable state keeps writes blocked by WithConfig, but settings and
+	// existing library browsing remain available for diagnosis.
+	if err := exportMgr.WithConfig(func(export.Config) error { return nil }); err != nil {
+		logger.ErrorContext(ctx, "export publication recovery is blocked", "error", err)
+	}
 	if err := libSvc.ScheduleLocalScan(ctx); err != nil {
 		logger.ErrorContext(ctx, "failed to queue startup Emby directory scan", "error", err)
 	}
@@ -204,6 +221,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScan, libSvc.Scan, libSvc.Finished).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScrape, scrapeSvc.Scrape, scrapeSvc.Finished).WithRetry(database.RetryDelay))
+	taskRegistry.Register(tasks.NewHandler(tasks.KindSubtitle, scrapeSvc.ExportSubtitle, nil).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindSubscriptionBatch, monitorSvc.BatchHandler, monitorSvc.BatchFinished))
 
 	pools := newTaskPools(taskSvc, logger)
@@ -230,8 +248,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		JavLibraryRelay: browserRelay,
 		BrowseExtension: browseExtension,
 		TopSettings:     top.NewService(store.Client),
-		Metadata:        mdczSvc,
+		Metadata:        metadataAPI{native: metadataSvc, images: mdczSvc},
 		MDCz:            mdczSvc,
+		Publication:     exportMgr,
 		Drive:           driveSvc,
 		Offline:         offlineSvc,
 		Monitor:         monitorSvc,

@@ -75,10 +75,10 @@ async function installed(t) {
     join(paths.app, "bridge/bridge.js"),
     `
 import { createServer } from 'node:http';
-import { engineRevision } from '../service/configuration.mjs';
+import { engineRevision, protocol, bridgeVersion, configurationVersion, requiredCapabilities } from '../service/compatibility.mjs';
 const server=createServer((req,res)=>{
  if(req.headers.authorization!=='Bearer '+process.env.MIYABI_MDCZ_KEY){res.writeHead(401);res.end();return;}
- res.setHeader('content-type','application/json');res.end(JSON.stringify({protocol:1,revision:engineRevision,configuration_version:1,configuration_id:'fixture'}));
+ res.setHeader('content-type','application/json');res.end(JSON.stringify({protocol,revision:engineRevision,bridge_version:bridgeVersion,capabilities:requiredCapabilities,configuration_version:configurationVersion,configuration_id:'fixture'}));
 });
 server.listen(Number(process.env.PORT),process.env.HOST);
 process.on('SIGTERM',()=>server.close());
@@ -127,6 +127,7 @@ test("concurrent starts produce one service pair; stop is idempotent and preserv
     [0, 0],
     JSON.stringify(calls),
   );
+  await eventually(async () => (await state(paths)).bridge.phase === "running");
   const before = await state(paths);
   assert.equal((await call("status")).code, 0);
   assert.equal((await call("start")).code, 0);
@@ -140,13 +141,14 @@ test("concurrent starts produce one service pair; stop is idempotent and preserv
     assert.equal(await alive(record), false);
 });
 
-test("worker failure stops its sibling and an immediate startup failure leaves no orphan", async (t) => {
+test("main failure stops bridge and an immediate startup failure leaves no orphan", async (t) => {
   const { paths, call } = await installed(t);
   assert.equal((await call("start")).code, 0);
+  await eventually(async () => (await state(paths)).bridge.phase === "running");
   const before = await state(paths);
-  process.kill(before.children[0].pid, "SIGTERM");
+  process.kill(before.children.find((record) => record.name === "miyabi").pid, "SIGTERM");
   await eventually(async () => !(await alive(before.supervisor)));
-  assert.equal(await alive(before.children[1]), false);
+  assert.equal(await alive(before.children.find((record) => record.name === "bridge")), false);
   await writeFile(join(paths.app, "fail-main"), "fixture");
   const result = await call("start");
   assert.equal(result.code, 1);
@@ -158,14 +160,15 @@ test("worker failure stops its sibling and an immediate startup failure leaves n
 test("state write failure cannot interrupt worker cleanup", async (t) => {
   const { paths, call } = await installed(t);
   assert.equal((await call("start")).code, 0);
+  await eventually(async () => (await state(paths)).bridge.phase === "running");
   const before = await state(paths);
   const file = join(paths.run, "processes.json");
   await rename(file, `${file}.saved`);
   await mkdir(file);
   try {
-    process.kill(before.children[0].pid, "SIGTERM");
+    process.kill(before.children.find((record) => record.name === "miyabi").pid, "SIGTERM");
     await eventually(async () => !(await alive(before.supervisor)));
-    assert.equal(await alive(before.children[1]), false);
+    assert.equal(await alive(before.children.find((record) => record.name === "bridge")), false);
   } finally {
     await rm(file, { recursive: true });
     await rename(`${file}.saved`, file);
@@ -246,4 +249,82 @@ test("access configuration restarts the pair, preserves playback tokens and roll
   assert.deepEqual(await load(paths), changed);
   assert.equal((await call("status")).code, 0);
   assert.equal(failed.stderr.includes("failure-password"), false);
+});
+
+
+test("bridge exit leaves Miyabi running and restarts only the optional child", async (t) => {
+  const { paths, call } = await installed(t);
+  assert.equal((await call("start")).code, 0);
+  await eventually(async () => (await state(paths)).bridge.phase === "running");
+  const before = await state(paths);
+  const bridge = before.children.find((record) => record.name === "bridge");
+  const main = before.children.find((record) => record.name === "miyabi");
+  process.kill(bridge.pid, "SIGTERM");
+  await eventually(async () => (await state(paths)).bridge.phase === "backoff");
+  assert.equal((await call("status")).code, 0);
+  assert.equal(await alive(main), true);
+  await eventually(async () => {
+    const current = await state(paths);
+    return current.bridge.phase === "running" &&
+      current.children.some((record) => record.name === "bridge" && record.pid !== bridge.pid);
+  });
+  assert.equal((await state(paths)).supervisor.pid, before.supervisor.pid);
+  assert.equal((await call("stop")).code, 0);
+  assert.equal(await alive(main), false);
+});
+
+test("missing bridge native dependency does not block main and stop cancels retry", async (t) => {
+  const { paths, call } = await installed(t);
+  await rm(join(paths.app, "bridge/node_modules/sharp"), { recursive: true });
+  assert.equal((await call("start")).code, 0);
+  await eventually(async () => (await state(paths)).bridge.phase === "backoff");
+  const before = await state(paths);
+  assert.equal((await call("status")).code, 0);
+  assert.equal(before.children.length, 1);
+  assert.equal(before.children[0].name, "miyabi");
+  assert.equal((await call("stop")).code, 0);
+  await delay(1200);
+  const after = await state(paths);
+  assert.equal(after.phase, "stopped");
+  assert.equal(after.bridge.phase, "stopped");
+  for (const record of [before.supervisor, ...before.children]) assert.equal(await alive(record), false);
+});
+
+test("bridge port conflict exhausts retry budget without stopping Miyabi or claiming ready", async (t) => {
+  const { paths, config, call } = await installed(t);
+  const occupied = createServer();
+  await new Promise((resolve) => occupied.listen(config.bridgePort, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => occupied.close(resolve)));
+  assert.equal((await call("start")).code, 0);
+  assert.equal((await call("status")).code, 0);
+  await eventually(async () => (await state(paths)).bridge.phase === "unavailable", 20_000);
+  const exhausted = await state(paths);
+  assert.equal(exhausted.bridge.attempts, 5);
+  assert.equal(exhausted.children.length, 1);
+  assert.equal(exhausted.children[0].name, "miyabi");
+  assert.equal((await call("status")).code, 0);
+  await delay(1200);
+  assert.deepEqual((await state(paths)).bridge, exhausted.bridge);
+  assert.equal((await call("stop")).code, 0);
+});
+
+test("stop aborts an in-flight bridge probe without waiting for its startup deadline", async (t) => {
+  const { paths, call } = await installed(t);
+  const probePID = join(paths.data, "probe.pid");
+  await writeFile(join(paths.app, "service/native-probe.mjs"), `
+import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(probePID)}, String(process.pid));
+setInterval(() => {}, 1000);
+`);
+  assert.equal((await call("start")).code, 0);
+  await eventually(async () => {
+    try { return !!(await readFile(probePID, "utf8")); } catch { return false; }
+  });
+  const probe = await identity(Number(await readFile(probePID, "utf8")));
+  assert.ok(probe);
+  const started = Date.now();
+  assert.equal((await call("stop")).code, 0);
+  assert.ok(Date.now() - started < 5000);
+  assert.equal(await alive(probe), false);
+  assert.equal((await state(paths)).phase, "stopped");
 });

@@ -61,29 +61,32 @@ export function MDCzConfigurationSection({
           的原生网络设置单独生效。
         </p>
         {!connected ? (
-          <p className="text-sm text-muted-foreground">请先填写并保存上方服务地址与密钥。</p>
-        ) : (
-          <>
-            {query.isPending ? (
-              <p role="status" className="text-sm text-muted-foreground">
-                正在读取引擎配置…
-              </p>
-            ) : null}
-            {query.isError ? (
-              <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
-                {describeApiError(query.error)}
-              </InlineError>
-            ) : null}
-            {query.data ? (
-              <ConfigurationForm
-                initial={query.data}
-                onDirtyChange={onDirtyChange}
-                reload={() => query.refetch()}
-                loading={query.isFetching}
-              />
-            ) : null}
-          </>
-        )}
+          <p className="text-sm text-muted-foreground">
+            {query.data
+              ? '当前连接不可用，已加载的配置草稿会保留；可放弃修改后切回原版。'
+              : '当前连接不可用，请检查上方连接状态后重试。'}
+          </p>
+        ) : null}
+        {connected && query.isPending ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            正在读取引擎配置…
+          </p>
+        ) : null}
+        {connected && query.isError ? (
+          <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
+            {describeApiError(query.error)}
+          </InlineError>
+        ) : null}
+        {/* Keep a loaded editor mounted across connection loss, so its draft can
+            still be explicitly discarded without blocking an offline engine switch. */}
+        {query.data ? (
+          <ConfigurationForm
+            initial={query.data}
+            onDirtyChange={onDirtyChange}
+            reload={() => query.refetch()}
+            loading={query.isFetching}
+          />
+        ) : null}
       </fieldset>
     </details>
   )
@@ -109,6 +112,9 @@ function ConfigurationForm({
     setDraft(previous => ({
       configuration_version: previous?.configuration_version ?? initial.configuration_version,
       configuration_id: previous?.configuration_id ?? initial.configuration_id,
+      connection_generation: previous
+        ? previous.connection_generation
+        : initial.connection_generation,
       values: { ...previous?.values, ...values }
     }))
     onDirtyChange(true)

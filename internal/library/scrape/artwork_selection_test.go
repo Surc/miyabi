@@ -225,3 +225,28 @@ func TestAuthoredPosterDoesNotRunCropOnPolicyChange(t *testing.T) {
 		t.Fatalf("authored poster changed: %+v", input)
 	}
 }
+
+type conflictingArtworkSource struct {
+	artworkSource
+	calls int
+}
+
+func (s *conflictingArtworkSource) Image(context.Context, domain.ImageCandidate) (domain.Media, error) {
+	s.calls++
+	return domain.Media{}, domain.E(domain.KindConflict, "configuration changed", nil)
+}
+
+func TestArtworkConfigurationConflictDoesNotTryAnotherCandidate(t *testing.T) {
+	source := &conflictingArtworkSource{}
+	service := &Service{metadata: source}
+	_, _, err := service.selectCover(t.Context(), []domain.ImageCandidate{
+		{Provider: "mdcz", Role: "poster"}, {Provider: "javdb", Role: "cover"},
+	}, "")
+	if !domain.IsKind(err, domain.KindConflict) || source.calls != 1 {
+		t.Fatalf("configuration conflict swallowed: calls=%d, error=%v", source.calls, err)
+	}
+	input := Payload{Document: nfo.Movie{Images: []domain.ImageCandidate{{Provider: "mdcz", Role: "poster"}}}}
+	if err := service.prepareArtwork(t.Context(), 1, &input); !domain.IsKind(err, domain.KindConflict) {
+		t.Fatalf("configuration conflict retried through metadata fallback: %v", err)
+	}
+}

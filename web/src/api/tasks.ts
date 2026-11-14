@@ -66,7 +66,14 @@ export type BatchTask = TaskBase & {
   }
 }
 
-export type Task = ScanTask | BatchTask
+export type SubtitleTask = TaskBase & {
+  type: 'subtitle'
+  movie_id: number
+  code: string
+  paused?: boolean
+}
+
+export type Task = ScanTask | BatchTask | SubtitleTask
 
 export const taskKeys = { all: ['tasks'] as const }
 
@@ -103,4 +110,8 @@ export function isScanTask(task: Task): task is ScanTask {
 
 export function isTaskActive(task: Task) {
   return task.status === 'queued' || task.status === 'running'
+}
+
+export function isSubtitleTask(task: Task): task is SubtitleTask {
+  return task.type === 'subtitle'
 }

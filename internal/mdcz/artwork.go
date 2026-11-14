@@ -24,9 +24,12 @@ func digest(body []byte) string { sum := sha256.Sum256(body); return hex.EncodeT
 // Decorate never marks a previously marked image. The original and derived
 // bytes are immutable and content-addressed, independent of cache pruning.
 func (s *Service) Decorate(ctx context.Context, doc nfo.Movie, videos []pan.File, poster []byte) (nfo.Movie, []byte, error) {
-	cfg := s.config()
+	cfg, err := s.attemptSettings(ctx)
 	if !cfg.Enabled {
 		return doc, poster, nil
+	}
+	if err != nil {
+		return doc, nil, err
 	}
 	original := poster
 	origin := digest(original)
@@ -48,7 +51,11 @@ func (s *Service) Decorate(ctx context.Context, doc nfo.Movie, videos []pan.File
 		names = append(names, video.Name)
 	}
 	slices.Sort(names)
-	key, _ := json.Marshal([]any{Protocol, EngineRevision, doc.Code, origin, cfg.Position, names})
+	configurationID := ""
+	if attempt, ok := ctx.Value(attemptContextKey{}).(attemptContext); ok {
+		configurationID = attempt.health.ConfigurationID
+	}
+	key, _ := json.Marshal([]any{Protocol, EngineRevision, cfg.Generation, configurationID, doc.Code, origin, cfg.Position, names})
 	profile := digest(key)
 	result := struct {
 		Health

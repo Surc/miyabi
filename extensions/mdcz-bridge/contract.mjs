@@ -1,7 +1,8 @@
 /* eslint-disable no-control-regex -- Reject control characters at the HTTP boundary. */
-export const protocol = 1;
-export const revision = "f65e7d4161151aff1531f3b99872e49234d5d539";
-export const health = { protocol, revision };
+import { protocol, engineRevision, bridgeVersion, requiredCapabilities } from "./compatibility.generated.mjs";
+export { protocol };
+export const revision = engineRevision;
+export const health = { protocol, revision, bridge_version: bridgeVersion, capabilities: requiredCapabilities };
 export const positions = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
 export const hashPattern = /^[a-f0-9]{64}$/;
 

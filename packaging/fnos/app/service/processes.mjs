@@ -2,8 +2,10 @@ import { open, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readJSON, writeJSON, engineRevision, childEnvironment, bridgeConnection, syncBridgeConnection } from "./configuration.mjs";
+import { readJSON, writeJSON, childEnvironment, bridgeConnection, syncBridgeConnection } from "./configuration.mjs";
 
+import { bridgePreflight } from "./preflight.mjs";
+import { engineRevision, protocol, configurationVersion, bridgeVersion, requiredCapabilities } from "./compatibility.mjs";
 import { identity, alive } from "./identity.mjs";
 export { identity, alive } from "./identity.mjs";
 
@@ -56,38 +58,36 @@ async function json(url, key) {
   if (!response.ok) throw new Error("服务健康检查失败");
   return response.json();
 }
+// Main availability and optional scraping capability are deliberately separate.
 export async function healthy(config) {
   try {
-    const mainHealth = json(`http://127.0.0.1:${config.port}/api/auth/config`);
-    if (config.externalMDCz) return (await mainHealth).enabled === true;
-
+    return (await json(`http://127.0.0.1:${config.port}/api/auth/config`)).enabled === true;
+  } catch {
+    return false;
+  }
+}
+export async function bridgeHealthy(config) {
+  try {
     const connection = bridgeConnection(config);
-    const [main, bridge] = await Promise.all([
-      mainHealth,
-      json(`${connection.server_url}/v1/health`, connection.api_key),
-    ]);
-    return (
-      main.enabled === true &&
-      bridge.protocol === 1 &&
-      bridge.revision === engineRevision &&
-      bridge.configuration_version === 1 &&
-      !!bridge.configuration_id
-    );
+    const health = await json(`${connection.server_url}/v1/health`, connection.api_key);
+    return health.protocol === protocol && health.revision === engineRevision &&
+      health.configuration_version === configurationVersion &&
+      typeof health.configuration_id === "string" && health.configuration_id.length > 0 &&
+      health.bridge_version === bridgeVersion && Array.isArray(health.capabilities) &&
+      requiredCapabilities.every((name) => health.capabilities?.includes(name));
   } catch {
     return false;
   }
 }
 export async function status(paths, config) {
   const saved = await state(paths);
-  return (
-    !!saved &&
-    saved.phase === "running" &&
-    saved.children?.length === (config.externalMDCz ? 1 : 2) &&
-    (await Promise.all([saved.supervisor, ...saved.children].map((record) => alive(record)))).every(
-      Boolean,
-    ) &&
-    (await healthy(config))
-  );
+  // Old state files have unnamed records in bridge/main order. Do not signal
+  // processes based on a role alone: alive() still verifies boot/start identity.
+  const named = saved?.children?.some((record) => record.name);
+  const main = named ? saved.children.find((record) => record.name === "miyabi") :
+    saved?.children?.[config.externalMDCz ? 0 : 1];
+  return !!saved && saved.phase === "running" && !!main &&
+    (await alive(saved.supervisor)) && (await alive(main)) && (await healthy(config));
 }
 
 async function logFile(paths, name) {
@@ -100,89 +100,173 @@ async function logFile(paths, name) {
   return open(file, "a", 0o600);
 }
 
-// The command wrapper holds flock for start/stop/configuration. A supervisor
-// owns both children, and stops the pair on either exit instead of reporting a
-// half-running application. No global killall or pidfile-only signals.
+// The command wrapper holds flock for start/stop/configuration. Only the main
+// process defines application availability. The optional bridge has a bounded
+// restart budget; neither its crash nor failed native probe terminates Miyabi.
+export const restartPolicy = Object.freeze({
+  attempts: 5,
+  firstDelay: 1000,
+  maximumDelay: 8000,
+  stablePeriod: 60_000,
+});
+export function restartDelay(failures) {
+  return failures >= restartPolicy.attempts ? null :
+    Math.min(restartPolicy.firstDelay * 2 ** (failures - 1), restartPolicy.maximumDelay);
+}
+
 export async function supervise(paths, config) {
   const file = join(paths.run, "processes.json");
-  const saved = { supervisor: await identity(process.pid), children: [], phase: "starting" };
+  const saved = {
+    supervisor: await identity(process.pid), children: [], phase: "starting",
+    bridge: { phase: config.externalMDCz ? "external" : "starting", attempts: 0 },
+  };
   const exited = Promise.withResolvers();
-  // Shutdown can fail before startup reaches the wait below; retain its error
-  // without an early unhandled rejection interrupting worker cleanup.
   void exited.promise.catch(() => {});
+  const controller = new AbortController();
   let stopping;
+  let bridgeWork;
   let writes = Promise.resolve();
+  const spawning = new Set();
   const persist = () => {
     const copy = structuredClone(saved);
     writes = writes.then(() => writeJSON(file, copy));
     return writes;
   };
   const shutdown = () => {
-    if (!stopping)
+    if (!stopping) {
+      controller.abort(); // Cancels backoff and an in-progress native probe.
       stopping = (async () => {
         let failure;
         saved.phase = "stopping";
-        try {
-          await persist();
-        } catch (error) {
-          failure = error;
-        }
-        // Disk/permission errors must never bypass stopping the owned workers.
-        try {
-          await terminate(saved.children);
-        } catch (error) {
-          failure ||= error;
-        }
+        try { await persist(); } catch (error) { failure = error; }
+        // A signal may arrive between spawn and recording the child's identity.
+        // Join those launches before terminating; no new launch starts on abort.
+        await Promise.allSettled([...spawning]);
+        try { await terminate(saved.children); } catch (error) { failure ||= error; }
+        await bridgeWork?.catch((error) => { failure ||= error; });
         saved.phase = "stopped";
-        try {
-          await persist();
-        } catch (error) {
-          failure ||= error;
-        }
+        saved.bridge.phase = "stopped";
+        try { await persist(); } catch (error) { failure ||= error; }
         if (failure) throw failure;
         exited.resolve();
       })().catch((error) => exited.reject(error));
+    }
     return stopping;
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
-  await persist();
   const env = childEnvironment(paths, config);
-  const programs = [
-    ...(!config.externalMDCz ? [["bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, "bridge/bridge.js")]]] : []),
-    ["miyabi", join(paths.app, "bin/miyabi"), []],
-  ];
-  try {
-    for (const [name, program, args] of programs) {
-      if (stopping) break;
+  const launch = (name, program, args) => {
+    const work = (async () => {
+      if (controller.signal.aborted) return null;
       const output = await logFile(paths, name);
-      const child = spawn(program, args, {
-        cwd: paths.app,
-        env: env[name],
-        stdio: ["ignore", output.fd, output.fd],
-      });
-      const started = Promise.withResolvers();
-      child.once("spawn", started.resolve);
-      child.once("error", started.reject);
-      child.once("exit", () => {
-        void shutdown();
-      });
       try {
-        await started.promise;
-        const record = await identity(child.pid);
-        if (!record) throw new Error("子服务启动后立即退出");
-        saved.children.push(record);
-        await persist();
-        // An earlier worker can exit while this spawn is completing.
-        if (stopping) await terminate([record]);
+        if (controller.signal.aborted) return null;
+        const child = spawn(program, args, {
+          cwd: paths.app, env: env[name], stdio: ["ignore", output.fd, output.fd],
+        });
+        const started = Promise.withResolvers();
+        const ended = Promise.withResolvers();
+        child.once("spawn", started.resolve);
+        child.once("error", (error) => { started.reject(error); ended.resolve(); });
+        child.once("exit", ended.resolve);
+        if (name === "miyabi") child.once("exit", () => { void shutdown(); });
+        let record;
+        try {
+          await started.promise;
+          const processIdentity = await identity(child.pid);
+          if (!processIdentity) throw new Error("子服务启动后立即退出");
+          record = { ...processIdentity, name };
+          saved.children.push(record);
+          await persist();
+          return { record, ended: ended.promise };
+        } catch (error) {
+          if (record) {
+            await terminate([record]);
+          } else if (child.pid && child.exitCode === null && child.signalCode === null) {
+            // Identity acquisition itself can fail. This is the owned spawn
+            // handle, never a PID from disk; dispose it before retry/rollback.
+            child.kill("SIGTERM");
+            await Promise.race([ended.promise, delay(1000)]);
+            if (child.exitCode === null && child.signalCode === null) {
+              child.kill("SIGKILL");
+              await ended.promise;
+            }
+          }
+          throw error;
+        }
       } finally {
         await output.close();
       }
+    })();
+    spawning.add(work);
+    void work.finally(() => spawning.delete(work)).catch(() => {});
+    return work;
+  };
+  const bridgeLoop = async () => {
+    let failures = 0;
+    while (!controller.signal.aborted) {
+      let worker;
+      let healthySince;
+      let reason = "preflight";
+      try {
+        saved.bridge = { phase: "starting", attempts: failures + 1 };
+        await persist();
+        await bridgePreflight(paths, config, controller.signal);
+        if (controller.signal.aborted) return;
+        worker = await launch("bridge", join(paths.app, "runtime/bin/node"), [join(paths.app, "bridge/bridge.js")]);
+        if (!worker || controller.signal.aborted) return;
+        reason = "health";
+        const deadline = Date.now() + 25_000;
+        while (!controller.signal.aborted && Date.now() < deadline && await alive(worker.record)) {
+          if (await bridgeHealthy(config)) {
+            healthySince = Date.now();
+            saved.bridge.phase = "running";
+            await persist();
+            break;
+          }
+          await delay(200, undefined, { signal: controller.signal });
+        }
+        if (!healthySince && !controller.signal.aborted) {
+          await terminate([worker.record]);
+          throw new Error("MDCz 健康检查失败");
+        }
+        reason = "process-exited";
+        await worker.ended;
+        if (await alive(worker.record)) await terminate([worker.record]);
+        if (healthySince && Date.now() - healthySince >= restartPolicy.stablePeriod) failures = 0;
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (worker) await terminate([worker.record]);
+        // Do not log raw spawn/probe errors or inherited process environments.
+      } finally {
+        if (worker && !(await alive(worker.record)))
+          saved.children = saved.children.filter((record) => record !== worker.record);
+      }
+      if (controller.signal.aborted) return;
+      failures++;
+      const wait = restartDelay(failures);
+      saved.bridge = { phase: wait === null ? "unavailable" : "backoff", attempts: failures, reason };
+      await persist();
+      if (wait === null) return;
+      await delay(wait, undefined, { signal: controller.signal }).catch((error) => {
+        if (!controller.signal.aborted) throw error;
+      });
+    }
+  };
+  try {
+    await persist();
+    const main = await launch("miyabi", join(paths.app, "bin/miyabi"), []);
+    if (!config.externalMDCz && !controller.signal.aborted) {
+      bridgeWork = bridgeLoop();
+      // A lifecycle/state error is not an ordinary bridge outage. Stop safely if
+      // identities cannot be persisted; the optional service must not be orphaned.
+      void bridgeWork.catch(() => { void shutdown(); });
     }
     const deadline = Date.now() + 25_000;
-    while (!stopping && Date.now() < deadline) {
-      if (saved.children.length === programs.length && (await healthy(config))) {
-        if (stopping) break;
+    while (!controller.signal.aborted && Date.now() < deadline) {
+      if (main && await alive(main.record) && await healthy(config)) {
+        if (controller.signal.aborted) break;
         saved.phase = "running";
         await persist();
         return await exited.promise;

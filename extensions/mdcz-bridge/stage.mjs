@@ -2,7 +2,9 @@
 import { readFile, writeFile, mkdir, cp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parse, stringify } from "yaml";
-import { revision } from "./contract.mjs";
+import { revision, health } from "./contract.mjs";
+import { configurationVersion } from "./compatibility.generated.mjs";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -49,3 +51,15 @@ await writeFile(
   ),
 );
 await writeFile(resolve(staging, "pnpm-lock.yaml"), stringify(lock));
+
+const sourceLock = JSON.parse(await readFile(resolve(import.meta.dirname, "source-lock.json"), "utf8"));
+if (sourceLock.engine_revision !== revision || sourceLock.protocol !== health.protocol ||
+    sourceLock.bridge_version !== health.bridge_version ||
+    sourceLock.configuration_version !== configurationVersion ||
+    JSON.stringify(sourceLock.capabilities) !== JSON.stringify(health.capabilities))
+  throw new Error("Stale bridge compatibility data");
+await writeFile(resolve(staging, "bridge-manifest.json"), JSON.stringify({
+  ...sourceLock,
+  node: process.version,
+  bridge_sha256: createHash("sha256").update(await readFile(resolve(staging, "bridge.js"))).digest("hex"),
+}, null, 2) + "\n");

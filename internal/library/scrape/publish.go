@@ -12,6 +12,7 @@ import (
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
+	"github.com/ppxb/miyabi/internal/ent/subtitle"
 	"github.com/ppxb/miyabi/internal/export"
 	"github.com/ppxb/miyabi/internal/pan"
 	"github.com/ppxb/miyabi/internal/tasks"
@@ -71,11 +72,6 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 	}
 	artwork = *input.Artwork
 
-	input.Completed = true
-	encoded, err := tasks.EncodePayload(input)
-	if err != nil {
-		return nil, err
-	}
 	if err := service.exportMgr.WithConfig(func(cfg export.Config) error {
 		return sess.WithSource(ctx, func() error {
 			record, err := service.db.Movie.Query().Where(movie.IDEQ(input.MovieID)).
@@ -107,20 +103,51 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 				service.dirMu.Unlock()
 				return &domain.RetryError{Cause: domain.E(domain.KindConflict, "媒体文件索引已更新，等待重新导出", nil)}
 			}
-			if _, err := export.WriteMedia(cfg, input.Code, input.Document, videos, poster, fanart); err != nil {
-				return err
-			}
-			oldDir, err := service.removePreviousExport(ctx, cfg.EmbyDir, record, input.Code)
+			oldDir, oldCode, err := service.previousExport(ctx, cfg.EmbyDir, record, input.Code)
 			if err != nil {
 				return err
 			}
-			return ent.WithTx(ctx, service.db, func(tx *ent.Tx) error {
-				// Decoration adds resource tags after the metadata checkpoint.
-				// Publish their relational index and final document atomically.
-				if input.Document.ArtworkExtension != nil {
-					if err := SaveMovieMetadata(ctx, tx, input.MovieID, input.Document); err != nil {
-						return err
+			var publication *export.Publication
+			if directory := service.exportMgr.PublicationDirectory(); directory != "" {
+				tracks, err := service.db.Subtitle.Query().Where(subtitle.MovieIDEQ(input.MovieID)).All(ctx)
+				if err != nil {
+					return err
+				}
+				var managedSubtitles []string
+				for _, track := range tracks {
+					if relative, err := filepath.Rel(cfg.EmbyDir, track.StoragePath); err == nil && filepath.IsLocal(relative) {
+						managedSubtitles = append(managedSubtitles, track.StoragePath)
 					}
+				}
+				publication, err = export.PreparePublication(directory, cfg, job.ID, input.MovieID,
+					input.Code, oldCode, input.Document, videos, poster, fanart, managedSubtitles...)
+				if err != nil {
+					return err
+				}
+				input.PublicationID, input.PublicationDigest = publication.ID, publication.Digest
+				if err := publication.Install(); err != nil {
+					return service.finishPublication(ctx, publication, err)
+				}
+			} else {
+				// Compatibility for isolated callers without an application manager.
+				// Production always enables publication recovery during app assembly.
+				if _, err := export.WriteMedia(cfg, input.Code, input.Document, videos, poster, fanart); err != nil {
+					return err
+				}
+				if _, err := service.removePreviousExport(ctx, cfg.EmbyDir, record, input.Code); err != nil {
+					return err
+				}
+			}
+			input.Completed = true
+			encoded, err := tasks.EncodePayload(input)
+			if err != nil {
+				return service.finishPublication(ctx, publication, err)
+			}
+			commitErr := ent.WithTx(ctx, service.db, func(tx *ent.Tx) error {
+				// Publish candidates and all relational indexes for both engines only
+				// after artwork/export succeed, in the final database transaction.
+				if err := SaveMovieMetadata(ctx, tx, input.MovieID, input.Document); err != nil {
+					return err
 				}
 				update := tx.Movie.UpdateOneID(input.MovieID).SetCode(input.Code).SetMetadata(&input.Document).
 					SetCover(artwork.Thumbnail).SetPoster(artwork.Poster).SetFanarts([]string{artwork.Fanart}).
@@ -134,6 +161,21 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 				if err := tx.Task.UpdateOneID(job.ID).SetPayload(encoded).Exec(ctx); err != nil {
 					return err
 				}
+				if publication != nil {
+					for previous, next := range publication.SubtitleMoves {
+						if err := tx.Subtitle.Update().Where(subtitle.MovieIDEQ(input.MovieID), subtitle.StoragePathEQ(previous)).SetStoragePath(next).SetName(filepath.Base(next)).Exec(ctx); err != nil {
+							return err
+						}
+					}
+					if len(publication.SubtitleDeletes) > 0 {
+						if _, err := tx.Subtitle.Delete().Where(subtitle.MovieIDEQ(input.MovieID), subtitle.StoragePathIn(publication.SubtitleDeletes...)).Exec(ctx); err != nil {
+							return err
+						}
+					}
+				}
+				if err := service.queueSubtitlesTx(ctx, tx, input.MetadataPayload, videos, cfg); err != nil {
+					return err
+				}
 				if service.mediaNotifier != nil && cfg.EmbyDir != "" {
 					if oldDir != "" {
 						if err := service.mediaNotifier.NotifyUpdatedTx(ctx, tx, oldDir); err != nil {
@@ -144,6 +186,7 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 				}
 				return nil
 			})
+			return service.finishPublication(ctx, publication, commitErr)
 		})
 	}); err != nil {
 		return nil, fmt.Errorf("publish movie: %w", err)
@@ -153,6 +196,7 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 
 	if service.notifier != nil {
 		service.notifier.NotifyLibraryChanged()
+		service.notifier.WakePool()
 	}
 	return subTask, nil
 }
@@ -163,6 +207,10 @@ func (service *Service) subtitleTask(input MetadataPayload, videos []pan.File) *
 	if service.subtitles == nil {
 		return nil
 	}
+	return service.subtitleTaskWithConfig(input, videos, service.exportConfig())
+}
+
+func (service *Service) subtitleTaskWithConfig(input MetadataPayload, videos []pan.File, cfg export.Config) *SubtitleTask {
 	plan, err := export.PlanVideos(input.Code, videos)
 	if err != nil {
 		return nil // Publication already rejects invalid plans before writing.
@@ -173,7 +221,7 @@ func (service *Service) subtitleTask(input MetadataPayload, videos []pan.File) *
 			continue
 		}
 		target := subtitlemeta.Target{
-			Dir:           filepath.Join(export.EmbyMovieDir(service.exportConfig().EmbyDir, input.Code), video.Dir),
+			Dir:           filepath.Join(export.EmbyMovieDir(cfg.EmbyDir, input.Code), video.Dir),
 			Stem:          video.Stem,
 			Code:          input.Code,
 			FileID:        video.File.ID,

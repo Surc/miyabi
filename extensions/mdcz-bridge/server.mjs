@@ -52,6 +52,17 @@ export function createBridge(adapter, token) {
     };
     res.on("close", disconnected);
     try {
+      // Check while holding the same slot used for configure and execution.
+      // Legacy clients omit both headers; a snapshot-aware request must provide
+      // both and cannot execute against a changed profile or engine.
+      const expectedID = req.headers["x-miyabi-mdcz-configuration-id"];
+      const expectedRevision = req.headers["x-miyabi-mdcz-engine-revision"];
+      if (expectedID !== undefined || expectedRevision !== undefined) {
+        const current = adapter.information?.();
+        if (typeof expectedID !== "string" || !expectedID ||
+            expectedID !== current?.configuration_id || expectedRevision !== health.revision)
+          return send(409, { error: "Attempt configuration changed" });
+      }
       if (imageID) {
         const image = await adapter.image(imageID, abort.signal);
         return send(200, image, "image/jpeg");
@@ -77,7 +88,7 @@ export function createBridge(adapter, token) {
           ? await adapter.metadata(metadataInput(input), abort.signal)
           : await adapter.poster(posterInput(input), abort.signal);
       if (abort.signal.aborted) return send(504, { error: "Canceled or timed out" });
-      send(200, { ...health, ...result });
+      send(200, { ...result, ...adapter.information?.(), ...health });
     } catch (error) {
       // Site exceptions may contain proxy URLs or cookies; expose only category.
       const status = [400, 404, 409, 413].includes(error?.statusCode)

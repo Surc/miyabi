@@ -90,7 +90,7 @@ func TestMetadataChecksProtocolIdentityAndPreservesKnownCatalogueID(t *testing.T
 				t.Error("credential contract changed")
 			}
 			if r.URL.Path == "/v1/health" {
-				json.NewEncoder(w).Encode(Health{Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: "fixture-profile"})
+				json.NewEncoder(w).Encode(Health{BridgeVersion: BridgeVersion, Capabilities: RequiredCapabilities, Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: "fixture-profile"})
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"protocol": Protocol, "revision": scenario.revision, "configuration_id": "fixture-profile", "detail": map[string]string{"code": scenario.code, "title": "Fixture", "plot": "Saved synopsis"}, "images": []any{}})

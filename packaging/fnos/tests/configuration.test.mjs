@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile, readFile, stat, rm } from "node:fs/promises";
@@ -36,7 +37,7 @@ test("external MDCz provisioning persists across initialization without replacin
   validate(next);
   await writeFile(paths.config,JSON.stringify(next));
   assert.deepEqual(await initialize(paths,env),next);
-  assert.deepEqual(JSON.parse(await readFile(join(paths.etc,"mdcz-connection.json"),"utf8")),bridgeConnection(next));
+  assert.deepEqual(JSON.parse(await readFile(join(paths.etc,"mdcz-connection.json"),"utf8")),{...bridgeConnection(next),generation:createHash("sha256").update(bridgeConnection(next).server_url).digest("hex")});
   assert.equal((await load(paths)).strmToken,config.strmToken);
   assert.throws(()=>validate({...next,externalMDCz:{...next.externalMDCz,serverURL:"http://user:secret@nas.test/"}}));
   assert.throws(()=>validate({...next,externalMDCz:{...next.externalMDCz,apiKey:"short"}}));
@@ -116,4 +117,20 @@ test("backups preserve original artwork and completion is absent on copy failure
   const failed = (await readdir(config.backups)).find((name) => name.startsWith("failure-"));
   await assert.rejects(stat(join(config.backups, failed, "complete.json")), { code: "ENOENT" });
   assert.equal((await load(paths)).strmToken, config.strmToken);
+});
+
+
+test("new installs use managed authority while upgrades retain legacy mode until explicit migration", async (t) => {
+  const { paths, env, config } = await fixture(t);
+  assert.equal(config.mdczConnectionMode, "managed");
+  assert.equal(childEnvironment(paths, config).miyabi.MIYABI_MDCZ_MANAGED, join(paths.etc, "mdcz-connection.json"));
+  assert.equal(childEnvironment(paths, config).miyabi.MIYABI_MDCZ_BOOTSTRAP, undefined);
+  const legacy = {...config};
+  delete legacy.mdczConnectionMode;
+  await writeFile(paths.config, JSON.stringify(legacy));
+  const upgraded = await initialize(paths, env);
+  assert.equal(upgraded.mdczConnectionMode, undefined);
+  assert.equal(childEnvironment(paths, upgraded).miyabi.MIYABI_MDCZ_MANAGED, undefined);
+  assert.equal(childEnvironment(paths, upgraded).miyabi.MIYABI_MDCZ_BOOTSTRAP, join(paths.etc, "mdcz-connection.json"));
+  assert.throws(() => validate({...config, mdczConnectionMode: "guess"}));
 });

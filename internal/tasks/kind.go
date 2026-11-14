@@ -6,6 +6,7 @@ type Kind string
 const (
 	KindScan              Kind = "scan"
 	KindScrape            Kind = "scrape"
+	KindSubtitle          Kind = "subtitle"
 	KindSubscriptionBatch Kind = "subscription_batch"
 )
 

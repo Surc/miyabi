@@ -65,8 +65,23 @@ const managedFields = {
   llm_service_type: ["translate", "llmServiceType"],
 } as const;
 
+// Translate old nonempty alias maps without rewriting the user's source file.
+// Validation remains upstream-owned, including duplicate/colliding aliases.
+export function parseBridgeConfiguration(configuration: unknown) {
+  const candidate = structuredClone(configuration);
+  if (candidate && typeof candidate === "object" && "personSync" in candidate) {
+    const person = candidate.personSync;
+    if (person && typeof person === "object" && "actorAliases" in person) {
+      const aliases = person.actorAliases;
+      if (aliases && typeof aliases === "object" && !Array.isArray(aliases))
+        person.actorAliases = Object.entries(aliases).map(([name, values]) => ({ name, aliases: values }));
+    }
+  }
+  return configurationSchema.parse(candidate);
+}
+
 export function configurationBoundary(directory: string, configuration: unknown) {
-  const base = configurationSchema.parse(configuration);
+  const base = parseBridgeConfiguration(configuration);
   const defaults: Record<string, unknown> = {};
   for (const [key, [section, field]] of Object.entries(managedFields))
     defaults[key] = (base[section] as unknown as Record<string, unknown>)[field];
@@ -97,7 +112,7 @@ export function configurationBoundary(directory: string, configuration: unknown)
 }
 
 export async function createAdapter(directory: string, configuration: unknown) {
-  const config = configurationSchema.parse(configuration);
+  const config = parseBridgeConfiguration(configuration);
   const computed = buildComputedConfiguration(config);
   const network = new NetworkClient({
     getProxyUrl: (site) => resolveSiteProxyUrl(computed, site),
@@ -240,7 +255,7 @@ export async function createAdapter(directory: string, configuration: unknown) {
         const matches = input.filenames.map((name) =>
           resolvePosterBadgeDefinitions(
             data,
-            parseFileInfo(name, [], { [basename(name, extname(name))]: input.code }),
+            parseFileInfo(name, { ...config.scrape, numberMappings: { [basename(name, extname(name))]: input.code } }),
             undefined,
             // Do not infer a positive "censored" badge from missing evidence.
             ["subtitle", "umr", "leak", "uncensored", "fullHd", "fourK", "eightK"],
@@ -256,7 +271,7 @@ export async function createAdapter(directory: string, configuration: unknown) {
           .toFile(path);
         // Generated styles are fully identified by the pinned engine revision.
         // Mutable custom image files require a separate style-hash contract.
-        await watermark.applyTagBadges(path, badges, input.position, { imageOverrides: false });
+        await watermark.applyTagBadges(path, badges, { position: input.position, imageOverrides: false });
         signal.throwIfAborted();
         return {
           poster: (await readFile(path)).toString("base64"),

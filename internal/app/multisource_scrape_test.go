@@ -253,8 +253,8 @@ func TestJavDBMetadataAndArtworkCheckpointSurvivePublishFailure(t *testing.T) {
 		t.Fatalf("fallback checkpoint=%+v err=%v", p, err)
 	}
 	failed := f.store.Client.Movie.Query().OnlyX(t.Context())
-	if failed.JavdbID == nil || *failed.JavdbID != "ABP-123" || failed.Metadata.Actors[0].Provider != "javdb" {
-		t.Fatal("catalogue metadata was not checkpointed before artwork")
+	if failed.JavdbID != nil || failed.Metadata != nil || p.Document.Actors[0].Provider != "javdb" {
+		t.Fatal("candidate metadata escaped its task checkpoint before publication")
 	}
 	if failed.Poster != nil || failed.MetadataSnapshot != nil || failed.ScrapeStatus != movie.ScrapeStatusFailed {
 		t.Fatal("artwork escaped failed publish transaction")
