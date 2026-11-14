@@ -29,6 +29,7 @@ test("installation is idempotent and keeps keys, configuration and artwork", asy
   const connection = JSON.parse(await readFile(join(paths.etc, "mdcz-connection.json"), "utf8"));
   assert.equal(connection.api_key, config.bridgeKey);
   assert.equal(connection.server_url, "http://127.0.0.1:3840");
+  assert.equal(connection.web_port, config.mdczWebPort);
 });
 
 test("external MDCz provisioning persists across initialization without replacing app credentials", async (t) => {
@@ -94,6 +95,8 @@ test("children receive separate credentials and no inherited proxy or wizard env
   assert.equal(env.bridge.MIYABI_MDCZ_KEY, config.bridgeKey);
   assert.equal(env.miyabi.MIYABI_MDCZ_KEY, undefined);
   assert.equal(env.bridge.MIYABI_ACCESS_PASSWORD, undefined);
+  assert.equal(env.bridge.MDCZ_ADMIN_PASSWORD, config.password);
+  assert.equal(env.bridge.MIYABI_MDCZ_WEB_PORT, "3838");
   assert.equal(env.miyabi.MIYABI_ACCESS_PASSWORD, config.password);
   for (const values of Object.values(env)) {
     assert.equal(values.wizard_password, undefined);
@@ -133,4 +136,21 @@ test("new installs use managed authority while upgrades retain legacy mode until
   assert.equal(childEnvironment(paths, upgraded).miyabi.MIYABI_MDCZ_MANAGED, undefined);
   assert.equal(childEnvironment(paths, upgraded).miyabi.MIYABI_MDCZ_BOOTSTRAP, join(paths.etc, "mdcz-connection.json"));
   assert.throws(() => validate({...config, mdczConnectionMode: "guess"}));
+});
+
+test("an explicit WebUI port switches old installations to managed mode and retains app credentials", async (t) => {
+  const { paths, config } = await fixture(t);
+  const previous = {
+    ...config,
+    mdczConnectionMode: "legacy",
+    externalMDCz: { serverURL: "http://old.test:3841", apiKey: "a".repeat(64) },
+  };
+  assert.throws(() => patchConfiguration(previous, { wizard_mdcz_web_port: String(config.bridgePort) }));
+  const next = patchConfiguration(previous, { wizard_mdcz_web_port: "3839" });
+  assert.equal(next.mdczConnectionMode, "managed");
+  assert.equal(next.externalMDCz, undefined);
+  assert.equal(next.strmToken, previous.strmToken);
+  assert.equal(next.bridgeKey, previous.bridgeKey);
+  assert.equal(bridgeConnection(next).web_port, 3839);
+  assert.equal(childEnvironment(paths, next).bridge.MDCZ_HOME, join(paths.data, "mdcz/webui"));
 });

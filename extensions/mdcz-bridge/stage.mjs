@@ -28,6 +28,14 @@ lock.importers = { ".": { dependencies: locked } };
 delete lock.catalogs;
 await mkdir(staging, { recursive: true });
 await cp(resolve(import.meta.dirname, "dist"), staging, { recursive: true });
+const withWebUI = process.argv.includes("--fnos");
+if (withWebUI) {
+  for (const [source, destination] of [
+    ["apps/server/dist/web", "web"],
+    ["packages/persistence/drizzle", "persistence/drizzle"],
+    ["packages/runtime/resources/mapping_table", "resources/mapping_table"],
+  ]) await cp(resolve(root, source), resolve(staging, destination), { recursive: true });
+}
 await cp(resolve(root, "LICENSE"), resolve(staging, "MDCz-LICENSE"));
 await writeFile(
   resolve(staging, "NOTICE"),
@@ -62,4 +70,7 @@ await writeFile(resolve(staging, "bridge-manifest.json"), JSON.stringify({
   ...sourceLock,
   node: process.version,
   bridge_sha256: createHash("sha256").update(await readFile(resolve(staging, "bridge.js"))).digest("hex"),
+  ...(withWebUI ? {
+    fnos_sha256: createHash("sha256").update(await readFile(resolve(staging, "fnos.js"))).digest("hex"),
+  } : {}),
 }, null, 2) + "\n");

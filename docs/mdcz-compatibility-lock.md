@@ -36,6 +36,10 @@ while a job is active.
 
 ## Build provenance
 
+The native recipe checks the official WebUI archive against `webui_archive_sha256`
+from the same source lock. It stages those static assets alongside the bundled
+server entry and records the entry checksum in the native package manifest.
+
 Docker and native build recipes obtain the engine commit from the lock. The native
 release recipe first checks generated files for drift. Staging verifies the actual
 MDCz checkout and generated bridge constants, then emits `bridge-manifest.json`

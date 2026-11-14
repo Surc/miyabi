@@ -13,6 +13,7 @@ import (
 // effective is the sole authority for all bridge requests. The legacy database
 // values are retained for rollback, never consulted when managed mode is set.
 func (s *Service) effective(cfg Settings) (Settings, error) {
+	cfg.WebPort = 0
 	if s.managedPath == "" {
 		cfg.Mode = "external"
 		cfg.Generation = digest([]byte(cfg.ServerURL))
@@ -33,6 +34,7 @@ func (s *Service) effective(cfg Settings) (Settings, error) {
 		ServerURL  string `json:"server_url"`
 		APIKey     string `json:"api_key"`
 		Generation string `json:"generation"`
+		WebPort    int    `json:"web_port"`
 	}
 	if json.Unmarshal(body, &connection) != nil || !hashPattern.MatchString(connection.Generation) || connection.Generation != digest([]byte(connection.ServerURL)) {
 		return cfg, connectionUnavailable()
@@ -43,6 +45,9 @@ func (s *Service) effective(cfg Settings) (Settings, error) {
 	if validate(check) != nil {
 		cfg.ServerURL, cfg.APIKey = "", ""
 		return cfg, connectionUnavailable()
+	}
+	if connection.WebPort >= 1024 && connection.WebPort <= 65535 {
+		cfg.WebPort = connection.WebPort
 	}
 	return cfg, s.initializationError
 }

@@ -114,6 +114,16 @@ test('legacy external connections remain editable', () => {
   expect(html).not.toMatch(/type="password"[^>]*disabled=""/)
 })
 
+test('bundled WebUI has a settings entry before enhanced scraping is enabled', () => {
+  vi.mocked(useMDCzSettings).mockReturnValue({
+    data: { ...defaults, enabled: false, web_port: 3838 }
+  } as ReturnType<typeof useMDCzSettings>)
+  const html = renderToStaticMarkup(<MDCzSection />)
+  expect(html).toContain('打开 MDCz 配置')
+  expect(html).not.toContain('advanced-configuration')
+  expect(html).not.toContain('翻译标题与介绍')
+})
+
 test('an unavailable bridge does not block saving the switch back to native mode', () => {
   vi.mocked(useMDCzSettings).mockReturnValue({
     data: { ...defaults, status: 'unavailable', server_url: '', has_api_key: false }

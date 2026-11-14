@@ -48,6 +48,9 @@ async function installed(t) {
   do {
     config.bridgePort = await port();
   } while (config.port === config.bridgePort);
+  do {
+    config.mdczWebPort = await port();
+  } while (config.mdczWebPort === config.port || config.mdczWebPort === config.bridgePort);
   config.publicURL = `http://127.0.0.1:${config.port}`;
   await writeJSON(paths.config, config);
   await cp(service, join(paths.app, "service"), { recursive: true });
@@ -83,6 +86,10 @@ const server=createServer((req,res)=>{
 server.listen(Number(process.env.PORT),process.env.HOST);
 process.on('SIGTERM',()=>server.close());
 `,
+  );
+  await writeFile(
+    join(paths.app, "bridge/fnos.js"),
+    "if (!process.env.MDCZ_ADMIN_PASSWORD || !process.env.MIYABI_MDCZ_WEB_PORT) process.exit(1); await import('./bridge.js');",
   );
   await writeFile(
     join(paths.app, "bin/miyabi"),

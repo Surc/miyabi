@@ -7,6 +7,7 @@ export type MDCzSettings = {
   mode?: 'managed' | 'external'
   status?: 'configured' | 'unconfigured' | 'unavailable'
   generation?: string
+  web_port?: number
   server_url: string
   has_api_key: boolean
   translate: boolean

@@ -28,7 +28,8 @@ def sha256_file(path):
 def verify_bridge_source(bridge, lock):
     """Reject stale or tampered staged artifacts before writing any package."""
     manifest = json.loads((bridge / "bridge-manifest.json").read_text())
-    for key in ["schema", "repository", "engine_version", "engine_revision", "bridge_version", "protocol", "configuration_version", "capabilities"]:
+    for key in ["schema", "repository", "engine_version", "engine_revision", "webui_archive_sha256",
+                "bridge_version", "protocol", "configuration_version", "capabilities"]:
         if manifest.get(key) != lock.get(key):
             raise ValueError("Bridge artifact source mismatch: " + key)
     if manifest.get("bridge_sha256") != sha256_file(bridge / "bridge.js"):
@@ -36,6 +37,15 @@ def verify_bridge_source(bridge, lock):
     if not str(manifest.get("node", "")).startswith("v24."):
         raise ValueError("Bridge artifact requires Node 24")
     return manifest
+
+
+def verify_mdcz_webui(bridge, manifest):
+    for file in ("fnos.js", "web/index.html", "persistence/drizzle/meta/_journal.json",
+                 "resources/mapping_table/mapping_info.json"):
+        if not (bridge / file).is_file():
+            raise ValueError("Missing bundled MDCz WebUI component: " + file)
+    if manifest.get("fnos_sha256") != sha256_file(bridge / "fnos.js"):
+        raise ValueError("Bundled MDCz WebUI checksum mismatch")
 
 
 def elf_x64(path):
@@ -85,6 +95,7 @@ def main():
     lock = json.loads((root / "extensions/mdcz-bridge/source-lock.json").read_text())
     engine = lock["engine_revision"]
     bridge_manifest = verify_bridge_source(args.bridge, lock)
+    verify_mdcz_webui(args.bridge, bridge_manifest)
     elf_x64(args.miyabi)
     elf_x64(args.node / "bin/node")
     build = subprocess.check_output([args.go, "version", "-m", str(args.miyabi)], text=True)
@@ -133,7 +144,7 @@ def main():
             raise ValueError("Dependency symlink escapes the package: " + str(file))
         if file.is_file():
             checksums[str(file.relative_to(args.output))] = sha256_file(file)
-    (app / "bundle.json").write_text(json.dumps({"version": args.version, "source_revision": revision, "mdcz_revision": engine, "bridge_version": lock["bridge_version"], "bridge_protocol": lock["protocol"], "configuration_version": lock["configuration_version"], "capabilities": lock["capabilities"], "bridge_sha256": bridge_manifest["bridge_sha256"], "node": node_version, "platform": "linux/amd64", "goamd64": "v1", "sha256": checksums}, indent=2) + "\n")
+    (app / "bundle.json").write_text(json.dumps({"version": args.version, "source_revision": revision, "mdcz_revision": engine, "bridge_version": lock["bridge_version"], "bridge_protocol": lock["protocol"], "configuration_version": lock["configuration_version"], "capabilities": lock["capabilities"], "bridge_sha256": bridge_manifest["bridge_sha256"], "mdcz_fnos_sha256": bridge_manifest["fnos_sha256"], "node": node_version, "platform": "linux/amd64", "goamd64": "v1", "sha256": checksums}, indent=2) + "\n")
     for file in [* (args.output / "cmd").iterdir(), app / "service/control", app / "runtime/bin/node", app / "bin/miyabi"]:
         file.chmod(0o755)
     print(f"Staged {args.output}; no FPK built. Validate on fnOS before release.")

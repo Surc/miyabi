@@ -92,6 +92,13 @@ export function validateValues(values, availableSites) {
   return values;
 }
 
+export function configurationView(information, values, sites) {
+  const visible = structuredClone(values);
+  const secrets = Object.fromEntries(secretFields.map((key) => [key, !!visible[key]]));
+  for (const key of secretFields) delete visible[key];
+  return { ...information, values: visible, secrets, available_sites: sites };
+}
+
 // The HTTP server serializes mutations with jobs. Build and persist a complete
 // candidate before swapping it; a failed save leaves the live runtime intact.
 export async function createManagedAdapter(directory, boundary) {
@@ -139,12 +146,7 @@ export async function createManagedAdapter(directory, boundary) {
     configuration_version: configurationVersion,
     configuration_id: state.id,
   });
-  const configuration = () => {
-    const visible = structuredClone(state.values);
-    const secrets = Object.fromEntries(secretFields.map((key) => [key, !!visible[key]]));
-    for (const key of secretFields) delete visible[key];
-    return { ...information(), values: visible, secrets, available_sites: boundary.sites };
-  };
+  const configuration = () => configurationView(information(), state.values, boundary.sites);
   return {
     information,
     configuration,
