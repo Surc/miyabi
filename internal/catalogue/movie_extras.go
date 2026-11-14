@@ -11,9 +11,6 @@ import (
 	"github.com/ppxb/miyabi/internal/javlibrary"
 )
 
-type commentReader interface {
-	MovieComments(context.Context, string, int) (domain.MovieComments, error)
-}
 type librarySocialReader interface {
 	Lookup(context.Context, string) (javlibrary.Film, error)
 	Comments(context.Context, string, int) (domain.MovieComments, error)
@@ -60,12 +57,7 @@ func (e *MovieExtras) MovieComments(ctx context.Context, source, id, code string
 	var err error
 	switch source {
 	case "javdb":
-		reader, ok := e.catalogue.javdb.(commentReader)
-		if !ok {
-			return empty, domain.E(domain.KindUpstream, "当前 JavDB 客户端不支持评论", nil)
-		}
-		key := fmt.Sprintf("javdb:%s:%d", id, page)
-		result, err = cachedJavDB(ctx, e.catalogue, e.comments, key, func(ctx context.Context) (domain.MovieComments, error) { return reader.MovieComments(ctx, id, page) })
+		result, err = e.catalogue.javdbCommentPage(ctx, id, page)
 	case "javlibrary":
 		film, lookupErr := e.film(ctx, code)
 		if lookupErr != nil {

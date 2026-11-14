@@ -18,6 +18,7 @@ type OfflineTask struct {
 	ProgressUnknown bool
 	FileID          string
 	DirectoryID     string
+	URL             string
 }
 
 type offlineTaskWire struct {
@@ -26,6 +27,7 @@ type offlineTaskWire struct {
 	Progress    json.Number `json:"percentDone"`
 	FileID      string      `json:"file_id"`
 	DirectoryID string      `json:"wp_path_id"`
+	URL         string      `json:"url"`
 }
 
 // 115 can return fractional percentages or numeric strings alongside integers.
@@ -45,7 +47,7 @@ func (wire offlineTaskWire) task() (OfflineTask, error) {
 		Hash: wire.Hash, Status: wire.Status, Progress: int(max(0, min(100, progress))),
 		RawProgress:     max(0, min(100, progress)),
 		ProgressUnknown: wire.Progress == "",
-		FileID:          wire.FileID, DirectoryID: wire.DirectoryID,
+		FileID:          wire.FileID, DirectoryID: wire.DirectoryID, URL: wire.URL,
 	}, nil
 }
 

@@ -75,10 +75,11 @@ export function useOfflineTasks(movieID: string, accountID: string, directoryID:
 export function useAddOffline(movieID: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (hash: string) =>
-      apiPost<OfflineSubmission>(`/api/discover/movies/${encodeURIComponent(movieID)}/offline`, {
-        hash
-      }),
+    mutationFn: (resource: { hash: string } | { ed2k: string; page: number }) =>
+      apiPost<OfflineSubmission>(
+        `/api/discover/movies/${encodeURIComponent(movieID)}/offline`,
+        resource
+      ),
     onMutate: () => queryClient.getQueryData<OfflineActivity>(offlineKeys.activity),
     onSuccess: (submission, _hash, previous) => {
       const account = queryClient.getQueryData<PanAccountStatus>(panKeys.account)

@@ -115,7 +115,7 @@ func (service *Service) submissions(ctx context.Context, records []*ent.OfflineD
 		item.CanSwitch = item.CanCancel
 		if state := record.Recovery; state != nil {
 			item.AttemptCount, item.SwitchReason = len(state.Attempts), state.Reason
-			item.CanSwitch = item.CanSwitch && state.Action == ""
+			item.CanSwitch = item.CanSwitch && state.Action == "" && state.ED2KURI == ""
 			if state.RetryAt.After(service.now()) && item.CanCancel {
 				item.RetryAt = &state.RetryAt
 			}

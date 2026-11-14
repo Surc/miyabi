@@ -17,6 +17,7 @@ type CatalogueManager interface {
 	ResolveMovieID(context.Context, string) (string, error)
 	MovieStates(context.Context, []catalogue.MovieIdentity) ([]catalogue.MovieStateItem, error)
 	Magnets(context.Context, string) ([]catalogue.Magnet, error)
+	ED2KResources(context.Context, string, int) (domain.ED2KPage, error)
 	Tags(context.Context, domain.Zone) ([]domain.TagCategory, error)
 	Media(context.Context, string) (domain.Media, error)
 }
@@ -160,6 +161,23 @@ func discoverMagnetsHandler(discover CatalogueManager) gin.HandlerFunc {
 		}
 		magnets, err := discover.Magnets(c.Request.Context(), uri.ID)
 		respond(c, magnets, err)
+	}
+}
+
+func discoverED2KHandler(discover CatalogueManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uri, ok := bindURI[movieURI](c)
+		if !ok {
+			return
+		}
+		query, ok := bindQuery[struct {
+			Page int `form:"page,default=1" binding:"min=1,max=1000"`
+		}](c)
+		if !ok {
+			return
+		}
+		result, err := discover.ED2KResources(c.Request.Context(), uri.ID, query.Page)
+		respond(c, result, err)
 	}
 }
 

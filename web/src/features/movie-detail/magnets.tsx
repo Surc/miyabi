@@ -10,6 +10,7 @@ import { useState } from 'react'
 
 import type { DiscoverMagnet, useDiscoverMagnets } from '@/api/discover'
 import { describeApiError, isPanUnauthorized } from '@/api/client'
+import { useDiscoverED2K } from '@/api/discover-ed2k'
 import {
   isOfflineTaskActive,
   useAddOffline,
@@ -39,6 +40,11 @@ const phaseLabels: Record<OfflineSubmission['phase'], string> = {
   downloaded: '已下载'
 }
 
+type DownloadResource = Pick<
+  DiscoverMagnet,
+  'hash' | 'name' | 'uri' | 'size' | 'created_at' | 'sources' | 'tags'
+> & { page?: number }
+
 export function MovieMagnets({
   movieID,
   query
@@ -46,7 +52,16 @@ export function MovieMagnets({
   movieID: string
   query: ReturnType<typeof useDiscoverMagnets>
 }) {
-  const account = usePanAccount(Boolean(query.data?.length))
+  const ed2k = useDiscoverED2K(movieID)
+  const ed2kLinks = new Map<string, DownloadResource>()
+  for (const page of ed2k.data?.pages ?? []) {
+    for (const item of page.items) {
+      if (!ed2kLinks.has(item.id)) {
+        ed2kLinks.set(item.id, { ...item, hash: item.id, page: page.page })
+      }
+    }
+  }
+  const account = usePanAccount(Boolean(query.data?.length || ed2kLinks.size))
   const unauthorized = isPanUnauthorized(account.error)
   const connected = account.data?.connected === true && !unauthorized
   const accountID = connected ? (account.data?.account?.id ?? '') : ''
@@ -58,22 +73,35 @@ export function MovieMagnets({
   const [copyError, setCopyError] = useState(false)
   const [order, setOrder] = useState<MagnetOrder>('recommended')
 
-  async function copy(magnet: DiscoverMagnet) {
+  async function copy(resource: DownloadResource) {
     setCopyError(false)
     try {
-      await navigator.clipboard.writeText(magnet.uri)
-      setCopiedHash(magnet.hash)
+      await navigator.clipboard.writeText(resource.uri)
+      setCopiedHash(resource.hash)
     } catch {
       setCopyError(true)
     }
   }
 
+  function renderResource(resource: DownloadResource) {
+    return (
+      <ResourceCard
+        key={`${movieID}:${resource.hash}`}
+        movieID={movieID}
+        resource={resource}
+        task={tasks.get(resource.hash)}
+        checkingStatus={checkingStatus}
+        statusError={offline.isError}
+        connected={connected}
+        hasDirectory={hasDirectory}
+        copied={copiedHash === resource.hash}
+        onCopy={() => void copy(resource)}
+      />
+    )
+  }
+
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold tracking-normal">磁力链</h2>
-        {query.data?.length ? <MagnetSort value={order} onChange={setOrder} /> : null}
-      </div>
+    <div className="space-y-6">
       {connected && account.data?.account && !hasDirectory ? (
         <p className="text-sm text-muted-foreground">
           请先到{' '}
@@ -88,40 +116,57 @@ export function MovieMagnets({
           离线任务状态读取失败，请重试。
         </InlineError>
       ) : null}
-      {query.isPending ? (
-        <MovieMagnetsSkeleton />
-      ) : query.isError ? (
-        <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
-          磁力加载失败
-        </InlineError>
-      ) : query.data.length === 0 ? (
-        <MovieSubscriptionAction movieID={movieID} />
-      ) : (
-        <div className="space-y-4">
-          {sortMagnets(query.data, order).map(magnet => (
-            <MagnetCard
-              key={`${movieID}:${magnet.hash}`}
-              movieID={movieID}
-              magnet={magnet}
-              task={tasks.get(magnet.hash)}
-              checkingStatus={checkingStatus}
-              statusError={offline.isError}
-              connected={connected}
-              hasDirectory={hasDirectory}
-              copied={copiedHash === magnet.hash}
-              onCopy={() => void copy(magnet)}
-            />
-          ))}
+      {ed2kLinks.size || ed2k.hasNextPage || ed2k.isError ? (
+        <section className="space-y-4">
+          <h2 className="text-xl font-semibold tracking-normal">ED2K · JavDB 评论区</h2>
+          {Array.from(ed2kLinks.values(), renderResource)}
+          {ed2k.isError ? (
+            <InlineError
+              onRetry={() =>
+                void (ed2k.isFetchNextPageError ? ed2k.fetchNextPage() : ed2k.refetch())
+              }
+              retrying={ed2k.isFetching}
+            >
+              {describeApiError(ed2k.error)}
+            </InlineError>
+          ) : ed2k.hasNextPage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={ed2k.isFetching}
+              onClick={() => void ed2k.fetchNextPage()}
+            >
+              {ed2k.isFetchingNextPage ? '加载中…' : '查找更多 ED2K'}
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold tracking-normal">磁力链</h2>
+          {query.data?.length ? <MagnetSort value={order} onChange={setOrder} /> : null}
         </div>
-      )}
+        {query.isPending ? (
+          <MovieMagnetsSkeleton />
+        ) : query.isError ? (
+          <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
+            磁力加载失败
+          </InlineError>
+        ) : query.data.length === 0 ? (
+          <MovieSubscriptionAction movieID={movieID} />
+        ) : (
+          sortMagnets(query.data, order).map(renderResource)
+        )}
+      </section>
       {copyError ? <InlineError>复制失败，请重试。</InlineError> : null}
-    </section>
+    </div>
   )
 }
 
-function MagnetCard({
+function ResourceCard({
   movieID,
-  magnet,
+  resource,
   task,
   checkingStatus,
   statusError,
@@ -131,7 +176,7 @@ function MagnetCard({
   onCopy
 }: {
   movieID: string
-  magnet: DiscoverMagnet
+  resource: DownloadResource
   task?: OfflineSubmission
   checkingStatus: boolean
   statusError: boolean
@@ -162,19 +207,19 @@ function MagnetCard({
       <CardContent className="space-y-3">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1 space-y-2">
-            <h3 className="text-base leading-6 font-semibold wrap-break-word">{magnet.name}</h3>
+            <h3 className="text-base leading-6 font-semibold wrap-break-word">{resource.name}</h3>
             <p className="w-fit max-w-full font-mono text-xs break-all text-muted-foreground select-all">
-              {magnet.uri}
+              {resource.uri}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm leading-6 text-muted-foreground">
-              <span className="text-xs">{formatSize(magnet.size)}</span>
-              <MagnetPublication value={magnet.created_at} />
-              {magnet.sources?.map(source => (
+              <span className="text-xs">{formatSize(resource.size)}</span>
+              <MagnetPublication value={resource.created_at} />
+              {resource.sources?.map(source => (
                 <Badge key={source} variant="outline">
                   {sourceLabels[source] ?? source}
                 </Badge>
               ))}
-              {magnet.tags?.map(tag => (
+              {resource.tags?.map(tag => (
                 <Badge key={tag} variant="outline">
                   {tag}
                 </Badge>
@@ -208,18 +253,23 @@ function MagnetCard({
                 size="sm"
                 disabled={!hasDirectory || busy || statusError || submitted}
                 onClick={() =>
-                  add.mutate(magnet.hash, {
-                    onSuccess: submission => {
-                      notifyOfflineTask(submission)
-                    },
-                    onError: error => {
-                      notifyTaskError(
-                        `offline:submit-error:${movieID}`,
-                        '加入 115 失败',
-                        describeApiError(error)
-                      )
+                  add.mutate(
+                    resource.page
+                      ? { ed2k: resource.hash, page: resource.page }
+                      : { hash: resource.hash },
+                    {
+                      onSuccess: submission => {
+                        notifyOfflineTask(submission)
+                      },
+                      onError: error => {
+                        notifyTaskError(
+                          `offline:submit-error:${movieID}`,
+                          '加入 115 失败',
+                          describeApiError(error)
+                        )
+                      }
                     }
-                  })
+                  )
                 }
               >
                 {busy || (task && isOfflineTaskActive(task)) ? (

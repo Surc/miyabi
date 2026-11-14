@@ -117,7 +117,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if !failed && !stalled {
 			continue
 		}
-		if !cfg.AutoSwitch {
+		if !cfg.AutoSwitch || state.ED2KURI != "" {
 			if stalled && !state.Stalled {
 				if err := s.markStalled(ctx, record.ID); err != nil {
 					return err

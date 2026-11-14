@@ -20,6 +20,7 @@ type Recovery struct {
 	Preferences       magnet.Preferences `json:"preferences"`
 	Attempts          []Attempt          `json:"attempts"`
 	CurrentHash       string             `json:"current_hash"`
+	ED2KURI           string             `json:"ed2k_uri,omitempty"`
 	Action            string             `json:"action,omitempty"`
 	NextHash          string             `json:"next_hash,omitempty"`
 	RetryAt           time.Time          `json:"retry_at,omitempty"`

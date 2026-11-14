@@ -36,11 +36,12 @@ type Service struct {
 	javbus     JavBusSource
 	aggregator *magnet.Aggregator
 
-	proxy   *netx.ProxyManager
-	lists   *responseCache[[]domain.Movie]
-	details *responseCache[domain.MovieDetail]
-	tags    *responseCache[[]domain.TagCategory]
-	magnets *responseCache[[]domain.Magnet]
+	proxy         *netx.ProxyManager
+	lists         *responseCache[[]domain.Movie]
+	details       *responseCache[domain.MovieDetail]
+	tags          *responseCache[[]domain.TagCategory]
+	magnets       *responseCache[[]domain.Magnet]
+	javdbComments *responseCache[domain.MovieComments]
 
 	persistRouteMu   sync.Mutex
 	javdbSessionMu   sync.Mutex
@@ -138,6 +139,7 @@ func newService(database *ent.Client, primary JavDBClient, supplement JavBusSour
 		details:        newResponseCache[domain.MovieDetail](detailCacheSize, detailCacheTTL),
 		tags:           newResponseCache[[]domain.TagCategory](tagsCacheSize, tagsCacheTTL),
 		magnets:        newResponseCache[[]domain.Magnet](magnetsCacheSize, magnetsCacheTTL),
+		javdbComments:  newResponseCache[domain.MovieComments](512, 2*time.Minute),
 		local:          local,
 		lastSavedRoute: route,
 	}
