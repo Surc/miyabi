@@ -54,7 +54,7 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 飞牛原生配置可设置 `javlibraryBrowser: {serverURL, apiToken}`，由原生服务写入权限受限的 `javlibrary-browser.json`，并仅向 Miyabi 传递 `MIYABI_JAVLIBRARY_BROWSER_CONFIG`。单独运行时也可直接通过该环境变量指定连接文件。已经启用 Javinizer 时仍优先使用 Javinizer。
 
-本次 PC 连接页为 `http://127.0.0.1:18082/`。用户点击“打开验证浏览器”，在专用 Edge 完成人工验证，再点击“验证完成”。请保持 PC、专用窗口及对应代理运行；浏览器再次要求验证时，评分请求返回可重试的来源错误，等待人工验证，不缓存该失败。LAN 取页接口仅绑定已配置的 PC 地址并校验指定 NAS 来源；本机控制和评分接口使用不同的访问限制。
+本机控制页为 `http://127.0.0.1:18082/`。点击“打开验证浏览器”，在专用 Edge 看到影片列表或详情后，再点击“验证完成”。服务会检查专用 Edge 中的 JavLibrary 标签页。页面显示“验证已确认”后可以关闭专用 Edge。下次取分时，运行中的验证服务会用同一浏览器资料最小化重开 Edge。网站再次要求验证或验证服务重启时，请重新确认。LAN 取页接口仅绑定已配置的 PC 地址并校验指定 NAS 来源。
 
 ### 由验证服务主动连接 Miyabi
 
@@ -70,4 +70,4 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 用户在 PC 完成验证并保持专用 Edge 开启后，2026-11-01 00:06:40（UTC+8）从飞牛实际请求 `/api/extensions/movie/javlibrary-rating?code=FSDSS-437`，得到 HTTP 200、`source=javlibrary`、`found=true`、`score=8.4`、`max=10`；请求 ID 为 `javlibrary-0410-e4ac461fb43246cca3022da7f5c0e143`，会话状态为 `ready`。该请求走真实会话取页与 Go 身份/评分解析，未向生产缓存注入摘录分数。
 
-本次验收覆盖当前 PC、代理和会话下的 FSDSS-437 评分链路。专用 Edge 关闭时会话会断开，评分接口明确返回需要人工验证；重新打开并确认后可继续读取。评论与其他网络出口仍按各自验收记录处理。
+本次验收覆盖当时运行中的 PC、代理和 Edge 会话下的 FSDSS-437 评分链路。

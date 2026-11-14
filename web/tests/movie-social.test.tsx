@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, test, vi } from 'vitest'
+import { ApiError } from '@/api/client'
 import { useJavLibraryRating, useMovieComments } from '@/api/movie-extras'
 import {
   JavLibraryRating,
@@ -103,6 +104,20 @@ test('rating errors remain retryable and distinct from unrated', () => {
   expect(html).toContain('暂不可用')
   expect(html).toContain('重试评分')
   expect(html).not.toContain('暂无评分')
+  expect(html).not.toContain('http://127.0.0.1:18082/')
+})
+test.each([
+  [new ApiError('验证', 502, 'JAVLIBRARY_VERIFICATION_REQUIRED'), '需要验证'],
+  [new ApiError('JavLibrary 需要在已连接的浏览器中完成人工验证', 502), '需要验证'],
+  [new ApiError('断开', 502, 'JAVLIBRARY_BROWSER_DISCONNECTED'), '请先启动本机验证服务']
+])('rating recovery opens the local verification page for %s', (error, label) => {
+  vi.mocked(useJavLibraryRating).mockReturnValue({ isError: true, error } as ReturnType<
+    typeof useJavLibraryRating
+  >)
+  const html = renderToStaticMarkup(<JavLibraryRating code="ABP-123" />)
+  expect(html).toContain(label)
+  expect(html).toContain('href="http://127.0.0.1:18082/" target="_blank" rel="noopener noreferrer"')
+  expect(html).toContain('aria-label="打开 JavLibrary 验证页"')
 })
 test.each(['film', ''])('JavLibrary comments stay disabled for JavDB ID "%s"', javdbId => {
   vi.mocked(useMovieComments).mockClear()

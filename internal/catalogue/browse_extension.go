@@ -123,12 +123,16 @@ func (s *BrowseExtension) ClearCache(scope string) (BrowseCacheStats, error) {
 func browseLoad[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
 	result, err := loadBrowseRecord(ctx, s, namespace, key, ttl, refresh, load)
 	if err != nil && ctx.Err() == nil {
-		if errors.Is(err, javlibrary.ErrVerificationRequired) || errors.Is(err, javlibrary.ErrBrowserDisconnected) {
+		if needsJavLibraryBrowser(err) {
 			return result, extrasError(ctx, err)
 		}
 		return result, domain.E(domain.KindUpstream, "作品资料或资源暂不可用，请重试", err)
 	}
 	return result, err
+}
+
+func needsJavLibraryBrowser(err error) bool {
+	return errors.Is(err, javlibrary.ErrVerificationRequired) || errors.Is(err, javlibrary.ErrBrowserDisconnected)
 }
 
 func loadBrowseRecord[T any](ctx context.Context, s *BrowseExtension, namespace, key string, ttl time.Duration, refresh bool, load func(context.Context) (T, bool, error)) (BrowseCached[T], error) {
@@ -200,7 +204,10 @@ func loadBrowseRecord[T any](ctx context.Context, s *BrowseExtension, namespace,
 		if ok {
 			cached.Stale, cached.RefreshFailed = true, true
 			slog.WarnContext(ctx, "discovery cache refresh failed", "namespace", namespace, "error", err)
-			return cached, nil
+			if !needsJavLibraryBrowser(err) {
+				err = nil
+			}
+			return cached, err
 		}
 		return result, err
 	}

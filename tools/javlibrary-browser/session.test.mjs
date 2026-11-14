@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { BrowserError, BrowserSession, CDP, browserArguments, initialPage, pageURL } from './session.mjs';
+import { createServer } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BrowserError, BrowserSession, CDP, browserArguments, connectBrowser, initialPage, pageURL } from './session.mjs';
 
 test('manual browser launch uses a concrete loopback debugging port', () => {
   const config = { profile_dir: 'dedicated-profile', browser_path: 'edge', proxy_url: 'http://127.0.0.1:7890', port: 18082 };
@@ -9,6 +13,11 @@ test('manual browser launch uses a concrete loopback debugging port', () => {
   assert.ok(args.includes('--remote-debugging-address=127.0.0.1'));
   assert.ok(args.includes('--remote-debugging-port=18083'));
   assert.ok(args.includes('--user-data-dir=dedicated-profile'));
+  assert.equal(args.at(-1), initialPage);
+  const minimized = browserArguments(config, { minimized: true });
+  assert.ok(minimized.includes('--start-minimized'));
+  assert.ok(minimized.includes('--user-data-dir=dedicated-profile'));
+  assert.equal(minimized.at(-1), 'about:blank');
   for (const invalid of [0, 18082, 80, 65536, '18083']) assert.throws(() => browserArguments({ ...config, debug_port: invalid }));
   assert.ok(browserArguments({ ...config, debug_port: 19083 }).includes('--remote-debugging-port=19083'));
 });
@@ -29,6 +38,7 @@ test('manual verification can navigate same-origin challenges while automatic pa
   cdp.noResponse = true;
   const controller = new AbortController();
   const pending = session.fetch(initialPage, controller.signal);
+  await Promise.resolve();
   cdp.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'automatic', request: { url: 'https://www.javlibrary.com/cn/videocomments.php?v=film' } });
   assert.equal(cdp.commands.at(-1).method, 'Fetch.failRequest');
   controller.abort();
@@ -79,7 +89,78 @@ test('manual confirmation gates requests and a renewed challenge does not get na
   await session.confirm(signal);
   assert.equal((await session.fetch(initialPage, signal)).status, 200);
   cdp.close();
-  assert.equal(session.status().state, 'closed');
+  assert.equal(session.status().state, 'standby');
+});
+
+test('closing a verified browser lets the next rating request reopen it minimized', async () => {
+  const manual = new FakeCDP();
+  const reopened = new FakeCDP();
+  const launches = [];
+  const session = new BrowserSession(async (signal, options) => {
+    launches.push(options.minimized);
+    return options.minimized ? reopened : manual;
+  });
+  const signal = AbortSignal.timeout(1000);
+  await session.open(signal);
+  await session.confirm(signal);
+  manual.close();
+  assert.equal(session.status().state, 'standby');
+  assert.deepEqual(launches, [false]);
+
+  assert.equal((await session.fetch(initialPage, signal)).status, 200);
+  assert.deepEqual(launches, [false, true]);
+  assert.equal(reopened.commands.some(command => command.method === 'Page.bringToFront'), false);
+
+  reopened.page.challenge = true;
+  await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
+  reopened.close();
+  await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
+  assert.deepEqual(launches, [false, true]);
+});
+
+test('confirmation attaches to a valid film in another tab of the dedicated browser', async t => {
+  const signal = AbortSignal.timeout(3000);
+  const profile = await mkdtemp(join(tmpdir(), 'miyabi-session-'));
+  t.after(() => rm(profile, { recursive: true, force: true }));
+  const filmURL = 'https://www.javlibrary.com/cn/javme4ivte.html';
+  const browserPath = '/devtools/browser/dedicated';
+  const checked = [];
+  const server = createServer((request, response) => {
+    const origin = `ws://127.0.0.1:${server.address().port}`;
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/json/version') {
+      response.end(JSON.stringify({ webSocketDebuggerUrl: origin + browserPath }));
+    } else {
+      response.end(JSON.stringify([
+        { type: 'page', url: initialPage, webSocketDebuggerUrl: origin + '/challenge' },
+        { type: 'page', url: filmURL, webSocketDebuggerUrl: origin + '/film' },
+        { type: 'page', url: 'https://example.test/', webSocketDebuggerUrl: origin + '/other' },
+      ]));
+    }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const debugPort = server.address().port;
+  const config = { profile_dir: profile, port: debugPort === 18082 ? 18084 : 18082, debug_port: debugPort };
+  await writeFile(join(profile, 'MiyabiDevTools.json'), JSON.stringify({ port: config.debug_port, browserPath }));
+  t.mock.method(CDP, 'connect', async address => {
+    const cdp = new FakeCDP();
+    const path = new URL(address).pathname;
+    checked.push(path);
+    cdp.page.challenge = path === '/challenge';
+    if (path === '/film') cdp.page.url = filmURL;
+    return cdp;
+  });
+
+  const session = new BrowserSession((signal, options) => connectBrowser(config, signal, options));
+  await session.open(signal);
+  await session.confirm(signal);
+  assert.equal(session.status().state, 'ready');
+  assert.equal(session.cdp.page.url, filmURL);
+  assert.deepEqual(checked, ['/challenge', '/challenge', '/film']);
+
+  session.cdp.close();
+  assert.equal(session.status().state, 'standby');
 });
 
 test('a canceled browser request stops its own navigation and releases the slot', async () => {

@@ -8,6 +8,7 @@ import { BrowserError, BrowserSession, connectBrowser } from './session.mjs';
 const local = value => value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1';
 export function createBrowserServer(config, session, relayStatus) {
   const expected = Buffer.from(`Bearer ${config.api_token}`);
+  const status = () => ({ ...session.status(), ...(relayStatus && { miyabi_connected: relayStatus() }) });
   return createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -35,12 +36,12 @@ export function createBrowserServer(config, session, relayStatus) {
         response.end(html); return;
       }
       if (request.method === 'GET' && request.url === '/control/status') {
-        send(200, { ...session.status(), ...(relayStatus && { miyabi_connected: relayStatus() }) });
+        send(200, status());
         return;
       }
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
-      if (request.method === 'POST' && request.url === '/control/open') { await session.open(signal); send(200, session.status()); return; }
-      if (request.method === 'POST' && request.url === '/control/confirm') { await session.confirm(signal); send(200, session.status()); return; }
+      if (request.method === 'POST' && request.url === '/control/open') { await session.open(signal); send(200, status()); return; }
+      if (request.method === 'POST' && request.url === '/control/confirm') { await session.confirm(signal); send(200, status()); return; }
       if (request.method !== 'POST' || request.url !== '/v1/page') { send(404, { error: 'not_found' }); return; }
       if (request.headers['content-type'] !== 'application/json') throw new BrowserError('invalid_content_type', 400);
       const chunks = []; let size = 0;
@@ -67,7 +68,7 @@ export async function start(config) {
   if (!['http:', 'https:'].includes(proxy.protocol) || proxy.username || proxy.password || proxy.pathname !== '/' || proxy.search || proxy.hash) throw new Error('Invalid browser proxy');
   const relay = config.miyabi_url === undefined ? null : relayURL(config.miyabi_url);
   let connected = false;
-  const session = new BrowserSession(signal => connectBrowser(config, signal));
+  const session = new BrowserSession((signal, options) => connectBrowser(config, signal, options));
   const server = createBrowserServer(config, session, relay ? () => connected : undefined);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve); });
   if (relay) {

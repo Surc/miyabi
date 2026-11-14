@@ -18,6 +18,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/drive"
 	"github.com/ppxb/miyabi/internal/javdb"
+	"github.com/ppxb/miyabi/internal/javlibrary"
 	"github.com/ppxb/miyabi/internal/maintenance"
 	"github.com/ppxb/miyabi/internal/netx"
 	"github.com/ppxb/miyabi/internal/offline"
@@ -64,6 +65,8 @@ func TestErrorMiddlewareMapsDomainErrorsToStatusAndMessage(t *testing.T) {
 		{name: "source changed", err: fmt.Errorf("submit: %w", drive.ErrSourceChanged), status: http.StatusConflict, message: drive.ErrSourceChanged.PublicMessage(), code: "PAN_SOURCE_CHANGED"},
 		{name: "access password", err: ErrAccessPassword, status: http.StatusUnauthorized, message: ErrAccessPassword.PublicMessage()},
 		{name: "upstream gateway error", err: domain.E(domain.KindUpstream, "上游服务异常", errors.New("javdb timeout")), status: http.StatusBadGateway, message: "上游服务异常"},
+		{name: "javlibrary verification required", err: domain.E(domain.KindUpstream, "需要验证", javlibrary.ErrVerificationRequired), status: http.StatusBadGateway, message: "需要验证", code: "JAVLIBRARY_VERIFICATION_REQUIRED"},
+		{name: "javlibrary browser disconnected", err: domain.E(domain.KindUpstream, "验证服务未连接", javlibrary.ErrBrowserDisconnected), status: http.StatusBadGateway, message: "验证服务未连接", code: "JAVLIBRARY_BROWSER_DISCONNECTED"},
 
 		{name: "javdb api error", err: fmt.Errorf("get JavDB movie detail: %w", &javdb.APIError{Action: "movie", Message: "not found"}), status: http.StatusBadGateway, message: "JavDB 返回了错误：not found"},
 		{name: "javdb http error", err: fmt.Errorf("search JavDB: %w", &javdb.HTTPError{StatusCode: 503}), status: http.StatusBadGateway, message: "JavDB 服务异常（HTTP 503），请稍后重试"},

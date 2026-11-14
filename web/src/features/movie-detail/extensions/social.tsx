@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { RotateCwIcon, StarIcon } from 'lucide-react'
+import { ApiError } from '@/api/client'
 import { useJavLibraryRating, useMovieComments, type CommentSource } from '@/api/movie-extras'
 import { InlineError } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
@@ -6,6 +8,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export function JavLibraryRating({ code }: { code: string }) {
   const query = useJavLibraryRating(code)
+  const { error, refetch, isError, isFetching } = query
+  const verificationRequired =
+    isError &&
+    error instanceof ApiError &&
+    (error.code === 'JAVLIBRARY_VERIFICATION_REQUIRED' ||
+      (!error.code && error.message === 'JavLibrary 需要在已连接的浏览器中完成人工验证'))
+  const browserDisconnected =
+    isError &&
+    error instanceof ApiError &&
+    (error.code === 'JAVLIBRARY_BROWSER_DISCONNECTED' ||
+      (!error.code && error.message === '当前电脑的 JavLibrary 验证服务尚未连接 Miyabi'))
+  const needsBrowser = verificationRequired || browserDisconnected
+  const retryLabel = needsBrowser ? '打开 JavLibrary 验证页' : '重试评分'
+
+  useEffect(() => {
+    if (!needsBrowser) return
+    const retry = () => void refetch({ cancelRefetch: false })
+    window.addEventListener('focus', retry)
+    return () => window.removeEventListener('focus', retry)
+  }, [needsBrowser, refetch])
+
   let value = '加载中…'
   if (!code.trim()) value = '缺少番号'
   else if (query.data)
@@ -14,7 +37,7 @@ export function JavLibraryRating({ code }: { code: string }) {
       : query.data.score === null
         ? '暂无评分'
         : `${query.data.score.toFixed(1)} / ${query.data.max}`
-  else if (query.isError) value = '暂不可用'
+  else if (query.isError) value = verificationRequired ? '需要验证' : '暂不可用'
   return (
     <div className="flex flex-auto flex-col items-center gap-2 px-2 py-3 sm:px-3 sm:py-4">
       <dt className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
@@ -23,19 +46,38 @@ export function JavLibraryRating({ code }: { code: string }) {
       </dt>
       <dd className="flex items-center gap-1 text-sm font-semibold whitespace-nowrap tabular-nums sm:text-base">
         {value}
-        {query.isError ? (
+        {needsBrowser ? (
+          <Button asChild size="icon-xs" variant="ghost">
+            <a
+              href="http://127.0.0.1:18082/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={retryLabel}
+              title={retryLabel}
+            >
+              <RotateCwIcon />
+            </a>
+          </Button>
+        ) : isError ? (
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="重试评分"
-            title="重试评分"
-            disabled={query.isFetching}
+            aria-label={retryLabel}
+            title={retryLabel}
+            disabled={isFetching}
             onClick={() => void query.refetch()}
           >
             <RotateCwIcon />
           </Button>
         ) : null}
       </dd>
+      {needsBrowser ? (
+        <dd className="max-w-44 text-center text-xs text-muted-foreground">
+          {browserDisconnected
+            ? '请先启动本机验证服务，再点刷新。'
+            : '点刷新打开验证页，确认后返回。'}
+        </dd>
+      ) : null}
     </div>
   )
 }
