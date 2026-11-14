@@ -31,13 +31,14 @@ export type ConfigurationValues = {
 export type Configuration = {
   configuration_version: number
   configuration_id: string
+  connection_generation: string
   values: ConfigurationValues
   secrets: Record<SecretName, boolean>
   available_sites: string[]
 }
 export type ConfigurationUpdate = Pick<
   Configuration,
-  'configuration_id' | 'configuration_version'
+  'configuration_id' | 'configuration_version' | 'connection_generation'
 > & {
   values: Partial<ConfigurationValues> & Partial<Record<SecretName, string>>
 }

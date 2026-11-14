@@ -85,8 +85,15 @@ export function MDCzSection() {
             <summary className="cursor-pointer text-sm font-medium">MDCz 增强设置</summary>
             <div className="mt-4 space-y-5">
               <p className="text-xs leading-5 text-muted-foreground">
-                MDCz 增强需要桥接服务，可提供影片介绍、翻译和封面角标。
+                {current.managed
+                  ? 'MDCz 已由安装包管理，可提供影片介绍、翻译和封面角标。连接地址和密钥由安装配置维护。'
+                  : 'MDCz 增强需要桥接服务，可提供影片介绍、翻译和封面角标。'}
               </p>
+              {current.status === 'unavailable' ? (
+                <p role="alert" className="text-sm text-destructive">
+                  MDCz 扩展不可用。媒体库和原版模式仍可使用，请检查安装配置和扩展目录。
+                </p>
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-2 text-sm">
                   <span>桥接服务地址</span>
@@ -95,6 +102,7 @@ export function MDCzSection() {
                     autoComplete="off"
                     placeholder="http://mdcz-bridge:3840"
                     value={current.server_url}
+                    readOnly={current.managed}
                     onChange={event => update({ server_url: event.target.value })}
                   />
                 </label>
@@ -105,6 +113,7 @@ export function MDCzSection() {
                     autoComplete="new-password"
                     placeholder={current.has_api_key ? '已保存，留空保留' : '填写桥接服务密钥'}
                     value={current.api_key ?? ''}
+                    disabled={current.managed}
                     onChange={event => update({ api_key: event.target.value || undefined })}
                   />
                 </label>
@@ -173,10 +182,14 @@ export function MDCzSection() {
               ) : null}
               <details className="rounded-md border p-3 text-xs leading-5 text-muted-foreground">
                 <summary className="cursor-pointer font-medium text-foreground">使用说明</summary>
-                <p className="mt-2">保存桥接地址与密钥后，可以在下方配置来源、代理和翻译服务。</p>
+                <p className="mt-2">
+                  {current.managed
+                    ? '包内连接无需手工填写。在下方配置来源、代理和翻译服务。'
+                    : '保存桥接地址与密钥后，可以在下方配置来源、代理和翻译服务。'}
+                </p>
                 <a
                   className="underline underline-offset-4"
-                  href="https://github.com/Surc/miyabi/blob/feat/mdcz-extension/docs/mdcz-extension.md"
+                  href="https://github.com/Surc/miyabi/blob/master/docs/mdcz-extension.md"
                   target="_blank"
                   rel="noreferrer"
                 >

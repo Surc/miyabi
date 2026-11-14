@@ -26,20 +26,22 @@ import (
 	"github.com/ppxb/miyabi/internal/metadata"
 )
 
-const Protocol = 1
-const EngineRevision = "f65e7d4161151aff1531f3b99872e49234d5d539"
 const imagePrefix = "mdcz:v1/"
 
 var hashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type Settings struct {
-	Enabled   bool   `json:"enabled"`
-	ServerURL string `json:"server_url"`
-	APIKey    string `json:"api_key,omitempty"`
-	HasAPIKey bool   `json:"has_api_key"`
-	Translate bool   `json:"translate"`
-	Badges    bool   `json:"badges"`
-	Position  string `json:"position"`
+	Managed    bool   `json:"managed,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Generation string `json:"generation,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	ServerURL  string `json:"server_url"`
+	APIKey     string `json:"api_key,omitempty"`
+	HasAPIKey  bool   `json:"has_api_key"`
+	Translate  bool   `json:"translate"`
+	Badges     bool   `json:"badges"`
+	Position   string `json:"position"`
 }
 
 type Update struct {
@@ -49,25 +51,29 @@ type Update struct {
 }
 
 type Health struct {
-	Protocol             int    `json:"protocol"`
-	Revision             string `json:"revision"`
-	ConfigurationVersion int    `json:"configuration_version"`
-	ConfigurationID      string `json:"configuration_id"`
+	BridgeVersion        string   `json:"bridge_version"`
+	Capabilities         []string `json:"capabilities"`
+	Protocol             int      `json:"protocol"`
+	Revision             string   `json:"revision"`
+	ConfigurationVersion int      `json:"configuration_version"`
+	ConfigurationID      string   `json:"configuration_id"`
 }
 
 type Service struct {
-	*metadata.Service
-	db        *ent.Client
-	directory string
-	client    *http.Client
-	mu        sync.RWMutex
-	settings  Settings
-	slots     chan struct{}
-	catalogue func(context.Context, domain.MovieRef) (domain.MovieMetadata, error)
+	base                *metadata.Service
+	managedPath         string
+	initializationError error
+	db                  *ent.Client
+	directory           string
+	client              *http.Client
+	mu                  sync.RWMutex
+	settings            Settings
+	slots               chan struct{}
+	catalogue           func(context.Context, domain.MovieRef) (domain.MovieMetadata, error)
 }
 
 func New(ctx context.Context, db *ent.Client, dataDir string, base *metadata.Service) (*Service, error) {
-	s := &Service{Service: base, db: db, directory: filepath.Join(dataDir, "extensions", "mdcz-v1"),
+	s := &Service{base: base, managedPath: os.Getenv("MIYABI_MDCZ_MANAGED"), db: db, directory: filepath.Join(dataDir, "extensions", "mdcz-v1"),
 		settings: Settings{Position: "bottomLeft", Badges: true}, slots: make(chan struct{}, 1), catalogue: base.Fallback}
 	value, found, err := database.LoadSetting[Settings](ctx, db, "extensions.mdcz.v1")
 	if err != nil {
@@ -75,14 +81,11 @@ func New(ctx context.Context, db *ent.Client, dataDir string, base *metadata.Ser
 	}
 	if found {
 		s.settings = value
-	} else {
-		s.settings, err = bootstrapConnection(s.settings, os.Getenv("MIYABI_MDCZ_BOOTSTRAP"))
-		if err != nil {
-			return nil, err
-		}
+	} else if s.managedPath == "" {
+		s.settings, _ = bootstrapConnection(s.settings, os.Getenv("MIYABI_MDCZ_BOOTSTRAP"))
 	}
 	if err := os.MkdirAll(s.directory, 0o700); err != nil {
-		return nil, err
+		s.initializationError = errors.New("MDCz 本地存储不可用，请检查扩展目录权限")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil // The sidecar has its own source-site proxy configuration.
@@ -94,7 +97,14 @@ func New(ctx context.Context, db *ent.Client, dataDir string, base *metadata.Ser
 
 func (s *Service) config() Settings { s.mu.RLock(); defer s.mu.RUnlock(); return s.settings }
 func (s *Service) ExtensionSettings() Settings {
-	cfg := s.config()
+	cfg, err := s.effective(s.config())
+	if err != nil {
+		cfg.Status = "unavailable"
+	} else if cfg.ServerURL == "" || cfg.APIKey == "" {
+		cfg.Status = "unconfigured"
+	} else {
+		cfg.Status = "configured"
+	}
 	cfg.HasAPIKey, cfg.APIKey = cfg.APIKey != "", ""
 	return cfg
 }
@@ -131,12 +141,29 @@ func (s *Service) candidate(change Update) Settings {
 		cfg.APIKey = strings.TrimSpace(*change.APIKey)
 	}
 	cfg.HasAPIKey = false
+	cfg.Managed, cfg.Mode, cfg.Status, cfg.Generation = false, "", "", ""
 	return cfg
 }
 
 func (s *Service) UpdateExtensionSettings(ctx context.Context, change Update) error {
 	cfg := s.candidate(change)
-	if err := validate(cfg); err != nil {
+	if s.managedPath != "" {
+		effective, err := s.effective(cfg)
+		if change.APIKey != nil || (err == nil && change.ServerURL != "" && change.ServerURL != effective.ServerURL) {
+			return domain.E(domain.KindConflict, "连接由安装包管理，请在安装配置中修改", nil)
+		}
+		// Disabling the extension must remain possible with a missing bridge file.
+		if cfg.Enabled && err != nil {
+			return err
+		}
+		check := effective
+		check.Enabled = cfg.Enabled
+		if err := validate(check); err != nil {
+			return err
+		}
+		legacy := s.config()
+		cfg.ServerURL, cfg.APIKey = legacy.ServerURL, legacy.APIKey
+	} else if err := validate(cfg); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -149,7 +176,10 @@ func (s *Service) UpdateExtensionSettings(ctx context.Context, change Update) er
 }
 
 func (s *Service) Test(ctx context.Context, change Update) (Health, error) {
-	cfg := s.candidate(change)
+	cfg, err := s.effective(s.candidate(change))
+	if err != nil {
+		return Health{}, err
+	}
 	cfg.Enabled = true
 	if err := validate(cfg); err != nil {
 		return Health{}, err
@@ -157,7 +187,7 @@ func (s *Service) Test(ctx context.Context, change Update) (Health, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var health Health
-	err := s.json(ctx, cfg, http.MethodGet, "/v1/health", nil, &health)
+	err = s.json(ctx, cfg, http.MethodGet, "/v1/health", nil, &health)
 	if err == nil && !compatibleConfiguration(health) {
 		err = domain.E(domain.KindUpstream, "桥接版本不匹配，请使用文档中的固定版本", nil)
 	}
@@ -167,9 +197,12 @@ func (s *Service) Test(ctx context.Context, change Update) (Health, error) {
 // Resolve is injected only into the library scrape pipeline. Browsing never
 // triggers a second scraper and the existing source-settings API stays intact.
 func (s *Service) Resolve(ctx context.Context, ref domain.MovieRef) (domain.MovieMetadata, error) {
-	cfg := s.config()
+	cfg, err := s.attemptSettings(ctx)
 	if !cfg.Enabled {
-		return s.Service.Resolve(ctx, ref)
+		return s.base.Resolve(ctx, ref)
+	}
+	if err != nil {
+		return domain.MovieMetadata{}, err
 	}
 	result, err := s.resolve(ctx, cfg, ref)
 	if err != nil {
@@ -251,12 +284,16 @@ func validImageID(value string) bool {
 
 func (s *Service) Image(ctx context.Context, candidate domain.ImageCandidate) (domain.Media, error) {
 	if candidate.Provider != "mdcz" {
-		return s.Service.Image(ctx, candidate)
+		return s.base.Image(ctx, candidate)
 	}
 	if !validImageID(candidate.URL) {
 		return domain.Media{}, domain.E(domain.KindInvalid, "无效的 MDCz 图片引用", nil)
 	}
-	body, err := s.request(ctx, s.config(), http.MethodGet, "/v1/images/"+strings.TrimPrefix(candidate.URL, imagePrefix), nil, 20<<20)
+	cfg, err := s.attemptSettings(ctx)
+	if err != nil {
+		return domain.Media{}, err
+	}
+	body, err := s.request(ctx, cfg, http.MethodGet, "/v1/images/"+strings.TrimPrefix(candidate.URL, imagePrefix), nil, 20<<20)
 	return domain.Media{Body: body, ContentType: http.DetectContentType(body)}, err
 }
 
@@ -272,6 +309,12 @@ func (s *Service) json(ctx context.Context, cfg Settings, method, path string, i
 	body, err = s.request(ctx, cfg, method, path, body, 32<<20)
 	if err != nil {
 		return err
+	}
+	if attempt, ok := ctx.Value(attemptContextKey{}).(attemptContext); ok && attempt.health.ConfigurationID != "" && (path == "/v1/metadata" || path == "/v1/poster") {
+		var identity Health
+		if json.Unmarshal(body, &identity) != nil || identity.Revision != attempt.health.Revision || identity.ConfigurationID != attempt.health.ConfigurationID {
+			return domain.E(domain.KindConflict, "MDCz 返回了不同配置的结果，请重新刮削", nil)
+		}
 	}
 	if err := json.Unmarshal(body, output); err != nil {
 		return domain.E(domain.KindUpstream, "桥接服务返回了无效数据", err)
@@ -297,6 +340,10 @@ func (s *Service) request(ctx context.Context, cfg Settings, method, path string
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	if attempt, ok := ctx.Value(attemptContextKey{}).(attemptContext); ok && attempt.health.ConfigurationID != "" {
+		req.Header.Set("X-Miyabi-MDCz-Configuration-ID", attempt.health.ConfigurationID)
+		req.Header.Set("X-Miyabi-MDCz-Engine-Revision", attempt.health.Revision)
+	}
 	response, err := s.client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -306,6 +353,9 @@ func (s *Service) request(ctx context.Context, cfg Settings, method, path string
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusConflict {
+			return nil, domain.E(domain.KindConflict, "MDCz 配置已变化，请重新刮削，不能混用旧资料和新图片", nil)
+		}
 		if path == "/v1/configuration" {
 			switch response.StatusCode {
 			case http.StatusBadRequest:
@@ -343,7 +393,10 @@ func (s *Service) synopsisPath(cfg Settings, code string) string {
 }
 
 func (s *Service) Synopsis(ctx context.Context, code string) (Synopsis, error) {
-	cfg := s.config()
+	cfg, connectionErr := s.effective(s.config())
+	if cfg.Enabled && connectionErr != nil {
+		return Synopsis{}, connectionErr
+	}
 	var health Health
 	if cfg.Enabled {
 		// A lightweight health read prevents a changed source/translation profile

@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-export const configurationVersion = 1;
+import { configurationVersion } from "./compatibility.generated.mjs";
+export { configurationVersion };
 export const secretFields = [
   "proxy_url",
   "javdb_cookie",

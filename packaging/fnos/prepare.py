@@ -24,6 +24,20 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+
+def verify_bridge_source(bridge, lock):
+    """Reject stale or tampered staged artifacts before writing any package."""
+    manifest = json.loads((bridge / "bridge-manifest.json").read_text())
+    for key in ["schema", "repository", "engine_version", "engine_revision", "bridge_version", "protocol", "configuration_version", "capabilities"]:
+        if manifest.get(key) != lock.get(key):
+            raise ValueError("Bridge artifact source mismatch: " + key)
+    if manifest.get("bridge_sha256") != sha256_file(bridge / "bridge.js"):
+        raise ValueError("Bridge artifact checksum mismatch")
+    if not str(manifest.get("node", "")).startswith("v24."):
+        raise ValueError("Bridge artifact requires Node 24")
+    return manifest
+
+
 def elf_x64(path):
     with open(path, "rb") as source:
         header = source.read(20)
@@ -68,9 +82,9 @@ def main():
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True).strip():
         raise ValueError("Prepare from a clean source checkout")
-    engine = re.search(r'engineRevision\s*=\s*"([a-f0-9]{40})"', (template / "app/service/configuration.mjs").read_text()).group(1)
-    if engine not in (args.bridge / "NOTICE").read_text():
-        raise ValueError("Bridge artifact does not match the pinned engine")
+    lock = json.loads((root / "extensions/mdcz-bridge/source-lock.json").read_text())
+    engine = lock["engine_revision"]
+    bridge_manifest = verify_bridge_source(args.bridge, lock)
     elf_x64(args.miyabi)
     elf_x64(args.node / "bin/node")
     build = subprocess.check_output([args.go, "version", "-m", str(args.miyabi)], text=True)
@@ -119,7 +133,7 @@ def main():
             raise ValueError("Dependency symlink escapes the package: " + str(file))
         if file.is_file():
             checksums[str(file.relative_to(args.output))] = sha256_file(file)
-    (app / "bundle.json").write_text(json.dumps({"version": args.version, "source_revision": revision, "mdcz_revision": engine, "node": node_version, "platform": "linux/amd64", "goamd64": "v1", "sha256": checksums}, indent=2) + "\n")
+    (app / "bundle.json").write_text(json.dumps({"version": args.version, "source_revision": revision, "mdcz_revision": engine, "bridge_version": lock["bridge_version"], "bridge_protocol": lock["protocol"], "configuration_version": lock["configuration_version"], "capabilities": lock["capabilities"], "bridge_sha256": bridge_manifest["bridge_sha256"], "node": node_version, "platform": "linux/amd64", "goamd64": "v1", "sha256": checksums}, indent=2) + "\n")
     for file in [* (args.output / "cmd").iterdir(), app / "service/control", app / "runtime/bin/node", app / "bin/miyabi"]:
         file.chmod(0o755)
     print(f"Staged {args.output}; no FPK built. Validate on fnOS before release.")

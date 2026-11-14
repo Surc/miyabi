@@ -25,6 +25,7 @@ type Dependencies struct {
 	TopSettings     TopSettingsManager
 	Metadata        MetadataManager
 	MDCz            MDCzManager
+	Publication     PublicationStatusReader
 	Drive           DriveManager
 	Offline         OfflineManager
 	Monitor         SubscriptionManager
@@ -92,6 +93,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerBrowseExtension(protected, deps.BrowseExtension, browserRating)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)
 	registerMDCz(protected, deps.MDCz)
+	registerPublicationStatus(protected, deps.Publication)
 	registerLibraryVersions(protected, deps.Library)
 
 	settingsAPI := protected.Group("/settings", noStore())

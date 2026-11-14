@@ -18,7 +18,7 @@ func TestConfigurationReadsBypassJobQueueAndNeverExposeSecrets(t *testing.T) {
 			t.Errorf("unexpected configuration request: %s %s", r.Method, r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(Configuration{
-			Health:  Health{Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: "profile-1"},
+			Health:  Health{BridgeVersion: BridgeVersion, Capabilities: RequiredCapabilities, Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: "profile-1"},
 			Values:  map[string]json.RawMessage{"sites": json.RawMessage(`["dmm"]`), "proxy_url": json.RawMessage(`"http://private:secret@proxy.test"`), "llm_key": json.RawMessage(`"private-key"`)},
 			Secrets: map[string]bool{"proxy_url": true, "llm_key": true}, AvailableSites: []string{"dmm"},
 		})
@@ -28,7 +28,7 @@ func TestConfigurationReadsBypassJobQueueAndNeverExposeSecrets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	value, err := s.Configuration(ctx)
-	if err != nil || value.ConfigurationID != "profile-1" || !value.Secrets["llm_key"] {
+	if err != nil || value.ConfigurationID != "profile-1" || value.ConnectionGeneration != digest([]byte(s.config().ServerURL)) || !value.Secrets["llm_key"] {
 		t.Fatalf("configuration unavailable during a job: %+v %v", value, err)
 	}
 	body, _ := json.Marshal(value)
@@ -51,6 +51,9 @@ func TestConfigurationUpdatesPreserveOmittedSecretsAndMapSafeErrors(t *testing.T
 			if r.Method != http.MethodPut || json.NewDecoder(r.Body).Decode(&input) != nil {
 				t.Error("expected configuration update")
 			}
+			if input.ConnectionGeneration != "" {
+				t.Error("Miyabi target guard leaked into bridge-owned schema")
+			}
 			if _, exists := input.Values["llm_key"]; exists || string(input.Values["javdb_cookie"]) != `""` {
 				t.Error("secret omission and explicit clear lost")
 			}
@@ -60,7 +63,7 @@ func TestConfigurationUpdatesPreserveOmittedSecretsAndMapSafeErrors(t *testing.T
 		if _, err := s.UpdateConfiguration(t.Context(), ConfigurationUpdate{}); !domain.IsKind(err, domain.KindInvalid) || calls != 0 {
 			t.Fatalf("invalid version reached the bridge: %v", err)
 		}
-		_, err := s.UpdateConfiguration(t.Context(), ConfigurationUpdate{Version: ConfigurationVersion, ID: "profile-1", Values: map[string]json.RawMessage{"javdb_cookie": json.RawMessage(`""`)}})
+		_, err := s.UpdateConfiguration(t.Context(), ConfigurationUpdate{ConnectionGeneration: digest([]byte(s.config().ServerURL)), Version: ConfigurationVersion, ID: "profile-1", Values: map[string]json.RawMessage{"javdb_cookie": json.RawMessage(`""`)}})
 		if !domain.IsKind(err, scenario.kind) || strings.Contains(err.Error(), "private") {
 			t.Fatalf("unsafe or incorrect bridge error: %v", err)
 		}
@@ -71,7 +74,7 @@ func TestSynopsisRefreshesAfterConfigurationChangesWithoutErasingCacheOnFailure(
 	id, plot, requests, failed := "profile-1", "First language", 0, false
 	s := fixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/health" {
-			json.NewEncoder(w).Encode(Health{Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: id})
+			json.NewEncoder(w).Encode(Health{BridgeVersion: BridgeVersion, Capabilities: RequiredCapabilities, Protocol: Protocol, Revision: EngineRevision, ConfigurationVersion: ConfigurationVersion, ConfigurationID: id})
 			return
 		}
 		requests++
@@ -107,5 +110,18 @@ func TestSynopsisRefreshesAfterConfigurationChangesWithoutErasingCacheOnFailure(
 	value, err = s.Synopsis(t.Context(), "TEST-001")
 	if err != nil || value.Enabled || value.Plot != plot {
 		t.Fatalf("disabled offline cache unavailable: %+v %v", value, err)
+	}
+}
+
+func TestConfigurationWriteCannotRetargetAnOldDraft(t *testing.T) {
+	calls := 0
+	s := fixture(t, func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) })
+	change := ConfigurationUpdate{Version: ConfigurationVersion, ID: "same-profile-on-two-servers", Values: map[string]json.RawMessage{"sites": json.RawMessage(`["dmm"]`)}}
+	if _, err := s.UpdateConfiguration(t.Context(), change); !domain.IsKind(err, domain.KindConflict) || calls != 0 {
+		t.Fatal("unbound configuration draft reached bridge")
+	}
+	change.ConnectionGeneration = digest([]byte("http://old-target.invalid"))
+	if _, err := s.UpdateConfiguration(t.Context(), change); !domain.IsKind(err, domain.KindConflict) || calls != 0 {
+		t.Fatal("old target draft reached current bridge")
 	}
 }

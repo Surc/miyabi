@@ -55,7 +55,7 @@ func (s *Service) SetLibraryPaused(ctx context.Context, paused bool) error {
 }
 
 func (q *Queue) runnableKinds(ctx context.Context, kinds []Kind) ([]Kind, error) {
-	isLibrary := func(kind Kind) bool { return kind == KindScan || kind == KindScrape }
+	isLibrary := func(kind Kind) bool { return kind == KindScan || kind == KindScrape || kind == KindSubtitle }
 	if !slices.ContainsFunc(kinds, isLibrary) {
 		return kinds, nil
 	}

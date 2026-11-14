@@ -36,11 +36,14 @@ type MetadataPayload struct {
 // Payload holds the checkpoints of one movie scraping workflow.
 type Payload struct {
 	MetadataPayload
-	MetadataReady bool                `json:"metadata_ready,omitempty"`
-	Document      nfo.Movie           `json:"document"`
-	Artwork       *mediaimage.Artwork `json:"artwork,omitempty"`
-	PosterVersion int                 `json:"poster_version,omitempty"`
-	Completed     bool                `json:"completed,omitempty"`
+	PublicationID     string              `json:"publication_id,omitempty"`
+	PublicationDigest string              `json:"publication_digest,omitempty"`
+	AttemptID         string              `json:"attempt_id,omitempty"`
+	MetadataReady     bool                `json:"metadata_ready,omitempty"`
+	Document          nfo.Movie           `json:"document"`
+	Artwork           *mediaimage.Artwork `json:"artwork,omitempty"`
+	PosterVersion     int                 `json:"poster_version,omitempty"`
+	Completed         bool                `json:"completed,omitempty"`
 }
 
 // MetadataSource resolves independent sources and downloads their image candidates.
@@ -74,13 +77,12 @@ type dirCacheEntry struct {
 
 // Service manages movie metadata scraping and artwork caching.
 type Service struct {
-	db            *ent.Client
-	drive         *drive.Drive
-	metadata      MetadataSource
-	images        *mediaimage.Cache
-	notifier      Notifier
-	subtitles     SubtitleExporter
-	subtitleQueue *SubtitleQueue
+	db        *ent.Client
+	drive     *drive.Drive
+	metadata  MetadataSource
+	images    *mediaimage.Cache
+	notifier  Notifier
+	subtitles SubtitleExporter
 
 	dirMu    sync.Mutex
 	dirCache map[string]dirCacheEntry
@@ -89,6 +91,7 @@ type Service struct {
 	mediaNotifier export.MediaNotifier
 
 	artworkDecorator ArtworkDecorator
+	beginAttempt     func(context.Context, string) (context.Context, string, error)
 }
 
 func (service *Service) exportConfig() export.Config {
@@ -99,6 +102,8 @@ func (service *Service) exportConfig() export.Config {
 }
 
 type Dependencies struct {
+	// BeginAttempt pins optional extension configuration for one recoverable attempt.
+	BeginAttempt     func(context.Context, string) (context.Context, string, error)
 	ArtworkDecorator ArtworkDecorator
 
 	ExportManager *export.Manager
@@ -106,10 +111,11 @@ type Dependencies struct {
 	Subtitles     SubtitleExporter
 }
 
-// New installs dependencies before starting subtitle workers.
+// New installs dependencies; the application task pools own background workers.
 func New(db *ent.Client, d *drive.Drive, metadata MetadataSource, images *mediaimage.Cache, notifier Notifier, deps Dependencies) *Service {
 	service := &Service{
 		artworkDecorator: deps.ArtworkDecorator,
+		beginAttempt:     deps.BeginAttempt,
 
 		db:            db,
 		drive:         d,
@@ -121,14 +127,12 @@ func New(db *ent.Client, d *drive.Drive, metadata MetadataSource, images *mediai
 		mediaNotifier: deps.MediaNotifier,
 		subtitles:     deps.Subtitles,
 	}
-	service.subtitleQueue = newSubtitleQueue(service)
 	return service
 }
 
-// Close releases resources and terminates background workers.
-func (service *Service) Close() {
-	service.subtitleQueue.Close()
-}
+// Close is retained for existing owners. The application task pools now own
+// subtitle worker lifetimes, so this service has no private goroutines to stop.
+func (service *Service) Close() {}
 
 // TryLockArtwork attempts to acquire the artwork lock for cache maintenance.
 func (service *Service) TryLockArtwork() bool {
@@ -158,8 +162,24 @@ func (service *Service) Scrape(ctx context.Context, job tasks.Job) error {
 	if err != nil {
 		return err
 	}
+	// Recovery precedes replay and all new checkpoints. Never overwrite a
+	// publication receipt while its files remain undecided.
+	if err := service.exportMgr.WithConfig(func(export.Config) error { return nil }); err != nil {
+		return domain.E(domain.KindConflict, "导出发布等待恢复，暂不继续刮削", err)
+	}
 	if input.Completed {
 		return nil
+	}
+	if service.beginAttempt != nil {
+		// Old checkpoints have no evidence tying their candidates to a configuration.
+		// Never combine those candidates with the current bridge settings.
+		if input.MetadataReady && input.AttemptID == "" {
+			return domain.E(domain.KindConflict, "旧刮削检查点缺少配置快照，请重新刮削", nil)
+		}
+		ctx, input.AttemptID, err = service.beginAttempt(ctx, input.AttemptID)
+		if err != nil {
+			return err
+		}
 	}
 	input.Code = codeid.Normalize(input.Code)
 	sess, err := service.begin(ctx, input.MetadataPayload)
@@ -187,12 +207,9 @@ func (service *Service) Scrape(ctx context.Context, job tasks.Job) error {
 	if err := tasks.Checkpoint(ctx, service.db); err != nil {
 		return err
 	}
-	subTask, err := service.publishMovie(ctx, sess, job, input)
+	_, err = service.publishMovie(ctx, sess, job, input)
 	if err != nil {
 		return err
-	}
-	if subTask != nil {
-		service.subtitleQueue.Enqueue(*subTask)
 	}
 	return nil
 }
@@ -236,15 +253,11 @@ func (service *Service) prepareMetadata(ctx context.Context, sess drive.Session,
 		return err
 	}
 	if err := sess.Commit(ctx, func(tx *ent.Tx) error {
-		if err := SaveMovieMetadata(ctx, tx, input.MovieID, input.Document); err != nil {
-			return err
-		}
+		// Candidates belong to the task until publication succeeds. Updating Movie
+		// here made a later artwork failure expose new text beside the old poster.
 		return tx.Task.UpdateOneID(taskID).SetPayload(encoded).Exec(ctx)
 	}); err != nil {
 		return fmt.Errorf("save movie metadata checkpoint: %w", err)
-	}
-	if service.notifier != nil {
-		service.notifier.NotifyLibraryChanged()
 	}
 	return nil
 }
@@ -256,9 +269,22 @@ func (service *Service) Finished(ctx context.Context, tx *ent.Tx, job tasks.Job,
 	if result == nil {
 		return tasks.ChangeOffline, nil
 	}
-	input, err := tasks.DecodePayload[MetadataPayload](job.Payload)
+	record, err := tx.Task.Get(ctx, job.ID)
 	if err != nil {
 		return 0, err
+	}
+	input, err := tasks.DecodePayload[struct {
+		MetadataPayload
+		Completed bool `json:"completed"`
+	}](record.Payload)
+	if err != nil {
+		return 0, err
+	}
+	// Read the durable task, not a possibly stale worker payload, for the SQL
+	// publication receipt. A failure to retire its journal is not a failed
+	// movie publication: preserve the already-committed visible state.
+	if input.Completed {
+		return tasks.ChangeOffline, nil
 	}
 	update := tx.Movie.Update().Where(
 		movie.IDEQ(input.MovieID),

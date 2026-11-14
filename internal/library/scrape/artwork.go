@@ -20,6 +20,9 @@ const preferredPosterPixels = 600 * 900
 func (service *Service) prepareArtwork(ctx context.Context, taskID int, input *Payload) error {
 	if input.Artwork == nil {
 		body, selected, err := service.selectCover(ctx, input.Document.Images, input.Document.Zone)
+		if domain.IsKind(err, domain.KindConflict) {
+			return err
+		}
 		if (err != nil || !hasPreferredPosterSize(selected)) && ctx.Err() == nil && !slices.ContainsFunc(input.Document.Images, func(image domain.ImageCandidate) bool {
 			return image.Provider == "javdb" && (image.Role == "cover" || image.Role == "poster")
 		}) {
@@ -29,6 +32,9 @@ func (service *Service) prepareArtwork(ctx context.Context, taskID int, input *P
 			}
 			if fallbackErr == nil {
 				fallbackBody, fallbackImage, imageErr := service.selectCover(ctx, fallback.Images, fallback.Detail.Zone)
+				if domain.IsKind(imageErr, domain.KindConflict) {
+					return imageErr
+				}
 				if imageErr == nil && (err != nil || coverPixels(fallbackImage) > coverPixels(selected)) {
 					body, selected, err = fallbackBody, fallbackImage, nil
 					input.Document.Images = append(input.Document.Images, fallback.Images...)
@@ -116,6 +122,9 @@ func (service *Service) selectCover(ctx context.Context, candidates []domain.Ima
 				continue
 			}
 			media, err := service.metadata.Image(ctx, candidate)
+			if domain.IsKind(err, domain.KindConflict) {
+				return nil, domain.ImageCandidate{}, err
+			}
 			if err != nil {
 				failures = append(failures, err)
 				continue

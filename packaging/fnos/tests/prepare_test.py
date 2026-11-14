@@ -63,12 +63,34 @@ class ArtifactChecks(unittest.TestCase):
         self.assertEqual(ui["miyabi-native.main"]["port"], "${wizard_port}")
         self.assertNotIn("docker-project", (package / "config/resource").read_text())
         self.assertEqual(json.loads((package / "config/privilege").read_text())["defaults"]["run-as"], "package")
-        import re
-        sources = [package / "app/service/configuration.mjs", root / "extensions/mdcz-bridge/contract.mjs", root / "internal/mdcz/service.go", root / "extensions/mdcz-bridge/Dockerfile"]
-        revisions = [set(re.findall(r"\b[a-f0-9]{40}\b", file.read_text())) for file in sources]
-        self.assertEqual(len(set.intersection(*revisions)), 1)
+        import subprocess
+        subprocess.run(["node", str(root / "extensions/mdcz-bridge/generate-compatibility.mjs"), "--check"], check=True)
+        lock = json.loads((root / "extensions/mdcz-bridge/source-lock.json").read_text())
+        self.assertEqual(lock["engine_version"], "0.22.0")
+        self.assertIn("source-lock.json", (root / "extensions/mdcz-bridge/Dockerfile").read_text())
         for file in (package / "wizard").iterdir():
             self.assertIsInstance(json.loads(file.read_text()), list)
+
+    def test_bridge_manifest_rejects_changed_source_or_artifact(self):
+        import json
+        root = Path(__file__).resolve().parents[3]
+        lock = json.loads((root / "extensions/mdcz-bridge/source-lock.json").read_text())
+        with tempfile.TemporaryDirectory() as folder:
+            bridge = Path(folder)
+            (bridge / "bridge.js").write_text("fixture bridge")
+            manifest = {**lock, "node": "v24.19.0", "bridge_sha256": prepare.sha256_file(bridge / "bridge.js")}
+            file = bridge / "bridge-manifest.json"
+            file.write_text(json.dumps(manifest))
+            self.assertEqual(prepare.verify_bridge_source(bridge, lock), manifest)
+            for key in ["engine_revision", "bridge_version", "protocol", "configuration_version", "capabilities"]:
+                wrong = {**manifest, key: None}
+                file.write_text(json.dumps(wrong))
+                with self.assertRaises(ValueError):
+                    prepare.verify_bridge_source(bridge, lock)
+            file.write_text(json.dumps(manifest))
+            (bridge / "bridge.js").write_text("changed")
+            with self.assertRaises(ValueError):
+                prepare.verify_bridge_source(bridge, lock)
 
 
 if __name__ == "__main__":

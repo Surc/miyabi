@@ -1,9 +1,4 @@
-import { access, writeFile } from "node:fs/promises";
-import { constants } from "node:fs";
-import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { createServer } from "node:net";
+import { writeFile } from "node:fs/promises";
 import {
   locations,
   initialize,
@@ -11,40 +6,10 @@ import {
   patchConfiguration,
   writeJSON,
   backup,
-  childEnvironment,
 } from "./configuration.mjs";
+import { mainPreflight, freePort } from "./preflight.mjs";
 import { start, stop, status, supervise } from "./processes.mjs";
 
-const exec = promisify(execFile);
-async function freePort(port, host) {
-  await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", () => reject(new Error(`端口 ${port} 已被占用或不可用`)));
-    server.listen(port, host, () => server.close(resolve));
-  });
-}
-const xml = (value) =>
-  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-async function preflight(paths, config) {
-  await access(join(paths.app, "bin/miyabi"), constants.X_OK);
-  await access(join(paths.app, "certs/ca-certificates.crt"));
-  await access(join(paths.app, "fonts/NotoSansCJK-Regular.ttc"));
-  await writeFile(
-    join(paths.etc, "fonts.conf"),
-    `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>${xml(join(paths.app, "fonts"))}</dir><cachedir>${xml(join(paths.data, "font-cache"))}</cachedir></fontconfig>`,
-    { mode: 0o600 },
-  );
-  if (config.externalMDCz) return;
-  try {
-    await exec(join(paths.app, "runtime/bin/node"), [join(paths.app, "service/native-probe.mjs")], {
-      env: { ...childEnvironment(paths, config).bridge, TRIM_APPDEST: paths.app },
-      timeout: 20_000,
-      maxBuffer: 32_768,
-    });
-  } catch {
-    throw new Error("内置 Node/图像/网络依赖不兼容，请使用已验证的 J4125 原生包");
-  }
-}
 async function main(action, paths) {
   if (action === "supervise") return supervise(paths, await load(paths));
   if (action === "status") return (await status(paths, await load(paths))) ? 0 : 3;
@@ -53,8 +18,8 @@ async function main(action, paths) {
     return;
   }
   if (action === "initialize" || action === "verify") {
-    const config = await initialize(paths);
-    await preflight(paths, config);
+    await initialize(paths);
+    await mainPreflight(paths);
     return;
   }
   const config = await load(paths);
@@ -65,9 +30,8 @@ async function main(action, paths) {
   if (action === "start") {
     if (await status(paths, config)) return;
     await stop(paths);
-    await preflight(paths, config);
+    await mainPreflight(paths);
     await freePort(config.port, "0.0.0.0");
-    if (!config.externalMDCz) await freePort(config.bridgePort, "127.0.0.1");
     return start(paths, config);
   }
   if (action === "configure") {

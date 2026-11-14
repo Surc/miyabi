@@ -8,7 +8,8 @@ import { once } from "node:events";
 import sharp from "sharp";
 import { CrawlerProvider } from "@mdcz/runtime/crawler/CrawlerProvider";
 import { Website } from "@mdcz/shared/enums";
-import { configurationBoundary, createAdapter } from "./adapter";
+import { configurationBoundary, createAdapter, parseBridgeConfiguration } from "./adapter";
+import { parseFileInfo } from "@mdcz/runtime/scrape/utils/number";
 import { createManagedAdapter } from "./configuration.mjs";
 import { revision } from "./contract.mjs";
 
@@ -38,6 +39,18 @@ afterEach(async () => {
 });
 
 test("real engine defaults and managed settings initialize, persist and reload", async () => {
+  const legacy = {
+    ...configuration,
+    personSync: { actorAliases: { "Canonical Actor": ["Old Alias", "第二艺名"] } },
+    network: { ...configuration.network, javdbCookie: "legacy-cookie", proxy: "http://127.0.0.1:7890", proxyType: "http", useProxy: true },
+  };
+  const original = structuredClone(legacy);
+  const parsed = parseBridgeConfiguration(legacy);
+  expect(parsed.personSync.actorAliases).toEqual([{ name: "Canonical Actor", aliases: ["Old Alias", "第二艺名"] }]);
+  expect(parsed.network.javdbCookie).toBe("legacy-cookie");
+  expect(parsed.network.proxy).toBe("http://127.0.0.1:7890");
+  expect(legacy).toEqual(original);
+  expect(() => parseBridgeConfiguration({ ...legacy, personSync: { actorAliases: { One: ["Alias"], Two: ["Alias"] } } })).toThrow();
   const boundary = configurationBoundary(directory, configuration);
   expect(boundary.sites).toContain(Website.JAVDB);
   expect(boundary.defaults.use_proxy).toBe(false);
@@ -61,6 +74,7 @@ test("real engine defaults and managed settings initialize, persist and reload",
 });
 
 test("real filename parsing and sharp produce common badges and clean cancelled work", async () => {
+  expect(parseFileInfo("unrecognizable-name-C-CD2.mp4", { numberMappings: { "unrecognizable-name": "TEST-001" } })).toMatchObject({ number: "TEST-001", isSubtitled: true, part: { number: 2 } });
   const adapter = await createAdapter(directory, configuration);
   const original = await poster();
   const input = { code: "TEST-001", poster: original, position: "bottomLeft" as const };
@@ -72,6 +86,22 @@ test("real filename parsing and sharp produce common badges and clean cancelled 
   const bytes = Buffer.from(decorated.poster, "base64");
   expect(bytes.equals(original)).toBe(false);
   expect(await sharp(bytes).metadata()).toMatchObject({ format: "jpeg", width: 400, height: 600 });
+  const basePixels = await sharp(original).raw().toBuffer();
+  for (const position of ["topLeft", "topRight", "bottomLeft", "bottomRight"] as const) {
+    const result = await adapter.poster({ ...input, position, filenames: ["TEST-001-C.mp4"] }, signal());
+    const pixels = await sharp(Buffer.from(result.poster, "base64")).raw().toBuffer();
+    const changes = [0, 0, 0, 0];
+    for (let y = 0; y < 600; y++) for (let x = 0; x < 400; x++) {
+      const i = (y * 400 + x) * 3;
+      if (Math.max(...[0, 1, 2].map((c) => Math.abs(pixels[i + c] - basePixels[i + c]))) > 40)
+        changes[(y >= 300 ? 2 : 0) + (x >= 200 ? 1 : 0)]++;
+    }
+    const corner = ["topLeft", "topRight", "bottomLeft", "bottomRight"].indexOf(position);
+    expect(changes[corner]).toBeGreaterThan(100);
+    expect(changes.filter((_, index) => index !== corner).every((value) => value < 20)).toBe(true);
+    const repeated = await adapter.poster({ ...input, position, filenames: ["TEST-001-C.mp4"] }, signal());
+    expect(repeated.poster).toEqual(result.poster);
+  }
   const mixed = await adapter.poster(
     { ...input, filenames: ["TEST-001-C-破解-1080p-CD1.mp4", "TEST-001-CD2.mp4"] },
     signal(),
@@ -138,6 +168,7 @@ test("real aggregation maps controlled crawler results without inventing a ratin
   const adapter = await createAdapter(directory, {
     ...configuration,
     scrape: { ...configuration.scrape, sites: [Website.JAVDB] },
+    personSync: { actorAliases: { "Canonical actor": ["Fixture actor"] } },
   });
   const result = await adapter.metadata({ code: "TEST-001", translate: false }, signal());
   expect(result.partial).toBe(false);
@@ -147,6 +178,7 @@ test("real aggregation maps controlled crawler results without inventing a ratin
     plot: "Fixture synopsis",
     duration: 120,
   });
+  expect(result.detail.actors.map((actor) => actor.name)).toEqual(["Canonical actor"]);
   expect(result.detail).not.toHaveProperty("rating");
   expect(result.images[0].url).toMatch(/^mdcz:v1\/[a-f0-9]{64}$/);
   expect(await readdir(join(directory, "assets"))).toHaveLength(1);

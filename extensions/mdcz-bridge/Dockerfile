@@ -7,7 +7,12 @@ ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 SKIP_INSTALL_SIMPLE_GIT_HOOKS=1
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 WORKDIR /repo
-RUN git init && git remote add origin https://github.com/ShotHeadman/mdcz.git && git fetch --depth 1 origin f65e7d4161151aff1531f3b99872e49234d5d539 && git checkout --detach FETCH_HEAD
+COPY extensions/mdcz-bridge/source-lock.json /tmp/mdcz-source-lock.json
+RUN engine=$(node -p 'require("/tmp/mdcz-source-lock.json").engine_revision') \
+    && repository=$(node -p 'require("/tmp/mdcz-source-lock.json").repository') \
+    && git init && git remote add origin "$repository" \
+    && git fetch --depth 1 origin "$engine" && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$engine"
 COPY extensions/mdcz-bridge /repo/apps/miyabi-bridge
 RUN CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 SKIP_INSTALL_SIMPLE_GIT_HOOKS=1 pnpm --filter @mdcz/server... install --frozen-lockfile
 RUN pnpm --filter @mdcz/server exec vite build --config ../miyabi-bridge/vite.config.ts

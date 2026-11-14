@@ -1,9 +1,11 @@
 // The FPK owns installation settings; application settings stay in Miyabi/MDCz.
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename, rm, cp, access, chmod } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
+import { verifyPublicationBackup } from "./publication-backup.mjs";
 
-export const engineRevision = "f65e7d4161151aff1531f3b99872e49234d5d539";
+import { engineRevision } from "./compatibility.mjs";
+export { engineRevision } from "./compatibility.mjs";
 export function locations(env = process.env) {
   const result = { app: env.TRIM_APPDEST, etc: env.TRIM_PKGETC, data: env.TRIM_PKGVAR };
   for (const value of Object.values(result))
@@ -30,6 +32,8 @@ export async function writeJSON(file, value) {
 }
 export function validate(value) {
   if (!value || value.version !== 1) throw new Error("安装配置版本无效，请从备份恢复");
+  if (value.mdczConnectionMode !== undefined && !["managed", "legacy"].includes(value.mdczConnectionMode))
+    throw new Error("MDCz 连接管理模式无效");
   for (const key of ["port", "bridgePort"])
     if (!Number.isInteger(value[key]) || value[key] < 1024 || value[key] > 65535)
       throw new Error("端口必须为 1024–65535 的整数");
@@ -114,6 +118,7 @@ export async function initialize(paths, env = process.env) {
     const share = (name) => shares.find((path) => path.endsWith(`/miyabi-native/${name}`));
     current = validate({
       version: 1,
+      mdczConnectionMode: "managed",
       port: Number(env.wizard_port || 18080),
       bridgePort: 3840,
       publicURL: (env.wizard_public_url || "").trim().replace(/\/$/, ""),
@@ -149,7 +154,11 @@ export function bridgeConnection(config) {
 }
 
 export async function syncBridgeConnection(paths, config) {
-  await writeJSON(join(paths.etc, "mdcz-connection.json"), bridgeConnection(config));
+  const connection = bridgeConnection(config);
+  await writeJSON(join(paths.etc, "mdcz-connection.json"), {
+    ...connection,
+    generation: createHash("sha256").update(connection.server_url).digest("hex"),
+  });
   if (config.javlibraryBrowser)
     await writeJSON(join(paths.etc, "javlibrary-browser.json"), {
       enabled: true,
@@ -187,6 +196,7 @@ export async function backup(paths, config, reason) {
   await cp(paths.etc, join(target, "etc"), { recursive: true, dereference: false });
   for (const name of ["miyabi", "mdcz"])
     await cp(join(paths.data, name), join(target, name), { recursive: true, dereference: false });
+  await verifyPublicationBackup(target, paths.data);
   await writeJSON(join(target, "complete.json"), {
     version: 1,
     reason,
@@ -219,7 +229,9 @@ export function childEnvironment(paths, config) {
       MIYABI_ACCESS_PASSWORD: config.password,
       MIYABI_JWT_SECRET: config.jwtSecret,
       MIYABI_STRM_TOKEN: config.strmToken,
-      MIYABI_MDCZ_BOOTSTRAP: join(paths.etc, "mdcz-connection.json"),
+      ...(config.mdczConnectionMode === "managed"
+        ? { MIYABI_MDCZ_MANAGED: join(paths.etc, "mdcz-connection.json") }
+        : { MIYABI_MDCZ_BOOTSTRAP: join(paths.etc, "mdcz-connection.json") }),
       ...(config.javlibraryBrowser
         ? { MIYABI_JAVLIBRARY_BROWSER_CONFIG: join(paths.etc, "javlibrary-browser.json") }
         : {}),

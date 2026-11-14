@@ -1,8 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost, apiPut } from './client'
 
 export type MDCzSettings = {
   enabled: boolean
+  managed?: boolean
+  mode?: 'managed' | 'external'
+  status?: 'configured' | 'unconfigured' | 'unavailable'
+  generation?: string
   server_url: string
   has_api_key: boolean
   translate: boolean
@@ -21,11 +25,11 @@ export function useMDCzSettings() {
       apiGet<MDCzSettings>('/api/extensions/mdcz/settings', undefined, signal)
   })
 }
-export function useUpdateMDCz() {
-  const client = useQueryClient()
-  return useMutation({
+export function updateMDCzOptions(client: QueryClient) {
+  return {
     mutationFn: (value: MDCzUpdate) => apiPut<MDCzSettings>('/api/extensions/mdcz/settings', value),
-    onSuccess: async value => {
+    onMutate: () => client.cancelQueries({ queryKey: mdczKeys.settings }),
+    onSuccess: async (value: MDCzSettings) => {
       // A different bridge must not inherit the previous bridge's editable form.
       await client.cancelQueries({ queryKey: ['extensions', 'mdcz', 'configuration'] })
       client.removeQueries({ queryKey: ['extensions', 'mdcz', 'configuration'] })
@@ -34,7 +38,10 @@ export function useUpdateMDCz() {
       // Refresh open details without holding the settings form for a scrape.
       void client.resetQueries({ queryKey: mdczKeys.synopsis })
     }
-  })
+  }
+}
+export function useUpdateMDCz() {
+  return useMutation(updateMDCzOptions(useQueryClient()))
 }
 export function useTestMDCz() {
   return useMutation({
