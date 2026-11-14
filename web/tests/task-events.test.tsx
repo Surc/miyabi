@@ -438,7 +438,7 @@ function useNextFixture() {
 
 for (const scan of [
   { name: 'scan', useOperation: useStartLibraryScan, input: false },
-  { name: 'rescrape', useOperation: useRescrapeFixture, input: 'ABP-001' }
+  { name: 'rescrape', useOperation: useRescrapeFixture, input: { code: 'ABP-001' } }
 ]) {
   test(`${scan.name}: an SSE snapshot arriving first survives an older mutation response`, async () => {
     const f = fixture()

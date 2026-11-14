@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/javdb"
 	lib "github.com/ppxb/miyabi/internal/library"
 )
 
@@ -16,7 +17,7 @@ type LibraryManager interface {
 	Preview(context.Context, int, int) (domain.ImageCandidate, error)
 	StartScan(context.Context) (domain.TaskInfo, error)
 	StartRebuild(context.Context) (domain.TaskInfo, error)
-	RescrapeMovie(context.Context, int, string) (domain.TaskInfo, error)
+	RescrapeMovie(context.Context, int, string, string) (domain.TaskInfo, error)
 }
 
 func libraryMovieScrapeHandler(library LibraryManager) gin.HandlerFunc {
@@ -28,12 +29,17 @@ func libraryMovieScrapeHandler(library LibraryManager) gin.HandlerFunc {
 			return
 		}
 		input, ok := bindJSON[struct {
-			Code string `json:"code" binding:"max=120"`
+			Code    string `json:"code" binding:"max=120"`
+			JavDBID string `json:"javdb_id"`
 		}](c)
 		if !ok {
 			return
 		}
-		job, err := library.RescrapeMovie(c.Request.Context(), uri.ID, input.Code)
+		if input.JavDBID != "" && (input.Code != "" || !javdb.ValidMovieID(input.JavDBID)) {
+			c.Error(domain.E(domain.KindInvalid, "请选择有效的 JavDB 条目，纠正番号请单独提交", nil))
+			return
+		}
+		job, err := library.RescrapeMovie(c.Request.Context(), uri.ID, input.Code, input.JavDBID)
 		accepted(c, job, err)
 	}
 }

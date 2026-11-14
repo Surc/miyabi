@@ -7,8 +7,8 @@ import (
 	"github.com/ppxb/miyabi/internal/ent"
 )
 
-func (s *Service) RescrapeMovie(ctx context.Context, id int, code string) (domain.TaskInfo, error) {
-	parent, err := s.scanner.RescrapeMovie(ctx, id, code)
+func (s *Service) RescrapeMovie(ctx context.Context, id int, code, javdbID string) (domain.TaskInfo, error) {
+	parent, err := s.scanner.RescrapeMovie(ctx, id, code, javdbID)
 	if err != nil {
 		return domain.TaskInfo{}, err
 	}

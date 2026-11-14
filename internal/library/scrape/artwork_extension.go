@@ -17,7 +17,7 @@ type ArtworkDecorator interface {
 }
 
 func (service *Service) decorateArtwork(ctx context.Context, taskID int, input *Payload, videos []pan.File, poster []byte) ([]byte, error) {
-	if service.artworkDecorator == nil {
+	if service.artworkDecorator == nil || input.SelectedJavDBID != "" {
 		return poster, nil
 	}
 	doc, decorated, err := service.artworkDecorator.Decorate(ctx, input.Document, videos, poster)

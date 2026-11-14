@@ -41,7 +41,7 @@ func TestMovieRescrapeIsFreshScopedAndDeduplicated(t *testing.T) {
 	results := make(chan domain.TaskInfo, 4)
 	for range 4 {
 		wg.Go(func() {
-			info, err := lib.RescrapeMovie(t.Context(), record.ID, "")
+			info, err := lib.RescrapeMovie(t.Context(), record.ID, "", "")
 			if err != nil {
 				t.Error(err)
 				return
@@ -69,7 +69,7 @@ func TestMovieRescrapeIsFreshScopedAndDeduplicated(t *testing.T) {
 	if lib.database.Movie.GetX(t.Context(), other.ID).ScrapeStatus != movie.ScrapeStatusDone {
 		t.Fatal("rescrape modified a different movie")
 	}
-	if _, err := lib.RescrapeMovie(t.Context(), record.ID, "IPX-123"); !domain.IsKind(err, domain.KindConflict) {
+	if _, err := lib.RescrapeMovie(t.Context(), record.ID, "IPX-123", ""); !domain.IsKind(err, domain.KindConflict) {
 		t.Fatalf("correction while scraping: %v", err)
 	}
 }
@@ -99,7 +99,7 @@ func TestMovieRescrapeDoesNotBlockMountEnqueue(t *testing.T) {
 		defer cancel()
 		rescraped := make(chan error, 1)
 		go func() {
-			_, err := lib.RescrapeMovie(ctx, record.ID, "IPX-123")
+			_, err := lib.RescrapeMovie(ctx, record.ID, "IPX-123", "")
 			rescraped <- err
 		}()
 		// The mount owns the source lock; rescrape is now waiting for it.
@@ -152,7 +152,7 @@ func TestMovieRescrapeQueueWaitDoesNotHoldDatabaseWriter(t *testing.T) {
 		defer cancel()
 		finished := make(chan error, 1)
 		go func() {
-			_, err := lib.RescrapeMovie(ctx, record.ID, "IPX-123")
+			_, err := lib.RescrapeMovie(ctx, record.ID, "IPX-123", "")
 			finished <- err
 		}()
 		synctest.Wait()
@@ -190,7 +190,7 @@ func TestMovieCorrectionValidatesBeforeChangingIdentity(t *testing.T) {
 	lib, record, _ := movieActionFixture(t)
 	lib.database.Movie.Create().SetCode("IPX-123").ExecX(t.Context())
 	for _, code := range []string{"../movie", "https://example.com/ABP-123", "IPX-123"} {
-		if _, err := lib.RescrapeMovie(t.Context(), record.ID, code); err == nil {
+		if _, err := lib.RescrapeMovie(t.Context(), record.ID, code, ""); err == nil {
 			t.Fatalf("accepted invalid or duplicate code %q", code)
 		}
 	}
@@ -198,7 +198,7 @@ func TestMovieCorrectionValidatesBeforeChangingIdentity(t *testing.T) {
 	if got.Code != record.Code || got.ManualCode != "" || got.ScrapeStatus != movie.ScrapeStatusDone || domain.ValueOrZero(got.JavdbID) != "old-id" {
 		t.Fatalf("rejected correction changed movie: %+v", got)
 	}
-	if _, err := lib.RescrapeMovie(t.Context(), 999, ""); !domain.IsKind(err, domain.KindNotFound) {
+	if _, err := lib.RescrapeMovie(t.Context(), 999, "", ""); !domain.IsKind(err, domain.KindNotFound) {
 		t.Fatalf("accepted movie outside current source: %v", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestMovieCorrectionValidatesBeforeChangingIdentity(t *testing.T) {
 func TestManualCorrectionSurvivesRebuildAndStaleTaskFailure(t *testing.T) {
 	lib, record, source := movieActionFixture(t)
 	ctx := t.Context()
-	info, err := lib.RescrapeMovie(ctx, record.ID, "ipx123")
+	info, err := lib.RescrapeMovie(ctx, record.ID, "ipx123", "")
 	if err != nil {
 		t.Fatal(err)
 	}

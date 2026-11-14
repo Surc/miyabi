@@ -24,13 +24,14 @@ import (
 
 // MetadataPayload describes the input for a movie scrape job.
 type MetadataPayload struct {
-	Rebuild    bool                 `json:"rebuild,omitempty"`
-	Source     domain.LibrarySource `json:"source"`
-	ScanTaskID int                  `json:"scan_task_id"`
-	MovieID    int                  `json:"movie_id"`
-	Code       string               `json:"code"`
-	JavDBID    string               `json:"javdb_id,omitempty"`
-	ManualCode string               `json:"manual_code,omitempty"`
+	Rebuild         bool                 `json:"rebuild,omitempty"`
+	Source          domain.LibrarySource `json:"source"`
+	ScanTaskID      int                  `json:"scan_task_id"`
+	MovieID         int                  `json:"movie_id"`
+	Code            string               `json:"code"`
+	JavDBID         string               `json:"javdb_id,omitempty"`
+	SelectedJavDBID string               `json:"selected_javdb_id,omitempty"`
+	ManualCode      string               `json:"manual_code,omitempty"`
 }
 
 // Payload holds the checkpoints of one movie scraping workflow.
@@ -170,7 +171,8 @@ func (service *Service) Scrape(ctx context.Context, job tasks.Job) error {
 	if input.Completed {
 		return nil
 	}
-	if service.beginAttempt != nil {
+	// An explicit JavDB entry uses its own metadata and artwork.
+	if service.beginAttempt != nil && input.SelectedJavDBID == "" {
 		// Old checkpoints have no evidence tying their candidates to a configuration.
 		// Never combine those candidates with the current bridge settings.
 		if input.MetadataReady && input.AttemptID == "" {
@@ -243,7 +245,9 @@ func (service *Service) prepareMetadata(ctx context.Context, sess drive.Session,
 		if err := service.resolveMetadata(ctx, input); err != nil {
 			return err
 		}
-		preserveExtensionMetadata(&input.Document, record.Metadata)
+		if input.SelectedJavDBID == "" || input.SelectedJavDBID == domain.ValueOrZero(record.JavdbID) {
+			preserveExtensionMetadata(&input.Document, record.Metadata)
+		}
 	}
 	input.Code = codeid.Normalize(input.Document.Code)
 	input.Document.Code = input.Code
@@ -410,9 +414,18 @@ func (service *Service) pruneDirCache(now time.Time) {
 }
 
 func (service *Service) resolveMetadata(ctx context.Context, input *Payload) error {
-	result, err := service.metadata.Resolve(ctx, domain.MovieRef{Code: input.Code, JavDBID: input.JavDBID, Refresh: input.Rebuild})
+	ref := domain.MovieRef{Code: input.Code, JavDBID: input.JavDBID, Refresh: input.Rebuild}
+	resolve := service.metadata.Resolve
+	if input.SelectedJavDBID != "" {
+		ref.JavDBID = input.SelectedJavDBID
+		resolve = service.metadata.Fallback
+	}
+	result, err := resolve(ctx, ref)
 	if err != nil {
 		return err
+	}
+	if input.SelectedJavDBID != "" && (result.Detail.ID != input.SelectedJavDBID || !codeid.IsFormatEquivalent(result.Detail.Code, input.Code)) {
+		return domain.E(domain.KindConflict, "所选 JavDB 条目与当前影片番号不符", nil)
 	}
 	input.Document = DetailNFO(result.Detail)
 	input.Document.Images = result.Images
