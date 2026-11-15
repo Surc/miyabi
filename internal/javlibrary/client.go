@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"time"
@@ -166,7 +167,7 @@ func (c *Client) Comments(ctx context.Context, id string, page int) (domain.Movi
 		return result, err
 	}
 	query := sourceQuery(response.location)
-	if filmIDFromQuery(query) != id {
+	if path.Base(response.location.Path) != "videocomments.php" || filmIDFromQuery(query) != id {
 		return result, response.trace.wrap(failure("identity", "comments_redirect_changed_identity"))
 	}
 	// A canonical first-page URL may omit page. Later pages must not silently

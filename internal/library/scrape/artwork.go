@@ -23,7 +23,7 @@ func (service *Service) prepareArtwork(ctx context.Context, taskID int, input *P
 		if domain.IsKind(err, domain.KindConflict) {
 			return err
 		}
-		if (err != nil || !hasPreferredPosterSize(selected)) && ctx.Err() == nil && !slices.ContainsFunc(input.Document.Images, func(image domain.ImageCandidate) bool {
+		if input.SelectedJavDBID == "" && (err != nil || !hasPreferredPosterSize(selected)) && ctx.Err() == nil && !slices.ContainsFunc(input.Document.Images, func(image domain.ImageCandidate) bool {
 			return image.Provider == "javdb" && (image.Role == "cover" || image.Role == "poster")
 		}) {
 			fallback, fallbackErr := service.metadata.Fallback(ctx, domain.MovieRef{Code: input.Code, JavDBID: input.Document.JavDBID()})

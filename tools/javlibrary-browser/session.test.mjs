@@ -37,7 +37,7 @@ test('manual verification can navigate same-origin challenges while automatic pa
   rating.noResponse = true;
   const controller = new AbortController();
   const pending = session.fetch(initialPage, controller.signal);
-  rating.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'automatic', request: { url: 'https://www.javlibrary.com/cn/videocomments.php?v=film' } });
+  rating.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'automatic', request: { url: 'https://www.javlibrary.com/cn/videocomments.php?v=film&page=1001' } });
   assert.equal(rating.commands.at(-1).method, 'Fetch.failRequest');
   controller.abort();
   await assert.rejects(pending);
@@ -182,16 +182,29 @@ test('a canceled browser request stops its own navigation and releases the slot'
   assert.equal((await session.fetch(initialPage, AbortSignal.timeout(1000))).status, 200);
 });
 
-test('only JavLibrary rating pages are navigable, including main-frame redirects', async () => {
-  for (const target of ['http://www.javlibrary.com/cn/?v=film', 'https://user:secret@www.javlibrary.com/cn/?v=film', 'https://localhost/cn/?v=film', 'https://www.javlibrary.com/cn/videocomments.php?v=film', initialPage + '&keyword=other']) assert.equal(pageURL(target), false);
+test('only JavLibrary rating and comment pages are navigable, including main-frame redirects', async () => {
+  const comments = 'https://www.javlibrary.com/cn/videocomments.php?v=film';
+  for (const target of [
+    'http://www.javlibrary.com/cn/?v=film', 'https://user:secret@www.javlibrary.com/cn/?v=film',
+    'https://localhost/cn/?v=film', initialPage + '&keyword=other',
+    comments + '&page=0', comments + '&page=1001', comments + '&page=1&page=2',
+    comments + '&v=other', comments + '&action=delete',
+  ]) assert.equal(pageURL(target), false);
   assert.equal(pageURL('https://www.javlibrary.com/cn/?v=film'), true);
+  assert.equal(pageURL(comments), true);
   const cdp = new FakeCDP();
-  const session = new BrowserSession(async () => cdp);
-  await session.open(AbortSignal.timeout(1000));
+  const rating = new FakeCDP();
+  const session = new BrowserSession(async (signal, { background }) => background ? rating : cdp);
+  const signal = AbortSignal.timeout(1000);
+  await session.open(signal);
   cdp.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'blocked', request: { url: 'http://127.0.0.1/private' } });
   assert.equal(cdp.commands.at(-1).method, 'Fetch.failRequest');
   cdp.emit('Fetch.requestPaused', { frameId: 'challenge-iframe', requestId: 'allowed', request: { url: 'https://challenges.cloudflare.com/' } });
   assert.equal(cdp.commands.at(-1).method, 'Fetch.continueRequest');
+  await session.confirm(signal);
+  rating.page.html = '<div id="video_comments"></div>';
+  const target = comments + '&page=2';
+  assert.equal((await session.fetch(target, signal)).url, target);
 });
 
 test('CDP correlates replies and rejects pending work when the browser closes', async () => {

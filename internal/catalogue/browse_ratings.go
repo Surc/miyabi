@@ -48,10 +48,10 @@ func (s *BrowseExtension) Tags(ctx context.Context, zone domain.Zone, refresh bo
 func (s *BrowseExtension) RatingByCode(ctx context.Context, code string, refresh bool) (BrowseCached[domain.ExternalRating], error) {
 	code = codeid.Normalize(code)
 	return browseLoad(ctx, s, "ratings", browseRatingKey("javlibrary-code", code), time.Duration(s.Settings().RatingHours)*time.Hour, refresh, func(ctx context.Context) (domain.ExternalRating, bool, error) {
-		if s.ratings == nil {
+		if s.extras == nil {
 			return domain.ExternalRating{}, false, fmt.Errorf("rating source unavailable")
 		}
-		rating, err := s.ratings.JavLibraryRating(ctx, code)
+		rating, err := s.extras.JavLibraryRating(ctx, code)
 		return rating, true, err
 	})
 }

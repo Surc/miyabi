@@ -81,6 +81,7 @@ func TestBrowserRelayServesRatingsForTheConnectingComputer(t *testing.T) {
 	}
 	const ratingPath = "/api/extensions/movie/javlibrary-rating?code=ABP-123"
 	const browsePath = "/api/extensions/browse/ratings/javlibrary?code=FSDSS-437"
+	const commentsPath = "/api/extensions/browse/comments?source=javlibrary&code=FSDSS-437&page=2"
 	const relayPath = "/api/extensions/movie/javlibrary-browser"
 	const openPath = relayPath + "/open"
 	const confirmPath = relayPath + "/confirm"
@@ -201,7 +202,21 @@ func TestBrowserRelayServesRatingsForTheConnectingComputer(t *testing.T) {
 				return
 			}
 		}
-		replies <- nil
+		var job struct {
+			ID  uint64 `json:"id"`
+			URL string `json:"url"`
+		}
+		if err := conn.ReadJSON(&job); err != nil {
+			replies <- err
+			return
+		}
+		if job.URL != "https://www.javlibrary.com/cn/videocomments.php?page=2&v=javfixture" {
+			t.Errorf("unexpected comments request %q", job.URL)
+		}
+		replies <- conn.WriteJSON(map[string]any{
+			"id": job.ID, "url": job.URL, "status": 200,
+			"html": `<div id="video_comments"><table class="comment" id="comment2"><tr><td class="t">Second page</td></tr></table></div>`,
+		})
 	}()
 	for _, step := range []struct {
 		path   string
@@ -229,6 +244,13 @@ func TestBrowserRelayServesRatingsForTheConnectingComputer(t *testing.T) {
 	result = request(http.MethodGet, browsePath, "127.0.0.1:56789")
 	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &cached) != nil || !cached.Data.Found || cached.Data.Score == nil || *cached.Data.Score != 8.4 {
 		t.Fatalf("browse rating: %d %s", result.Code, result.Body)
+	}
+	for _, peer := range []string{"127.0.0.1:56789", "192.0.2.4:56789"} {
+		var page catalogue.BrowseCached[domain.MovieComments]
+		result = request(http.MethodGet, commentsPath, peer)
+		if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &page) != nil || page.Data.Page != 2 || len(page.Data.Items) != 1 || page.Data.Items[0].Content != "Second page" {
+			t.Fatalf("browser comments: %d %s", result.Code, result.Body)
+		}
 	}
 	if err := <-replies; err != nil {
 		t.Fatal(err)

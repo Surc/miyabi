@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/jpeg"
 	"net/http"
@@ -39,7 +40,8 @@ func (ambiguousABF027Catalogue) Search(context.Context, string, domain.SearchOpt
 
 type selectedABF027Catalogue struct {
 	ambiguousABF027Catalogue
-	t *testing.T
+	t          *testing.T
+	artworkErr error
 }
 
 func (s selectedABF027Catalogue) RefreshCatalogueDetail(_ context.Context, id string) (domain.MovieDetail, error) {
@@ -51,7 +53,10 @@ func (s selectedABF027Catalogue) RefreshCatalogueDetail(_ context.Context, id st
 	}}, nil
 }
 
-func (selectedABF027Catalogue) Media(context.Context, string) (domain.Media, error) {
+func (s *selectedABF027Catalogue) Media(context.Context, string) (domain.Media, error) {
+	if s.artworkErr != nil {
+		return domain.Media{}, s.artworkErr
+	}
 	var body bytes.Buffer
 	err := jpeg.Encode(&body, image.NewRGBA(image.Rect(0, 0, 320, 480)), nil)
 	return domain.Media{Body: body.Bytes(), ContentType: "image/jpeg"}, err
@@ -77,7 +82,9 @@ func TestRescrapePublishesTheSelectedSameNumberJavDBEntry(t *testing.T) {
 	client.info = func(context.Context, string, string) (pan.FileInfo, error) {
 		return pan.FileInfo{File: video.File, Path: path}, nil
 	}
-	native, err := metadata.New(ctx, lib.database, providers.NewJavDB(selectedABF027Catalogue{t: t}))
+	coverErr := errors.New("selected artwork unavailable")
+	selected := &selectedABF027Catalogue{t: t, artworkErr: coverErr}
+	native, err := metadata.New(ctx, lib.database, providers.NewJavDB(selected))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +117,30 @@ func TestRescrapePublishesTheSelectedSameNumberJavDBEntry(t *testing.T) {
 		t.Fatal("selection changed published metadata before export")
 	}
 	job := lib.database.Task.Query().Where(task.TypeEQ(tasks.KindScrape.String())).OnlyX(ctx)
+	if err := worker.Scrape(ctx, tasks.Job{ID: job.ID, Payload: job.Payload}); !errors.Is(err, coverErr) {
+		t.Fatalf("first attempt: %v", err)
+	}
+	if before := lib.database.Movie.GetX(ctx, record.ID); domain.ValueOrZero(before.JavdbID) != "45yav" || before.Title != "Old title" {
+		t.Fatal("failed artwork replaced published metadata")
+	}
+	job = lib.database.Task.GetX(ctx, job.ID)
+	checkpoint, err := tasks.DecodePayload[scrape.Payload](job.Payload)
+	if err != nil || !checkpoint.MetadataReady || checkpoint.SelectedJavDBID != "g0dk4G" || checkpoint.Document.JavDBID() != "g0dk4G" {
+		t.Fatalf("missing selected metadata checkpoint: %+v, %v", checkpoint, err)
+	}
+
+	selected.artworkErr = nil
+	owner := lib.database.Movie.Create().SetCode("IPX-002").SetJavdbID("g0dk4G").SaveX(ctx)
+	if err := worker.Scrape(ctx, tasks.Job{ID: job.ID, Payload: job.Payload}); !domain.IsKind(err, domain.KindConflict) {
+		t.Fatalf("claimed JavDB identity: %v", err)
+	}
+	exportDir := export.EmbyMovieDir(exportConfig.EmbyDir, record.Code)
+	if _, err := os.Stat(filepath.Join(exportDir, record.Code+".nfo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("export was written before checking identity: %v", err)
+	}
+	owner.Update().ClearJavdbID().ExecX(ctx)
+
+	job = lib.database.Task.GetX(ctx, job.ID)
 	if err := worker.Scrape(ctx, tasks.Job{ID: job.ID, Payload: job.Payload}); err != nil {
 		t.Fatal(err)
 	}

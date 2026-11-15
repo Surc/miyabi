@@ -17,12 +17,14 @@ export function MovieHero({
   movie,
   libraryStatus,
   extraBadges,
+  javdbRating,
   extraStats,
   actions
 }: {
   movie: DiscoverMovieDetail | LibraryMovieDetail
   libraryStatus?: LibraryMovieDetail['scrape_status']
   extraBadges?: ReactNode
+  javdbRating?: ReactNode
   extraStats?: ReactNode
   actions?: ReactNode
 }) {
@@ -57,7 +59,7 @@ export function MovieHero({
         </div>
 
         {actions}
-        <MovieStats movie={movie} extraStats={extraStats} />
+        <MovieStats movie={movie} javdbRating={javdbRating} extraStats={extraStats} />
 
         {!libraryStatus && 'release_status' in movie ? (
           <div className="flex flex-wrap gap-2">
@@ -73,12 +75,14 @@ export function MovieHero({
 
 function MovieStats({
   movie,
+  javdbRating,
   extraStats
 }: {
   movie: Pick<
     DiscoverMovie,
     'release_date' | 'duration' | 'rating' | 'rating_source' | 'rating_max'
   >
+  javdbRating?: ReactNode
   extraStats?: ReactNode
 }) {
   const stats: Array<{ label: string; value: string; icon: LucideIcon }> = []
@@ -88,7 +92,7 @@ function MovieStats({
   if (movie.duration > 0) {
     stats.push({ label: '片长', value: `${movie.duration} 分钟`, icon: ClockIcon })
   }
-  if (movie.rating > 0) {
+  if (movie.rating > 0 && !(javdbRating && movie.rating_source === 'javdb')) {
     const source = movie.rating_source === 'javdb' ? 'JavDB' : movie.rating_source?.toUpperCase()
     stats.push({
       label: source ? `${source} 评分` : '评分',
@@ -98,7 +102,7 @@ function MovieStats({
       icon: StarIcon
     })
   }
-  if (stats.length === 0 && !extraStats) return null
+  if (stats.length === 0 && !javdbRating && !extraStats) return null
 
   return (
     <dl className="flex divide-x divide-border/60 overflow-x-auto rounded-2xl bg-muted py-1 ring-1 ring-border dark:bg-card/60 dark:ring-0">
@@ -116,6 +120,7 @@ function MovieStats({
           </dd>
         </div>
       ))}
+      {javdbRating}
       {extraStats}
     </dl>
   )

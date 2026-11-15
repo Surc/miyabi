@@ -19,6 +19,7 @@ type BrowseExtensionManager interface {
 	Rating(context.Context, string, string, bool) (catalogue.BrowseCached[domain.ExternalRating], error)
 	RatingByCode(context.Context, string, bool) (catalogue.BrowseCached[domain.ExternalRating], error)
 	CachedRating(string, string) *catalogue.BrowseCached[domain.ExternalRating]
+	Comments(context.Context, string, string, string, int, bool) (catalogue.BrowseCached[domain.MovieComments], error)
 	Tags(context.Context, domain.Zone, bool) (catalogue.BrowseCached[[]domain.TagCategory], error)
 	Media(context.Context, string) (domain.Media, error)
 	PreviewImage(context.Context, domain.ImageCandidate, func(context.Context, domain.ImageCandidate) (domain.Media, error)) (domain.Media, error)
@@ -74,6 +75,21 @@ func registerBrowseExtension(protected *gin.RouterGroup, service BrowseExtension
 			return
 		}
 		result, err := service.RatingByCode(c.Request.Context(), code, refresh)
+		respond(c, result, err)
+	})
+	group.GET("/comments", func(c *gin.Context) {
+		q, ok := bindMovieCommentsQuery(c)
+		if !ok {
+			return
+		}
+		refresh, ok := browseRefresh(c)
+		if !ok {
+			return
+		}
+		if q.Source == "javlibrary" {
+			browserRating(c)
+		}
+		result, err := service.Comments(c.Request.Context(), q.Source, q.ID, q.Code, q.Page, refresh)
 		respond(c, result, err)
 	})
 	group.GET("/movies", func(c *gin.Context) {

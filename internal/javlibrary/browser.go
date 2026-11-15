@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,6 +226,10 @@ func browserPageURL(address *url.URL) bool {
 	}
 	if strings.HasPrefix(address.Path, "/cn/") && filmHTMLPath.MatchString(address.Path) {
 		return filmIDFromURL(address) != "" && (len(query) == 0 || (len(query) == 1 && len(query["v"]) == 1))
+	}
+	if address.Path == "/cn/videocomments.php" {
+		page, valid := commentPageFromQuery(query)
+		return filmIDFromQuery(query) != "" && valid && (len(query) == 1 || (len(query) == 2 && query.Get("page") == strconv.Itoa(page)))
 	}
 	if len(query) != 1 {
 		return false

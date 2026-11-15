@@ -15,6 +15,12 @@ export function pageURL(value) {
   const entries = [...url.searchParams];
   const film = /^\/cn\/(jav[A-Za-z0-9_-]{1,77})\.html$/.exec(url.pathname);
   if (film) return entries.length === 0 || (entries.length === 1 && entries[0][0] === 'v' && entries[0][1] === film[1]);
+  if (url.pathname === '/cn/videocomments.php') {
+    const ids = url.searchParams.getAll('v');
+    const pages = url.searchParams.getAll('page');
+    const validPage = pages.length === 0 || (pages.length === 1 && /^[1-9][0-9]{0,3}$/.test(pages[0]) && Number(pages[0]) <= 1000);
+    return ids.length === 1 && /^[A-Za-z0-9_-]{1,80}$/.test(ids[0]) && validPage && entries.length === ids.length + pages.length;
+  }
   if (entries.length !== 1) return false;
   const [key, item] = entries[0];
   if (url.pathname === '/cn/vl_searchbyid.php') return key === 'keyword' && item.length > 0 && item.length <= 200;
@@ -187,7 +193,7 @@ const snapshotExpression = `(() => {
   return {url:location.href, ready:document.readyState !== 'loading',
     oversized:html.length > ${maxHTML}, html:html.length <= ${maxHTML} ? html : '',
     challenge:html.includes('_cf_chl_opt') || !!document.querySelector('#challenge-form,#cf-challenge-running'),
-    template:!!document.querySelector('#video_id,.videos')};
+    template:!!document.querySelector('#video_id,.videos,#video_comments')};
 })()`;
 
 async function readPage(cdp, signal) {

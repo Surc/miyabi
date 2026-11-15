@@ -11,6 +11,8 @@ import (
 	"github.com/ppxb/miyabi/internal/javlibrary"
 )
 
+const commentCacheTTL = 2 * time.Minute
+
 type librarySocialReader interface {
 	Lookup(context.Context, string) (javlibrary.Film, error)
 	Comments(context.Context, string, int) (domain.MovieComments, error)
@@ -28,7 +30,7 @@ type MovieExtras struct {
 }
 
 func NewMovieExtras(service *Service) *MovieExtras {
-	return &MovieExtras{catalogue: service, library: javlibrary.New(service.proxy), films: newResponseCache[javlibrary.Film](256, 10*time.Minute), comments: newResponseCache[domain.MovieComments](512, 2*time.Minute)}
+	return &MovieExtras{catalogue: service, library: javlibrary.New(service.proxy), films: newResponseCache[javlibrary.Film](256, 10*time.Minute), comments: newResponseCache[domain.MovieComments](512, commentCacheTTL)}
 }
 func (e *MovieExtras) Close() {
 	e.library.Close()
@@ -38,7 +40,7 @@ func (e *MovieExtras) Close() {
 }
 func (e *MovieExtras) film(ctx context.Context, code string) (javlibrary.Film, error) {
 	code = codeid.Normalize(code)
-	return e.films.get(ctx, code, func(ctx context.Context) (javlibrary.Film, error) { return e.library.Lookup(ctx, code) })
+	return e.films.get(ctx, libraryCacheKey(ctx, code), func(ctx context.Context) (javlibrary.Film, error) { return e.library.Lookup(ctx, code) })
 }
 func (e *MovieExtras) JavLibraryRating(ctx context.Context, code string) (domain.ExternalRating, error) {
 	if e.rating != nil {
@@ -67,7 +69,7 @@ func (e *MovieExtras) MovieComments(ctx context.Context, source, id, code string
 			return empty, nil
 		}
 		key := fmt.Sprintf("javlibrary:%s:%d", film.ID, page)
-		result, err = e.comments.get(ctx, key, func(ctx context.Context) (domain.MovieComments, error) { return e.library.Comments(ctx, film.ID, page) })
+		result, err = e.comments.get(ctx, libraryCacheKey(ctx, key), func(ctx context.Context) (domain.MovieComments, error) { return e.library.Comments(ctx, film.ID, page) })
 	default:
 		return empty, domain.E(domain.KindInvalid, "不支持的评论来源", nil)
 	}

@@ -40,7 +40,7 @@ func (f *archiveSource) JavLibraryRating(ctx context.Context, code string) (doma
 	return f.browseFake.JavLibraryRating(ctx, code)
 }
 
-func TestBrowseArchiveRestoresMetadataImagesRatingsAndTaxonomyAfterRestart(t *testing.T) {
+func TestBrowseArchiveRestoresMetadataImagesRatingsCommentsAndTaxonomyAfterRestart(t *testing.T) {
 	f := &archiveSource{}
 	source, err := NewBrowseExtension(t.TempDir(), f, f)
 	if err != nil {
@@ -59,6 +59,10 @@ func TestBrowseArchiveRestoresMetadataImagesRatingsAndTaxonomyAfterRestart(t *te
 		t.Fatal(err)
 	}
 	rating, err := source.Rating(t.Context(), "javlibrary", "film", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, err := source.Comments(t.Context(), "javdb", "film", "", 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +117,11 @@ func TestBrowseArchiveRestoresMetadataImagesRatingsAndTaxonomyAfterRestart(t *te
 	if restarted.CachedRating("javlibrary", "film") == nil || restarted.CachedRating("javdb", "film") == nil {
 		t.Fatal("restored rating missing from cache-only lookup")
 	}
-	if f.details != 1 || f.magnets != 1 || f.images != 2 || f.ratings != 1 || f.tagCalls != 1 {
+	page, err := restarted.Comments(t.Context(), "javdb", "film", "", 2, false)
+	if err != nil || !page.UpdatedAt.Equal(comments.UpdatedAt) || page.Data.Page != 2 || len(page.Data.Items) != 1 {
+		t.Fatalf("comments=%+v err=%v", page, err)
+	}
+	if f.details != 1 || f.magnets != 1 || f.images != 2 || f.ratings != 1 || f.comments != 1 || f.tagCalls != 1 {
 		t.Fatalf("restored data contacted upstream: %+v", f)
 	}
 }

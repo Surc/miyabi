@@ -51,8 +51,9 @@ type browseExtensionSource interface {
 	BrowseResourceSnapshot(context.Context, domain.MovieDetail) ([]Magnet, bool, error)
 	Media(context.Context, string) (domain.Media, error)
 }
-type browseRatingReader interface {
+type browseExtrasReader interface {
 	JavLibraryRating(context.Context, string) (domain.ExternalRating, error)
+	MovieComments(context.Context, string, string, string, int) (domain.MovieComments, error)
 }
 type browseGenerationKey struct{}
 
@@ -67,7 +68,7 @@ func browseGeneration(ctx context.Context, current uint64) uint64 {
 // change the upstream catalogue interfaces, ratings, ranking or download picker.
 type BrowseExtension struct {
 	source     browseExtensionSource
-	ratings    browseRatingReader
+	extras     browseExtrasReader
 	store      *browseStore
 	loads      *responseCache[json.RawMessage]
 	settingsMu sync.RWMutex
@@ -75,12 +76,12 @@ type BrowseExtension struct {
 	now        func() time.Time
 }
 
-func NewBrowseExtension(directory string, source browseExtensionSource, ratings browseRatingReader) (*BrowseExtension, error) {
+func NewBrowseExtension(directory string, source browseExtensionSource, extras browseExtrasReader) (*BrowseExtension, error) {
 	store, err := newBrowseStore(directory)
 	if err != nil {
 		return nil, err
 	}
-	s := &BrowseExtension{source: source, ratings: ratings, store: store, loads: newResponseCache[json.RawMessage](256, time.Second), settings: DefaultBrowseCacheSettings(), now: time.Now}
+	s := &BrowseExtension{source: source, extras: extras, store: store, loads: newResponseCache[json.RawMessage](256, time.Second), settings: DefaultBrowseCacheSettings(), now: time.Now}
 	if r, ok, _ := store.read("config", "settings"); ok {
 		var settings BrowseCacheSettings
 		if json.Unmarshal(r.Data, &settings) == nil && settings.Valid() {

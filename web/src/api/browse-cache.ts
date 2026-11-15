@@ -146,7 +146,11 @@ export async function readCachedRating(
   return queued ? librarySlots.run(signal, refresh) : refresh()
 }
 
-export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
+export function useBrowseRating(
+  id: string,
+  source: 'javdb' | 'javlibrary',
+  refetchOnMount: true | 'always' = true
+) {
   const client = useQueryClient()
   const settings = useBrowseSettings()
   const key = [...browseKeys.all, 'rating', source, id]
@@ -189,6 +193,7 @@ export function useBrowseRating(id: string, source: 'javdb' | 'javlibrary') {
         source === 'javlibrary'
       ),
     staleTime: 60_000,
+    refetchOnMount,
     refetchInterval: Math.min((settings.data?.rating_hours ?? 12) * 3_600_000, 300_000),
     retry: false
   })

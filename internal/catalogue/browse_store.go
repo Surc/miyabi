@@ -28,7 +28,7 @@ type BrowseCacheStats struct {
 	Bytes  int64 `json:"bytes"`
 }
 
-var browseNamespaces = []string{"works", "references", "indexes", "resources", "ratings", "images", "taxonomy"}
+var browseNamespaces = []string{"works", "references", "indexes", "resources", "ratings", "comments", "images", "taxonomy"}
 
 func newBrowseStore(directory string) (*browseStore, error) {
 	s := &browseStore{directory: filepath.Join(directory, "extensions", "browse-v1")}

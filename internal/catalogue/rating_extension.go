@@ -21,11 +21,15 @@ type ratingExtension struct {
 	cache  *responseCache[domain.ExternalRating]
 }
 
-// NewMovieExtrasWithRating keeps the existing constructor and public API intact.
-// Ratings have a separate cache so a failed comment lookup cannot replace them.
 func NewMovieExtrasWithRating(service *Service, reader ExternalRatingReader) *MovieExtras {
 	extras := NewMovieExtras(service)
-	if reader != nil {
+	switch reader.(type) {
+	case *javlibrary.Client, *javlibrary.BrowserRelay:
+		// These readers derive their score from Lookup and can share it with comments.
+		extras.library.Close()
+		extras.library = reader.(librarySocialReader)
+	case nil:
+	default:
 		extras.rating = &ratingExtension{reader: reader, cache: newResponseCache[domain.ExternalRating](256, 10*time.Minute)}
 	}
 	return extras
@@ -33,11 +37,14 @@ func NewMovieExtrasWithRating(service *Service, reader ExternalRatingReader) *Mo
 
 func (r *ratingExtension) rating(ctx context.Context, code string) (domain.ExternalRating, error) {
 	code = codeid.Normalize(code)
-	key := code
-	if peer := javlibrary.BrowserPeer(ctx); peer != "" {
-		key = code + "@" + peer
-	}
-	return r.cache.get(ctx, key, func(ctx context.Context) (domain.ExternalRating, error) {
+	return r.cache.get(ctx, libraryCacheKey(ctx, code), func(ctx context.Context) (domain.ExternalRating, error) {
 		return r.reader.Rating(ctx, code)
 	})
+}
+
+func libraryCacheKey(ctx context.Context, key string) string {
+	if peer := javlibrary.BrowserPeer(ctx); peer != "" {
+		return key + "@" + peer
+	}
+	return key
 }

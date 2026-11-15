@@ -1,6 +1,12 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData
+} from '@tanstack/react-query'
 import { ApiError, apiGet, apiPost } from './client'
-import { readCachedRating } from './browse-cache'
+import { readCachedRating, type Cached } from './browse-cache'
 
 export type CommentSource = 'javdb' | 'javlibrary'
 export type ExternalRating = { source: string; found: boolean; score: number | null; max: number }
@@ -18,6 +24,7 @@ export type MovieCommentsPage = {
   page: number
   has_more: boolean
   items: MovieComment[]
+  refreshError?: Error
 }
 
 const retry = (count: number, error: Error) =>
@@ -50,23 +57,60 @@ export function requestJavLibraryVerification(action: 'open' | 'confirm') {
 }
 
 export function useMovieComments(source: CommentSource, javdbId: string, code: string) {
-  return useInfiniteQuery({
-    queryKey: ['movie-extras', 'comments', source, source === 'javdb' ? javdbId : code],
+  return useInfiniteQuery(movieCommentsOptions(source, javdbId, code))
+}
+
+export function movieCommentsOptions(source: CommentSource, javdbId: string, code: string) {
+  const normalized = code.trim().toUpperCase()
+  const identity = source === 'javdb' ? javdbId : normalized
+  const key = ['movie-extras', 'comments', source, identity] as const
+  const path = '/api/extensions/browse/comments'
+  return infiniteQueryOptions({
+    queryKey: key,
     initialPageParam: 1,
-    queryFn: ({ pageParam, signal }) =>
-      apiGet<MovieCommentsPage>(
-        '/api/extensions/movie/comments',
-        {
-          source,
-          javdb_id: source === 'javdb' ? javdbId : undefined,
-          code: source === 'javlibrary' ? code : undefined,
-          page: pageParam
-        },
-        signal
-      ),
-    enabled: source === 'javdb' ? !!javdbId : !!code.trim(),
+    queryFn: async ({ client, pageParam, signal }): Promise<MovieCommentsPage> => {
+      const params = {
+        source,
+        javdb_id: source === 'javdb' ? identity : undefined,
+        code: source === 'javlibrary' ? identity : undefined,
+        page: pageParam
+      }
+      const previous = await apiGet<Cached<MovieCommentsPage>>(path, params, signal)
+      if (!previous.stale) return previous.data
+
+      signal.throwIfAborted()
+      client.setQueryData<InfiniteData<MovieCommentsPage, number>>(key, current => {
+        const pages = [...(current?.pages ?? [])]
+        const pageParams = [...(current?.pageParams ?? [])]
+        const index = pageParams.indexOf(pageParam)
+        if (index === -1) {
+          pages.push(previous.data)
+          pageParams.push(pageParam)
+        } else {
+          pages[index] = previous.data
+        }
+        return { pages, pageParams }
+      })
+
+      try {
+        const refreshed = await apiGet<Cached<MovieCommentsPage>>(
+          path,
+          { ...params, refresh: 1 },
+          signal
+        )
+        if (!refreshed.stale) return refreshed.data
+        return { ...previous.data, refreshError: new Error('评论更新失败') }
+      } catch (error) {
+        signal.throwIfAborted()
+        return {
+          ...previous.data,
+          refreshError: error instanceof Error ? error : new Error('评论更新失败')
+        }
+      }
+    },
+    enabled: !!identity,
     getNextPageParam: page => (page.has_more && page.page < 1000 ? page.page + 1 : undefined),
-    staleTime: 2 * 60_000,
+    staleTime: query => (query.state.data?.pages.some(page => page.refreshError) ? 0 : 2 * 60_000),
     retry
   })
 }

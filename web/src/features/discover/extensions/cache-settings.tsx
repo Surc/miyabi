@@ -87,9 +87,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
   })
   async function reconcileCache(data: CacheStats) {
     const affected = (key: readonly unknown[]) =>
-      key[0] === browseKeys.all[0] ||
-      key[0] === discoverKeys.all[0] ||
-      (key[0] === 'movie-extras' && key[1] === 'javlibrary-rating')
+      key[0] === browseKeys.all[0] || key[0] === discoverKeys.all[0] || key[0] === 'movie-extras'
     await client.cancelQueries({ predicate: query => affected(query.queryKey) })
     client.removeQueries({
       predicate: query => affected(query.queryKey) && !query.getObserversCount()
@@ -163,7 +161,7 @@ function CacheSettingsForm({ initial, close }: { initial: BrowseSettings; close:
         </SettingRow>
       ))}
       <div className="space-y-1 border-t pt-3 text-sm text-muted-foreground">
-        <p>作品资料、演员、标签、评分和已浏览图片保存在服务端，可导出迁移。</p>
+        <p>作品资料、演员、标签、评分、评论和已浏览图片保存在服务端，可导出迁移。</p>
         <p>图片仅当前页加载；过期数据保留，后台更新。</p>
       </div>
       <p className="text-sm">
