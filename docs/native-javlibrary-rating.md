@@ -54,7 +54,7 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 飞牛原生配置可设置 `javlibraryBrowser: {serverURL, apiToken}`，由原生服务写入权限受限的 `javlibrary-browser.json`，并仅向 Miyabi 传递 `MIYABI_JAVLIBRARY_BROWSER_CONFIG`。单独运行时也可直接通过该环境变量指定连接文件。已经启用 Javinizer 时仍优先使用 Javinizer。
 
-本机控制页为 `http://127.0.0.1:18082/`。点击“打开验证浏览器”，在专用 Edge 看到影片列表或详情后，再点击“验证完成”。服务会检查专用 Edge 中的 JavLibrary 标签页。页面显示“验证已确认”后可以关闭专用 Edge。下次取分时，运行中的验证服务会用同一浏览器资料最小化重开 Edge。网站再次要求验证或验证服务重启时，请重新确认。LAN 取页接口仅绑定已配置的 PC 地址并校验指定 NAS 来源。
+本机控制页为 `http://127.0.0.1:18082/`。点击“打开验证浏览器”，在专用 Edge 看到影片列表或详情后，再点击“验证完成”。验证助手会检查可见标签页，并在同一个 Edge 会话中创建隐藏页面。显示“验证已确认”后可以关闭验证窗口，评分会通过隐藏页面读取。网站再次要求验证、专用 Edge 进程退出或验证服务重启时，需要重新打开验证窗口。LAN 取页接口仅绑定已配置的 PC 地址并校验指定 NAS 来源。
 
 ### 由验证服务主动连接 Miyabi
 
@@ -62,7 +62,7 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 在 PC 原有的验证服务配置中添加 `"miyabi_url": "http://NAS地址:Miyabi端口"`，沿用原来的 `api_token`、Edge 配置、代理和用户目录。验证服务通过 Miyabi 的网页端口主动连接并自动重连，本机操作页仍仅监听回环地址。
 
-更新 Miyabi 和 PC 上的验证服务后，在影片详情点 JavLibrary 评分旁的刷新按钮即可打开验证引导。验证服务已连接时，Miyabi 会通知它打开专用 Edge；完成验证后回到详情点「验证完成」，评分会自动刷新。验证服务需要继续运行，验证确认后可以关闭专用 Edge。
+在影片详情点 JavLibrary 评分旁的刷新按钮即可打开验证引导。验证服务已连接时，Miyabi 会通知它打开专用 Edge。完成验证后回到详情点「验证完成」，评分会自动刷新。关闭验证窗口后，验证助手和专用 Edge 的后台进程负责继续取分。
 
 在同一台电脑上通过同一个 NAS 地址直连打开 Miyabi。遇到评分缓存未命中时，Miyabi 根据评分请求和验证连接的来源 IP 匹配电脑。电脑局域网地址改变后，验证服务重连即可。经反向代理或 NAT 访问时，Miyabi 可能只看到代理或网关的 IP，此模式适用于来源地址可直接区分的连接。
 

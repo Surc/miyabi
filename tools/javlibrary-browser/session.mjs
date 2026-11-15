@@ -34,11 +34,10 @@ function browserPort(config) {
   return port;
 }
 
-export function browserArguments(config, { minimized = false } = {}) {
+export function browserArguments(config) {
   return [
     `--user-data-dir=${config.profile_dir}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${browserPort(config)}`,
-    '--no-first-run', '--no-default-browser-check', `--proxy-server=${config.proxy_url}`, '--new-window',
-    ...(minimized ? ['--start-minimized', 'about:blank'] : [initialPage]),
+    '--no-first-run', '--no-default-browser-check', `--proxy-server=${config.proxy_url}`, '--no-startup-window',
   ];
 }
 
@@ -94,64 +93,93 @@ export class CDP extends EventEmitter {
   close() { this.socket.close(); }
 }
 
-// A concrete loopback port avoids Chromium's port-0 automation mode. Reconnect
-// only to the browser endpoint recorded after launching our dedicated profile.
-export async function connectBrowser(config, signal, { minimized = false, verify = false } = {}) {
+async function hiddenPage(endpoint, signal) {
+  const owner = await CDP.connect(endpoint.href, signal);
+  try {
+    const { targetId } = await owner.send('Target.createTarget', { url: 'about:blank', hidden: true, background: true }, signal);
+    const page = await CDP.connect(new URL('/devtools/page/' + encodeURIComponent(targetId), endpoint).href, signal);
+    page.targetId = targetId;
+    // Chromium removes the hidden target when its owning socket closes.
+    page.once('disconnected', () => owner.close());
+    owner.once('disconnected', () => page.close());
+    return page;
+  } catch (error) {
+    owner.close();
+    throw error;
+  }
+}
+
+async function closeLegacyBrowser(endpoint, signal) {
+  const owner = await CDP.connect(endpoint.href, signal);
+  try {
+    await Promise.all([
+      once(owner, 'disconnected', { signal }),
+      owner.send('Browser.close', {}, signal).catch(error => {
+        if (error.code !== 'browser_closed') throw error;
+      }),
+    ]);
+  } finally {
+    owner.close();
+  }
+}
+
+// Only the manual open action may start Edge. The startup flag keeps the
+// dedicated process alive when the user closes its last visible window.
+export async function connectBrowser(config, signal, { background = false, verify = false, exclude } = {}) {
   await mkdir(config.profile_dir, { recursive: true, mode: 0o700 });
   const port = browserPort(config);
   const recordPath = join(config.profile_dir, 'MiyabiDevTools.json');
+  const base = `http://127.0.0.1:${port}`;
+  const getJSON = async (path, method = 'GET') => {
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(1000)]);
+    const response = await fetch(base + path, { method, signal: requestSignal });
+    if (!response.ok) throw new BrowserError('browser_unavailable', 503);
+    return response.json();
+  };
   const discover = async expectedPath => {
-    const base = `http://127.0.0.1:${port}`;
-    const getJSON = async (path, method = 'GET') => {
-      const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(1000)]);
-      return (await fetch(base + path, { method, signal: requestSignal })).json();
-    };
     const version = await getJSON('/json/version');
     const endpoint = new URL(version.webSocketDebuggerUrl);
     if (endpoint.protocol !== 'ws:' || endpoint.hostname !== '127.0.0.1' || endpoint.port !== String(port) || !/^\/devtools\/browser\/[A-Za-z0-9-]+$/.test(endpoint.pathname) || (expectedPath && endpoint.pathname !== expectedPath)) throw new Error('browser identity mismatch');
-    const pages = await getJSON('/json/list');
-    if (verify) {
-      const client = await verifiedTab(pages, port, signal);
-      return { client, browserPath: endpoint.pathname };
-    }
-    let page = pages.find(item => item.type === 'page' && (manualPageURL(item.url) || (minimized && item.url === 'about:blank')));
-    if (!page) {
-      const target = minimized ? 'about:blank' : initialPage;
-      page = await getJSON(`/json/new?${encodeURIComponent(target)}`, 'PUT');
-    }
-    return { client: await connectTab(page, port, signal), browserPath: endpoint.pathname };
+    return endpoint;
   };
+  let endpoint;
+  let record;
   try {
-    const record = JSON.parse(await readFile(recordPath, 'utf8'));
-    if (record.port !== port || typeof record.browserPath !== 'string' || !record.browserPath.startsWith('/devtools/browser/')) throw new Error('invalid browser record');
-    return (await discover(record.browserPath)).client;
+    record = JSON.parse(await readFile(recordPath, 'utf8'));
+    if (record.port === port && typeof record.browserPath === 'string' && record.browserPath.startsWith('/devtools/browser/')) endpoint = await discover(record.browserPath);
   } catch {
     signal.throwIfAborted();
-    if (verify) throw new BrowserError('verification_required', 409);
   }
-  await access(config.browser_path);
-  const probe = createServer();
-  await new Promise((resolve, reject) => {
-    probe.once('error', () => reject(new BrowserError('debug_port_in_use', 503)));
-    probe.listen(port, '127.0.0.1', () => probe.close(resolve));
-  });
-  signal.throwIfAborted();
-  const child = spawn(config.browser_path, browserArguments(config, { minimized }), { detached: true, stdio: 'ignore', windowsHide: false });
-  child.on('error', () => {});
-  child.unref();
-  while (!signal.aborted) {
-    let connection;
-    try {
-      connection = await discover();
-      await writeFile(recordPath, JSON.stringify({ port, browserPath: connection.browserPath }), { mode: 0o600 });
-      return connection.client;
-    } catch {
-      connection?.client.close();
-      signal.throwIfAborted();
+  if (!endpoint || record.keepAlive !== true) {
+    if (verify || background) throw new BrowserError('verification_required', 409);
+    if (endpoint) await closeLegacyBrowser(endpoint, signal);
+    await access(config.browser_path);
+    const probe = createServer();
+    await new Promise((resolve, reject) => {
+      probe.once('error', () => reject(new BrowserError('debug_port_in_use', 503)));
+      probe.listen(port, '127.0.0.1', () => probe.close(resolve));
+    });
+    signal.throwIfAborted();
+    const child = spawn(config.browser_path, browserArguments(config), { detached: true, stdio: 'ignore', windowsHide: false });
+    child.on('error', () => {});
+    child.unref();
+    for (;;) {
+      try { endpoint = await discover(); break; }
+      catch { await delay(200, undefined, { signal }); }
     }
-    await delay(200, undefined, { signal });
+    await writeFile(recordPath, JSON.stringify({ port, browserPath: endpoint.pathname, keepAlive: true }), { mode: 0o600 });
   }
-  throw new BrowserError('browser_unavailable', 503);
+  if (background) {
+    // Older engines may ignore unknown parameters and open a visible tab.
+    const protocol = await getJSON('/json/protocol');
+    const createTarget = protocol.domains?.find(domain => domain.domain === 'Target')?.commands?.find(command => command.name === 'createTarget');
+    if (!createTarget?.parameters?.some(parameter => parameter.name === 'hidden')) throw new BrowserError('hidden_page_unsupported', 503);
+    return hiddenPage(endpoint, signal);
+  }
+  const pages = (await getJSON('/json/list')).filter(page => exclude === undefined || page.id !== exclude);
+  if (verify) return verifiedTab(pages, port, signal);
+  const manual = pages.find(page => page.type === 'page' && manualPageURL(page.url));
+  return connectTab(manual ?? await getJSON(`/json/new?${encodeURIComponent(initialPage)}`, 'PUT'), port, signal);
 }
 
 const snapshotExpression = `(() => {
@@ -202,18 +230,20 @@ export class BrowserSession {
     this.connect = connect;
     this.pollMS = pollMS;
     this.cdp = null;
+    this.background = false;
     this.verified = false;
     this.busy = false;
     this.navigation = null;
   }
   status() {
     if (this.busy) return { state: 'loading' };
-    if (this.verified) return { state: this.cdp ? 'ready' : 'standby' };
+    if (this.verified) return { state: 'ready' };
     return { state: this.cdp ? 'verification_required' : 'closed' };
   }
 
   async open(signal) {
     if (this.busy) throw new BrowserError('busy', 503);
+    if (this.verified) return;
     this.busy = true;
     try {
       const cdp = await this.attach(signal);
@@ -223,13 +253,18 @@ export class BrowserSession {
     }
   }
 
-  async attach(signal, { minimized = false, verify = false } = {}) {
-    if (this.cdp && !verify) return this.cdp;
-    const cdp = await this.connect(signal, { minimized, verify });
+  async attach(signal, { background = false, verify = false } = {}) {
+    if (this.cdp && this.background === background && !verify) return this.cdp;
+    const cdp = await this.connect(signal, { background, verify, exclude: this.background ? this.cdp?.targetId : undefined });
     if (this.cdp === cdp) return cdp;
     this.cdp?.close();
     this.cdp = cdp;
-    cdp.on('disconnected', () => { if (this.cdp === cdp) this.cdp = null; });
+    this.background = background;
+    cdp.once('disconnected', () => {
+      if (this.cdp !== cdp) return;
+      this.cdp = null;
+      this.verified = false;
+    });
     try {
       await cdp.send('Page.enable', {}, signal);
       const tree = await cdp.send('Page.getFrameTree', {}, signal);
@@ -246,7 +281,7 @@ export class BrowserSession {
         this.navigation.url = event.response.url;
       });
       cdp.on('Fetch.requestPaused', event => {
-        const allowed = this.navigation ? pageURL(event.request.url) : manualPageURL(event.request.url);
+        const allowed = background ? pageURL(event.request.url) : manualPageURL(event.request.url);
         const blocked = event.frameId === frameID && !allowed;
         if (blocked && this.navigation) this.navigation.invalid = true;
         void cdp.send(blocked ? 'Fetch.failRequest' : 'Fetch.continueRequest', {
@@ -264,10 +299,11 @@ export class BrowserSession {
   }
   async confirm(signal) {
     if (this.busy) throw new BrowserError('busy', 503);
+    if (this.verified) return;
     this.busy = true;
     try {
       let page;
-      if (this.cdp) {
+      if (this.cdp && !this.background) {
         try { page = await readPage(this.cdp, signal); }
         catch { signal.throwIfAborted(); }
       }
@@ -275,6 +311,8 @@ export class BrowserSession {
         const cdp = await this.attach(signal, { verify: true });
         if (!isVerifiedPage(await readPage(cdp, signal))) throw new BrowserError('verification_required', 409);
       }
+      const background = await this.attach(signal, { background: true });
+      if (this.cdp !== background) throw new BrowserError('browser_unavailable', 503);
       this.verified = true;
     } catch (error) {
       if (error instanceof BrowserError && error.code === 'verification_required') this.verified = false;
@@ -287,9 +325,9 @@ export class BrowserSession {
     if (!pageURL(url)) throw new BrowserError('invalid_url', 400);
     if (!this.verified) throw new BrowserError('verification_required', 409);
     if (this.busy) throw new BrowserError('busy', 503);
+    const cdp = this.cdp;
     this.busy = true;
     try {
-      const cdp = await this.attach(signal, { minimized: true });
       this.navigation = { url: '', status: 0, redirects: [], invalid: false };
       const navigation = await cdp.send('Page.navigate', { url }, signal);
       if (navigation.errorText) throw new BrowserError('navigation_failed');

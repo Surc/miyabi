@@ -7,24 +7,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserError, BrowserSession, CDP, browserArguments, connectBrowser, initialPage, pageURL } from './session.mjs';
 
-test('manual browser launch uses a concrete loopback debugging port', () => {
+test('dedicated browser starts without a window on a concrete loopback debugging port', () => {
   const config = { profile_dir: 'dedicated-profile', browser_path: 'edge', proxy_url: 'http://127.0.0.1:7890', port: 18082 };
   const args = browserArguments(config);
   assert.ok(args.includes('--remote-debugging-address=127.0.0.1'));
   assert.ok(args.includes('--remote-debugging-port=18083'));
   assert.ok(args.includes('--user-data-dir=dedicated-profile'));
-  assert.equal(args.at(-1), initialPage);
-  const minimized = browserArguments(config, { minimized: true });
-  assert.ok(minimized.includes('--start-minimized'));
-  assert.ok(minimized.includes('--user-data-dir=dedicated-profile'));
-  assert.equal(minimized.at(-1), 'about:blank');
+  assert.ok(args.includes('--no-startup-window'));
+  assert.ok(!args.includes('--new-window'));
+  assert.ok(!args.includes(initialPage));
   for (const invalid of [0, 18082, 80, 65536, '18083']) assert.throws(() => browserArguments({ ...config, debug_port: invalid }));
   assert.ok(browserArguments({ ...config, debug_port: 19083 }).includes('--remote-debugging-port=19083'));
 });
 
 test('manual verification can navigate same-origin challenges while automatic page access stays strict', async () => {
   const cdp = new FakeCDP();
-  const session = new BrowserSession(async () => cdp);
+  const rating = new FakeCDP();
+  const session = new BrowserSession(async (signal, { background }) => background ? rating : cdp);
   const signal = AbortSignal.timeout(1000);
   await session.open(signal);
   for (const url of [initialPage + '&__cf_chl_tk=temporary', 'https://www.javlibrary.com/cdn-cgi/challenge-platform/verify']) {
@@ -35,12 +34,11 @@ test('manual verification can navigate same-origin challenges while automatic pa
   cdp.page.url = initialPage + '&__cf_chl_tk=temporary';
   await session.confirm(signal);
   assert.equal(session.status().state, 'ready');
-  cdp.noResponse = true;
+  rating.noResponse = true;
   const controller = new AbortController();
   const pending = session.fetch(initialPage, controller.signal);
-  await Promise.resolve();
-  cdp.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'automatic', request: { url: 'https://www.javlibrary.com/cn/videocomments.php?v=film' } });
-  assert.equal(cdp.commands.at(-1).method, 'Fetch.failRequest');
+  rating.emit('Fetch.requestPaused', { frameId: 'main', requestId: 'automatic', request: { url: 'https://www.javlibrary.com/cn/videocomments.php?v=film' } });
+  assert.equal(rating.commands.at(-1).method, 'Fetch.failRequest');
   controller.abort();
   await assert.rejects(pending);
 });
@@ -68,54 +66,46 @@ class FakeCDP extends EventEmitter {
   close() { this.emit('disconnected'); }
 }
 
-test('manual confirmation gates requests and a renewed challenge does not get navigated away', async () => {
-  const cdp = new FakeCDP();
-  let connections = 0;
-  const session = new BrowserSession(async () => { connections++; return cdp; });
+test('ratings use the hidden page after the visible window closes and stop when verification expires', async () => {
+  const connections = [];
+  const session = new BrowserSession(async (signal, options) => {
+    const cdp = new FakeCDP();
+    if (options.background) cdp.targetId = 'hidden';
+    connections.push({ ...options, cdp });
+    return cdp;
+  });
   const signal = AbortSignal.timeout(3000);
   await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
   await session.open(signal);
   await session.open(signal);
-  assert.equal(connections, 1);
+  assert.equal(connections.length, 1);
   assert.equal(session.status().state, 'verification_required');
   await session.confirm(signal);
-  assert.equal((await session.fetch(initialPage, signal)).status, 200);
-  cdp.page.challenge = true;
-  await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
-  const navigations = cdp.commands.filter(command => command.method === 'Page.navigate').length;
-  await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
-  assert.equal(cdp.commands.filter(command => command.method === 'Page.navigate').length, navigations);
-  cdp.page.challenge = false;
-  await session.confirm(signal);
-  assert.equal((await session.fetch(initialPage, signal)).status, 200);
-  cdp.close();
-  assert.equal(session.status().state, 'standby');
-});
-
-test('closing a verified browser lets the next rating request reopen it minimized', async () => {
-  const manual = new FakeCDP();
-  const reopened = new FakeCDP();
-  const launches = [];
-  const session = new BrowserSession(async (signal, options) => {
-    launches.push(options.minimized);
-    return options.minimized ? reopened : manual;
-  });
-  const signal = AbortSignal.timeout(1000);
-  await session.open(signal);
-  await session.confirm(signal);
+  const manual = connections[0].cdp;
+  const rating = connections[1].cdp;
   manual.close();
-  assert.equal(session.status().state, 'standby');
-  assert.deepEqual(launches, [false]);
-
+  assert.equal(session.status().state, 'ready');
+  await session.open(signal);
   assert.equal((await session.fetch(initialPage, signal)).status, 200);
-  assert.deepEqual(launches, [false, true]);
-  assert.equal(reopened.commands.some(command => command.method === 'Page.bringToFront'), false);
+  assert.deepEqual(connections.map(connection => connection.background), [false, true]);
+  assert.equal(manual.commands.some(command => command.method === 'Page.navigate'), false);
+  assert.equal(rating.commands.some(command => command.method === 'Page.bringToFront'), false);
 
-  reopened.page.challenge = true;
+  rating.page.challenge = true;
   await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
-  reopened.close();
+  const navigations = rating.commands.filter(command => command.method === 'Page.navigate').length;
   await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
-  assert.deepEqual(launches, [false, true]);
+  assert.equal(rating.commands.filter(command => command.method === 'Page.navigate').length, navigations);
+  assert.equal(connections.length, 2);
+  await session.open(signal);
+  assert.equal(connections[2].background, false);
+  assert.equal(connections[2].exclude, 'hidden');
+  assert.equal(connections[2].cdp.commands.at(-1).method, 'Page.bringToFront');
+  await session.confirm(signal);
+  assert.equal((await session.fetch(initialPage, signal)).status, 200);
+  connections[3].cdp.close();
+  await assert.rejects(session.fetch(initialPage, signal), { code: 'verification_required' });
+  assert.deepEqual(connections.map(connection => connection.background), [false, true, false, true]);
 });
 
 test('confirmation attaches to a valid film in another tab of the dedicated browser', async t => {
@@ -125,11 +115,16 @@ test('confirmation attaches to a valid film in another tab of the dedicated brow
   const filmURL = 'https://www.javlibrary.com/cn/javme4ivte.html';
   const browserPath = '/devtools/browser/dedicated';
   const checked = [];
+  let hiddenSupported = false;
+  let owner;
   const server = createServer((request, response) => {
     const origin = `ws://127.0.0.1:${server.address().port}`;
     response.setHeader('Content-Type', 'application/json');
     if (request.url === '/json/version') {
       response.end(JSON.stringify({ webSocketDebuggerUrl: origin + browserPath }));
+    } else if (request.url === '/json/protocol') {
+      const parameters = hiddenSupported ? [{ name: 'hidden' }] : [];
+      response.end(JSON.stringify({ domains: [{ domain: 'Target', commands: [{ name: 'createTarget', parameters }] }] }));
     } else {
       response.end(JSON.stringify([
         { type: 'page', url: initialPage, webSocketDebuggerUrl: origin + '/challenge' },
@@ -142,32 +137,43 @@ test('confirmation attaches to a valid film in another tab of the dedicated brow
   t.after(() => new Promise(resolve => server.close(resolve)));
   const debugPort = server.address().port;
   const config = { profile_dir: profile, port: debugPort === 18082 ? 18084 : 18082, debug_port: debugPort };
-  await writeFile(join(profile, 'MiyabiDevTools.json'), JSON.stringify({ port: config.debug_port, browserPath }));
+  await writeFile(join(profile, 'MiyabiDevTools.json'), JSON.stringify({ port: config.debug_port, browserPath, keepAlive: true }));
   t.mock.method(CDP, 'connect', async address => {
     const cdp = new FakeCDP();
     const path = new URL(address).pathname;
     checked.push(path);
     cdp.page.challenge = path === '/challenge';
     if (path === '/film') cdp.page.url = filmURL;
+    if (path === browserPath) {
+      owner = cdp;
+      t.mock.method(owner, 'send', async (method, params) => {
+        assert.equal(method, 'Target.createTarget');
+        assert.deepEqual(params, { url: 'about:blank', hidden: true, background: true });
+        return { targetId: 'hidden-rating' };
+      });
+    }
     return cdp;
   });
 
   const session = new BrowserSession((signal, options) => connectBrowser(config, signal, options));
   await session.open(signal);
+  await assert.rejects(session.confirm(signal), { code: 'hidden_page_unsupported' });
+  assert.equal(session.status().state, 'verification_required');
+  assert.equal(session.cdp.page.url, filmURL);
+  hiddenSupported = true;
   await session.confirm(signal);
   assert.equal(session.status().state, 'ready');
-  assert.equal(session.cdp.page.url, filmURL);
-  assert.deepEqual(checked, ['/challenge', '/challenge', '/film']);
+  assert.deepEqual(checked, ['/challenge', '/challenge', '/film', browserPath, '/devtools/page/hidden-rating']);
 
-  session.cdp.close();
-  assert.equal(session.status().state, 'standby');
+  owner.close();
+  assert.equal(session.status().state, 'closed');
 });
 
 test('a canceled browser request stops its own navigation and releases the slot', async () => {
-  const cdp = new FakeCDP();
-  const session = new BrowserSession(async () => cdp, { pollMS: 1 });
+  const session = new BrowserSession(async () => new FakeCDP(), { pollMS: 1 });
   await session.open(AbortSignal.timeout(1000));
   await session.confirm(AbortSignal.timeout(1000));
+  const cdp = session.cdp;
   cdp.noResponse = true;
   await assert.rejects(session.fetch(initialPage, AbortSignal.timeout(10)));
   assert.equal(session.busy, false);
