@@ -54,22 +54,37 @@ func (c *Client) movieDetailFromWeb(ctx context.Context, movieID string, apiErr 
 	if err == nil {
 		return detail, nil
 	}
-	var response *HTTPError
-	if errors.As(err, &response) && response.StatusCode == http.StatusTooManyRequests {
-		delay := response.RetryAfter
-		if delay <= 0 {
-			delay = time.Second
-		}
-		c.deferRequests(delay)
+	if c.deferWebRateLimit(err) {
 		return domain.MovieDetail{}, err
 	}
 	return domain.MovieDetail{}, domain.E(domain.KindUpstream, domain.PublicMessage(apiErr), errors.Join(apiErr, err))
 }
 
+func (c *Client) deferWebRateLimit(err error) bool {
+	var response *HTTPError
+	if !errors.As(err, &response) || response.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	delay := response.RetryAfter
+	if delay <= 0 {
+		delay = time.Second
+	}
+	c.deferRequests(delay)
+	return true
+}
+
 func fetchWebMovie(ctx context.Context, client netx.FingerprintHTTPClient, movieID string) (domain.MovieDetail, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, webBaseURL+"/v/"+url.PathEscape(movieID), nil)
+	body, err := fetchWebMovieHTML(ctx, client, movieID)
 	if err != nil {
 		return domain.MovieDetail{}, err
+	}
+	return parseWebMovieDetail(body, movieID)
+}
+
+func fetchWebMovieHTML(ctx context.Context, client netx.FingerprintHTTPClient, movieID string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, webBaseURL+"/v/"+url.PathEscape(movieID), nil)
+	if err != nil {
+		return nil, err
 	}
 	request.Header.Set("user-agent", webUserAgent)
 	request.Header.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -78,12 +93,12 @@ func fetchWebMovie(ctx context.Context, client netx.FingerprintHTTPClient, movie
 	// This request carries no App API credentials, device fields or signature.
 	response, err := client.Do(request)
 	if err != nil {
-		return domain.MovieDetail{}, &networkError{err: err}
+		return nil, &networkError{err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.CopyN(io.Discard, response.Body, 4096)
-		return domain.MovieDetail{}, &HTTPError{
+		return nil, &HTTPError{
 			StatusCode: response.StatusCode,
 			RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now()),
 		}
@@ -91,31 +106,39 @@ func fetchWebMovie(ctx context.Context, client netx.FingerprintHTTPClient, movie
 	if contentType := response.Header.Get("Content-Type"); contentType != "" {
 		mediaType, _, err := mime.ParseMediaType(contentType)
 		if err != nil || (mediaType != "text/html" && mediaType != "application/xhtml+xml") {
-			return domain.MovieDetail{}, errors.New("JavDB web detail did not return HTML")
+			return nil, errors.New("JavDB web detail did not return HTML")
 		}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBodyBytes+1))
 	if err != nil {
-		return domain.MovieDetail{}, &networkError{err: fmt.Errorf("read JavDB web response: %w", err)}
+		return nil, &networkError{err: fmt.Errorf("read JavDB web response: %w", err)}
 	}
 	if len(body) > maxResponseBodyBytes {
-		return domain.MovieDetail{}, errors.New("JavDB web response exceeded the size limit")
+		return nil, errors.New("JavDB web response exceeded the size limit")
 	}
-	return parseWebMovieDetail(body, movieID)
+	return body, nil
 }
 
-func parseWebMovieDetail(raw []byte, movieID string) (domain.MovieDetail, error) {
+func parseWebMovieDocument(raw []byte, movieID string) (*html.Node, error) {
 	document, err := html.Parse(bytes.NewReader(raw))
 	if err != nil {
-		return domain.MovieDetail{}, err
+		return nil, err
 	}
 	for n := range document.Descendants() {
 		if n.DataAtom == atom.Link && strings.EqualFold(htmlAttr(n, "rel"), "canonical") {
 			if webEntityID(htmlAttr(n, "href"), "/v/") != movieID {
-				return domain.MovieDetail{}, errors.New("JavDB web detail has a different canonical movie ID")
+				return nil, errors.New("JavDB web detail has a different canonical movie ID")
 			}
 			break
 		}
+	}
+	return document, nil
+}
+
+func parseWebMovieDetail(raw []byte, movieID string) (domain.MovieDetail, error) {
+	document, err := parseWebMovieDocument(raw, movieID)
+	if err != nil {
+		return domain.MovieDetail{}, err
 	}
 	page := htmlFind(document, atom.Div, "video-detail")
 	panel := htmlFind(page, atom.Nav, "movie-panel-info")

@@ -88,6 +88,7 @@ func resolveED2KCompletion(ctx context.Context, sess drive.Session, remote pan.O
 	if !info.IsDirectory {
 		return remote, nil
 	}
+	remoteLink, _ := domain.ParseED2K(remote.URL)
 	remote.FileID = ""
 	rootID := sess.Source().Directory.ID
 	err = drive.WalkFilePages(ctx, func(offset int) (pan.FilePage, error) {
@@ -97,7 +98,9 @@ func resolveED2KCompletion(ctx context.Context, sess drive.Session, remote pan.O
 			return false, domain.E(domain.KindNotFound, "下载目录已移出媒体目录", nil)
 		}
 		for _, entry := range page.Files {
-			if entry.ID == "" || entry.IsDirectory || entry.Size != link.Size || !strings.EqualFold(entry.Name, link.Name) {
+			nameMatches := strings.EqualFold(entry.Name, link.Name) ||
+				(remoteLink.ID == link.ID && strings.EqualFold(entry.Name, remoteLink.Name))
+			if entry.ID == "" || entry.IsDirectory || entry.Size != link.Size || !nameMatches {
 				continue
 			}
 			if remote.FileID != "" {

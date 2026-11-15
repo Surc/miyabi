@@ -10,12 +10,19 @@ import (
 )
 
 type ED2KResource struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
-	URI       string `json:"uri"`
-	CreatedAt string `json:"created_at"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Size      int64    `json:"size"`
+	URI       string   `json:"uri"`
+	CreatedAt string   `json:"created_at"`
+	Source    string   `json:"source,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
+
+const (
+	ED2KSourceJavDB         = "javdb"
+	ED2KSourceJavDBComments = "javdb_comments"
+)
 
 type ED2KPage struct {
 	Items   []ED2KResource `json:"items"`

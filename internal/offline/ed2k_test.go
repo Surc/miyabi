@@ -22,8 +22,10 @@ func TestED2KSubmissionRecoversByLinkAndCancelsByRemoteHash(t *testing.T) {
 		id      = "ed2k:" + hash + ":1234"
 		uri     = "ed2k://|file|ABP-123.mp4|1234|" + hash + "|/"
 	)
+	webLink, _ := domain.ParseED2K("ed2k://|file|ABP-123.mp4%20LTX|1234|" + hash + "|/")
+	webLink.Source = domain.ED2KSourceJavDB
 	service.catalogue.(*stubCatalogue).ed2k = map[string][]domain.ED2KResource{
-		movieID: {{ID: id, URI: uri}},
+		movieID: {webLink},
 	}
 	adds := 0
 	var directoryID string
@@ -83,7 +85,8 @@ func TestED2KCompletionResolvesFileInReportedDirectory(t *testing.T) {
 	client := stubOf(t, service.drive)
 	client.offlineTasks = func(context.Context, string, int) (pan.OfflinePage, error) {
 		return pan.OfflinePage{PageCount: 1, Tasks: []pan.OfflineTask{
-			{Hash: record.InfoHash, Status: 2, FileID: source.Directory.ID, DirectoryID: source.Directory.ID},
+			{Hash: record.InfoHash, Status: 2, FileID: source.Directory.ID, DirectoryID: source.Directory.ID,
+				URL: "ed2k://|file|ABP-123%20HD.mp4|1234|1234567890abcdef1234567890abcdef|/"},
 		}}, nil
 	}
 	client.info = func(_ context.Context, _, id string) (pan.FileInfo, error) {
@@ -111,7 +114,7 @@ func TestED2KCompletionResolvesFileInReportedDirectory(t *testing.T) {
 	if waiting.Status != offlinedownload.StatusDone || !waiting.AwaitingLocation || waiting.ScanTaskID != 0 {
 		t.Fatalf("scanned the reported directory before the file was present: %+v", waiting)
 	}
-	files = append(files, pan.File{ID: "ed2k-video", Name: "ABP-123.mp4", Size: 1234})
+	files = append(files, pan.File{ID: "ed2k-video", Name: "ABP-123 HD.mp4", Size: 1234})
 	if err := service.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}

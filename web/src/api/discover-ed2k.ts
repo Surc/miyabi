@@ -8,6 +8,8 @@ type ED2KResource = {
   size: number
   uri: string
   created_at: string
+  source?: 'javdb' | 'javdb_comments'
+  tags?: string[]
 }
 
 type ED2KPage = {
