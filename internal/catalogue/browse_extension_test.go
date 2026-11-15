@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,13 +14,13 @@ import (
 )
 
 type browseFake struct {
-	pages, details, magnets, images, ratings int
-	partial, fail                            bool
-	started, release                         chan struct{}
-	detailStarted, detailRelease             chan struct{}
-	tags                                     []string
-	unrated                                  bool
-	listUnrated                              bool
+	pages, details, magnets, images, ratings, comments int
+	partial, fail                                      bool
+	started, release                                   chan struct{}
+	detailStarted, detailRelease                       chan struct{}
+	tags                                               []string
+	unrated                                            bool
+	listUnrated                                        bool
 }
 
 func (f *browseFake) Browse(ctx context.Context, options domain.BrowseOptions) ([]Movie, error) {
@@ -75,6 +76,17 @@ func (f *browseFake) JavLibraryRating(ctx context.Context, code string) (domain.
 	score := 8.1
 	return domain.ExternalRating{Source: "javlibrary", Score: &score, Max: 10, Found: true}, nil
 }
+
+func (f *browseFake) MovieComments(_ context.Context, source, id, code string, page int) (domain.MovieComments, error) {
+	f.comments++
+	if f.fail {
+		return domain.MovieComments{}, errors.New("offline")
+	}
+	return domain.MovieComments{
+		Source: source, Page: page, HasMore: page == 1,
+		Items: []domain.MovieComment{{ID: fmt.Sprint(f.comments), Content: source + ":" + id + code}},
+	}, nil
+}
 func newBrowseTest(t *testing.T, f *browseFake) (*BrowseExtension, string) {
 	t.Helper()
 	directory := t.TempDir()
@@ -83,6 +95,49 @@ func newBrowseTest(t *testing.T, f *browseFake) (*BrowseExtension, string) {
 		t.Fatal(err)
 	}
 	return s, directory
+}
+
+func TestBrowseCommentPagesPersistAndRefreshIndependently(t *testing.T) {
+	f := &browseFake{}
+	s, directory := newBrowseTest(t, f)
+	ctx := t.Context()
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	for _, fixture := range []struct {
+		source, id, code string
+		page             int
+	}{{"javdb", "ABP-123", "", 1}, {"javdb", "ABP-123", "", 2}, {"javlibrary", "", " abp-123 ", 1}} {
+		if _, err := s.Comments(ctx, fixture.source, fixture.id, fixture.code, fixture.page, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restarted, err := NewBrowseExtension(directory, f, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt := now
+	now = now.Add(commentCacheTTL)
+	restarted.now = func() time.Time { return now }
+	f.fail = true
+	stale, err := restarted.Comments(ctx, "javlibrary", "", "ABP-123", 1, false)
+	if err != nil || !stale.Stale || !stale.UpdatedAt.Equal(updatedAt) || len(stale.Data.Items) != 1 || stale.Data.Items[0].ID != "3" || f.comments != 3 {
+		t.Fatalf("cache read: %+v, %v, upstream calls=%d", stale, err, f.comments)
+	}
+	failed, err := restarted.Comments(ctx, "javlibrary", "", "ABP-123", 1, true)
+	if err != nil || !failed.RefreshFailed || !failed.UpdatedAt.Equal(updatedAt) || len(failed.Data.Items) != 1 || failed.Data.Items[0].ID != "3" || f.comments != 4 {
+		t.Fatalf("refresh failure: %+v, %v, upstream calls=%d", failed, err, f.comments)
+	}
+	f.fail = false
+	refreshed, err := restarted.Comments(ctx, "javlibrary", "", "ABP-123", 1, true)
+	if err != nil || refreshed.Stale || !refreshed.UpdatedAt.Equal(now) || len(refreshed.Data.Items) != 1 || refreshed.Data.Items[0].ID != "5" {
+		t.Fatalf("refreshed page: %+v, %v", refreshed, err)
+	}
+	for page, want := range []string{"1", "2"} {
+		cached, err := restarted.Comments(ctx, "javdb", "ABP-123", "", page+1, false)
+		if err != nil || !cached.UpdatedAt.Equal(updatedAt) || len(cached.Data.Items) != 1 || cached.Data.Items[0].ID != want || cached.Data.HasMore != (page == 0) || f.comments != 5 {
+			t.Fatalf("cached JavDB page %d: %+v, %v, upstream calls=%d", page+1, cached, err, f.comments)
+		}
+	}
 }
 func TestBrowseCachePersistsResourcesAndOnlyLoadsImagesOnDemand(t *testing.T) {
 	f := &browseFake{}

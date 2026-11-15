@@ -2,9 +2,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, test, vi } from 'vitest'
+import { browseKeys } from '@/api/browse-cache'
 import { ApiError } from '@/api/client'
 import { useJavLibraryRating, useMovieComments } from '@/api/movie-extras'
 import {
+  JavDBRating,
   JavLibraryRating,
   CommentList,
   MovieComments
@@ -18,10 +20,8 @@ vi.mock('@/api/movie-extras', () => ({
   useMovieComments: vi.fn()
 }))
 
-function renderWithQueries(node: ReactNode) {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>{node}</QueryClientProvider>
-  )
+function renderWithQueries(node: ReactNode, client = new QueryClient()) {
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -46,6 +46,7 @@ test.each([
     rating.mockReturnValue({ data: { source: 'javlibrary', found: true, max: 10, score: 8.5 } })
   }
   const movie = {
+    id: 'film',
     code: 'ABP-123',
     title: 'Saved film',
     cover: '',
@@ -57,15 +58,26 @@ test.each([
     actors: [],
     tags: []
   } as unknown as DiscoverMovieDetail
+  const client = new QueryClient()
+  client.setQueryData([...browseKeys.all, 'rating', 'javdb', movie.id], {
+    data: { source: 'javdb', found: true, score: 4.8, max: 5 },
+    stale: true,
+    updated_at: '2026-11-01T00:00:00Z'
+  })
   const html = renderWithQueries(
     <MovieHero
       movie={movie}
       libraryStatus="done"
+      javdbRating={<JavDBRating movie={movie} />}
       extraStats={<JavLibraryRating code={movie.code} />}
-    />
+    />,
+    client
   )
   expect(html).toContain(`${label} 评分`)
-  expect(html).toContain('4.2 / 5')
+  expect(html).toContain('4.8 / 5')
+  expect(html.match(/JavDB 评分/g)).toHaveLength(1)
+  if (source === 'fanza') expect(html).toContain('4.2 / 5')
+  else expect(html).not.toContain('4.2 / 5')
   expect(html).toContain('JavLibrary 评分')
   expect(html).toContain(unavailable ? '暂不可用' : '8.5 / 10')
   expect(movie.rating).toBe(4.2)
@@ -138,15 +150,20 @@ test.each([
   expect(html).not.toContain('href=')
   expect(html).toContain('aria-label="打开 JavLibrary 验证引导"')
 })
-test.each(['film', ''])('JavLibrary comments stay disabled for JavDB ID "%s"', javdbId => {
-  vi.mocked(useMovieComments).mockClear()
-  const html = renderToStaticMarkup(<MovieComments javdbId={javdbId} code="ABP-123" />)
-  expect(useMovieComments).toHaveBeenCalledTimes(1)
-  expect(useMovieComments).toHaveBeenCalledWith('javdb', javdbId, 'ABP-123')
-  expect(html).toContain('JavDB')
-  expect(html).not.toContain('JavLibrary')
-  if (!javdbId) expect(html).toContain('尚未关联 JavDB')
-})
+test.each([
+  ['film', 'javdb'],
+  ['', 'javlibrary']
+] as const)(
+  'comments initially load only the active source for JavDB ID "%s"',
+  (javdbId, source) => {
+    vi.mocked(useMovieComments).mockClear()
+    const html = renderToStaticMarkup(<MovieComments javdbId={javdbId} code="ABP-123" />)
+    expect(useMovieComments).toHaveBeenCalledTimes(1)
+    expect(useMovieComments).toHaveBeenCalledWith(source, javdbId, 'ABP-123')
+    expect(html).toContain('JavDB')
+    expect(html).toContain('JavLibrary')
+  }
+)
 test('comment pages deduplicate IDs, escape text and retain loaded comments after a next-page failure', () => {
   vi.mocked(useMovieComments).mockReturnValue({
     isPending: false,

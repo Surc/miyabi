@@ -82,6 +82,15 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 			if record.ManualCode != input.ManualCode {
 				return domain.E(domain.KindConflict, "影片番号已纠正，请使用新的刮削任务", nil)
 			}
+			if input.SelectedJavDBID != "" {
+				linked, err := service.db.Movie.Query().Where(movie.JavdbIDEQ(input.SelectedJavDBID), movie.IDNEQ(input.MovieID)).Exist(ctx)
+				if err != nil {
+					return err
+				}
+				if linked {
+					return domain.E(domain.KindConflict, "该 JavDB 条目已关联到媒体库中的另一部影片", nil)
+				}
+			}
 			// A scan may have reconciled the index while artwork was downloading.
 			// Check again under the source/export locks before creating any sidecars.
 			files, err := service.db.File.Query().Where(database.LibraryFiles(input.Source), file.MovieIDEQ(input.MovieID)).All(ctx)

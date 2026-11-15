@@ -119,6 +119,8 @@ func validateBrowseRecord(namespace string, data []byte) (browseRecord, error) {
 		value = &BrowseResources{}
 	case "ratings":
 		value = &domain.ExternalRating{}
+	case "comments":
+		value = &domain.MovieComments{}
 	case "images":
 		value = &domain.Media{}
 	case "taxonomy":
@@ -135,6 +137,8 @@ func validateBrowseRecord(namespace string, data []byte) (browseRecord, error) {
 		valid = value.Movie.ID != "" && value.Complete
 	case *domain.ExternalRating:
 		valid = value.Max > 0 && (value.Score == nil || (*value.Score >= 0 && *value.Score <= float64(value.Max)))
+	case *domain.MovieComments:
+		valid = (value.Source == "javdb" || value.Source == "javlibrary") && value.Page >= 1 && value.Page <= 1000 && value.Items != nil
 	case *domain.Media:
 		valid = strings.HasPrefix(value.ContentType, "image/") && len(value.Body) > 0
 	}

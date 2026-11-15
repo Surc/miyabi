@@ -140,7 +140,7 @@ func newService(database *ent.Client, primary JavDBClient, supplement JavBusSour
 		details:        newResponseCache[domain.MovieDetail](detailCacheSize, detailCacheTTL),
 		tags:           newResponseCache[[]domain.TagCategory](tagsCacheSize, tagsCacheTTL),
 		magnets:        newResponseCache[[]domain.Magnet](magnetsCacheSize, magnetsCacheTTL),
-		javdbComments:  newResponseCache[domain.MovieComments](512, 2*time.Minute),
+		javdbComments:  newResponseCache[domain.MovieComments](512, commentCacheTTL),
 		javdbED2K:      newResponseCache[[]domain.ED2KResource](64, 2*time.Minute),
 		local:          local,
 		lastSavedRoute: route,

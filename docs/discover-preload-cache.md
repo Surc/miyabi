@@ -34,6 +34,8 @@
 
 列表与详情的 JavLibrary 评分共用按规范化番号保存的持久缓存。评分先通过 `cached_only=1` 读取服务端缓存，缓存读取不占用上游请求队列；未命中或过期时再进入最多两个并发的更新队列。过期分数立即显示，刷新失败保留分数及原始更新时间并允许重试。旧的按影片 ID 保存的 JavLibrary 分数仍可在列表缓存读取中显示，新请求写入共用番号缓存。
 
+详情中的 JavDB 评分与发现卡片共用缓存。两站评论按来源、影片和页码保存，打开页签或翻页时先显示已有评论，再刷新过期页。评论随作品资料缓存导出、导入和清理。
+
 “设置 → 作品列表缓存”或列表右侧按钮可调整设置、查看占用、清理图片/资料/全部扩展缓存。设置为 NAS 服务端共享配置。旧“清理未使用图片缓存”接口保持原样。清理仅影响扩展目录，不删除媒体库、任务、订阅或网盘内容；写入采用临时文件加原子替换，代次沿嵌套请求传递，阻止清理前的旧请求恢复缓存。
 
 同一窗口提供“导出缓存”和“导入缓存”。ZIP 包含上述资料、演员与标签字段、评分、资源摘要、列表索引、标签分类和已缓存图片，保留原始更新时间；不包含服务端配置、登录信息或媒体库。导入最大 512 MB，解压总量最多 2 GB，单条最多 64 MB。只接受带版本标识的本应用缓存包，全部记录校验通过后才合并，已有且时间不早于导入记录的本地数据会保留。导入推进缓存代次，阻止之前的请求写回；成功后刷新当前浏览会话和评分查询。
@@ -53,6 +55,7 @@ GET    /api/extensions/browse/movies/:id/resources?refresh=0|1
 GET    /api/extensions/browse/movies/:id/ratings/javdb|javlibrary?refresh=0|1
 GET    /api/extensions/browse/movies/:id/ratings/javdb|javlibrary?cached_only=1
 GET    /api/extensions/browse/ratings/javlibrary?code=...&refresh=0|1&cached_only=0|1
+GET    /api/extensions/browse/comments?source=javdb|javlibrary&javdb_id=...|code=...&page=1&refresh=0|1
 GET    /api/extensions/browse/tags?zone=...&refresh=0|1
 GET    /api/extensions/browse/movies/:id/image
 GET    /api/extensions/browse/settings

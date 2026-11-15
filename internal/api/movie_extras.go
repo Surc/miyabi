@@ -35,21 +35,34 @@ func registerMovieExtras(protected *gin.RouterGroup, extras MovieExtrasManager, 
 		respond(c, rating, err)
 	})
 	group.GET("/comments", func(c *gin.Context) {
-		q, ok := bindQuery[struct {
-			Source string `form:"source" binding:"required,oneof=javdb javlibrary"`
-			ID     string `form:"javdb_id" binding:"max=200"`
-			Code   string `form:"code" binding:"max=200"`
-			Page   int    `form:"page,default=1" binding:"min=1,max=1000"`
-		}](c)
+		q, ok := bindMovieCommentsQuery(c)
 		if !ok {
 			return
 		}
-		code := codeid.Normalize(q.Code)
-		if (q.Source == "javdb" && q.ID == "") || (q.Source == "javlibrary" && code == "") {
-			respond(c, nil, domain.E(domain.KindInvalid, "缺少影片标识", nil))
-			return
+		if q.Source == "javlibrary" {
+			browserRating(c)
 		}
-		comments, err := extras.MovieComments(c.Request.Context(), q.Source, q.ID, code, q.Page)
+		comments, err := extras.MovieComments(c.Request.Context(), q.Source, q.ID, q.Code, q.Page)
 		respond(c, comments, err)
 	})
+}
+
+type movieCommentsQuery struct {
+	Source string `form:"source" binding:"required,oneof=javdb javlibrary"`
+	ID     string `form:"javdb_id" binding:"max=200"`
+	Code   string `form:"code" binding:"max=200"`
+	Page   int    `form:"page,default=1" binding:"min=1,max=1000"`
+}
+
+func bindMovieCommentsQuery(c *gin.Context) (movieCommentsQuery, bool) {
+	q, ok := bindQuery[movieCommentsQuery](c)
+	if !ok {
+		return q, false
+	}
+	q.Code = codeid.Normalize(q.Code)
+	if (q.Source == "javdb" && q.ID == "") || (q.Source == "javlibrary" && q.Code == "") {
+		respond(c, nil, domain.E(domain.KindInvalid, "缺少影片标识", nil))
+		return q, false
+	}
+	return q, true
 }

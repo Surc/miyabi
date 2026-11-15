@@ -8,7 +8,7 @@ import type { MovieDetailTarget } from './dialog-context'
 import { MovieHero } from './hero'
 import { MovieMagnets } from './magnets'
 import { MovieMediaPreviews } from './extensions/trailer'
-import { JavLibraryRating, MovieComments } from './extensions/social'
+import { JavDBRating, JavLibraryRating, MovieComments } from './extensions/social'
 import { MovieRecommendations } from './recommendations'
 import { MovieDetailSkeleton } from './skeleton'
 import { MovieEmbyPlayback } from './extensions/emby-playback'
@@ -48,6 +48,7 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
         movie={detail.data}
         libraryStatus={detail.data.scrape_status}
         extraBadges={<MovieTopRankings code={detail.data.code} />}
+        javdbRating={detail.data.id ? <JavDBRating movie={detail.data} /> : undefined}
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />
@@ -131,6 +132,7 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
       <MovieHero
         movie={detail.data}
         extraBadges={<MovieTopRankings code={detail.data.code} />}
+        javdbRating={<JavDBRating movie={detail.data} />}
         extraStats={<JavLibraryRating code={detail.data.code} />}
         actions={<MovieEmbyPlayback code={detail.data.code} />}
       />

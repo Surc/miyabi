@@ -41,6 +41,11 @@ func (s *browseAPIStub) Rating(_ context.Context, source, _ string, refresh bool
 	s.refresh = refresh
 	return catalogue.BrowseCached[domain.ExternalRating]{}, nil
 }
+func (s *browseAPIStub) Comments(_ context.Context, source, _, _ string, page int, refresh bool) (catalogue.BrowseCached[domain.MovieComments], error) {
+	s.calls++
+	s.refresh = refresh
+	return catalogue.BrowseCached[domain.MovieComments]{Data: domain.MovieComments{Source: source, Page: page, Items: []domain.MovieComment{}}}, nil
+}
 func (s *browseAPIStub) Image(context.Context, string) (domain.Media, error) {
 	s.calls++
 	return domain.Media{ContentType: "image/png", Body: []byte("image")}, nil
@@ -55,6 +60,10 @@ func TestBrowseExtensionRoutesPreserveValidationAndAuthentication(t *testing.T) 
 		{"search?q=ABP-123&page=3", 200}, {"search?q=", 400},
 		{"movies/film/resources?refresh=1", 200}, {"movies/film/resources?refresh=bad", 400},
 		{"movies/film/ratings/javlibrary", 200}, {"movies/film/ratings/evil", 400},
+		{"comments?source=javdb&javdb_id=film&page=2&refresh=1", 200},
+		{"comments?source=javlibrary&code=ABP-123", 200},
+		{"comments?source=javdb&code=ABP-123", 400},
+		{"comments?source=javlibrary&code=ABP-123&refresh=bad", 400},
 		{"movies/film/image", 200},
 	} {
 		t.Run(test.path, func(t *testing.T) {
@@ -85,7 +94,7 @@ func TestBrowseExtensionRoutesPreserveValidationAndAuthentication(t *testing.T) 
 	}
 	s := &browseAPIStub{}
 	router := NewRouter(Dependencies{Access: NewAccessGateService("password", "secret"), BrowseExtension: s})
-	for _, path := range []string{"movies", "movies/film/resources", "movies/film/image", "settings", "cache"} {
+	for _, path := range []string{"movies", "movies/film/resources", "movies/film/image", "settings", "cache", "comments?source=javdb&javdb_id=film"} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest("GET", "/api/extensions/browse/"+path, nil))
 		if w.Code != 401 || s.calls != 0 {
