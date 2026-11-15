@@ -6,6 +6,8 @@ import (
 	"errors"
 	"image"
 	_ "image/jpeg"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/metadata"
 	"github.com/ppxb/miyabi/internal/netx"
+	_ "golang.org/x/image/webp"
 )
 
 const fc2ProductPage = `<meta property="og:url" content="https://adult.contents.fc2.com/article/1234567/">
@@ -71,6 +74,75 @@ func TestFC2RejectsUnconfirmedProductsAndInvalidCodes(t *testing.T) {
 	}
 }
 
+const ppvDataBankProductPage = `<meta property="og:url" content="/article_search.php?id=1234567">
+<meta property="og:title" content="Backup title">
+<div class="article_title"><a>Archived title</a></div>
+<div class="thumb"><img src="/cover.webp"></div>
+<ul class="meta"><li>販売日：2025/2/5</li><li>再生時間：01:06:27</li><li>販売者：<a>Seller</a></li></ul>
+<ul class="sample_image_area">
+<li><a href="/preview.webp"><img src="/small.webp"></a></li>
+<li><a href="https://unrelated.example/preview.webp">Foreign image</a></li>
+</ul>`
+
+type fc2Transport func(*http.Request) (*http.Response, error)
+
+func (f fc2Transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestFC2UsesVerifiedArchiveWhenOfficialPageRequiresVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name, location, officialBody, archiveBody string
+		officialStatus, archiveStatus             int
+		wantProvider                              string
+		wantErr                                   error
+	}{
+		{name: "official", officialStatus: 200, officialBody: fc2ProductPage, wantProvider: "fc2"},
+		{name: "age verification", officialStatus: 303, location: "https://redirect.fc2.com/ekyc_auth/", archiveStatus: 200, archiveBody: ppvDataBankProductPage, wantProvider: "ppvdatabank"},
+		{name: "legacy login", officialStatus: 302, location: "/lk/services/id/login", archiveStatus: 200, archiveBody: ppvDataBankProductPage, wantProvider: "ppvdatabank"},
+		{name: "verification page", officialStatus: 200, officialBody: `<div class="error-ipblock__ekyc">Age verification</div>`, archiveStatus: 200, archiveBody: ppvDataBankProductPage, wantProvider: "ppvdatabank"},
+		{name: "archive miss", officialStatus: 303, location: "https://redirect.fc2.com/ekyc_auth/", archiveStatus: 404, wantErr: metadata.ErrFC2VerificationRequired},
+		{name: "wrong product", officialStatus: 303, location: "https://redirect.fc2.com/ekyc_auth/", archiveStatus: 200, archiveBody: strings.Replace(ppvDataBankProductPage, "id=1234567", "id=7654321", 1), wantErr: metadata.ErrFC2VerificationRequired},
+		{name: "official not found", officialStatus: 404, wantErr: metadata.ErrNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewFC2(nil)
+			defer s.Close()
+			s.http.Transport = fc2Transport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != fc2Base+"article/1234567/" {
+					t.Fatalf("unexpected official request: %s", r.URL)
+				}
+				header := make(http.Header)
+				if tc.location != "" {
+					header.Set("Location", tc.location)
+				}
+				return &http.Response{StatusCode: tc.officialStatus, Header: header, Body: io.NopCloser(strings.NewReader(tc.officialBody))}, nil
+			})
+			s.archive.http.Transport = fc2Transport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != ppvDataBankBase+"article/1234567/" || tc.archiveStatus == 0 {
+					t.Fatalf("unexpected archive request: %s", r.URL)
+				}
+				return &http.Response{StatusCode: tc.archiveStatus, Body: io.NopCloser(strings.NewReader(tc.archiveBody))}, nil
+			})
+			m, err := s.Fetch(t.Context(), domain.MovieRef{Code: "FC2-PPV-1234567", Refresh: true})
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) || m.Detail.Code != "" ||
+					(tc.wantErr == metadata.ErrFC2VerificationRequired && errors.Is(err, metadata.ErrNotFound)) {
+					t.Fatalf("incorrect verification or miss result: %+v %v", m, err)
+				}
+				return
+			}
+			if err != nil || len(m.Detail.Sources) != 1 || m.Detail.Sources[0] != (domain.SourceID{Provider: tc.wantProvider, ID: "1234567"}) {
+				t.Fatalf("incorrect product: %+v %v", m, err)
+			}
+			if tc.wantProvider == "ppvdatabank" &&
+				(m.Detail.Title != "Archived title" || m.Detail.ReleaseDate != "2025-02-05" || m.Detail.Duration != 66 ||
+					m.Detail.Maker == nil || m.Detail.Maker.Name != "Seller" || m.Detail.Cover != ppvDataBankBase+"cover.webp" ||
+					len(m.Images) != 2 || m.Images[1].URL != ppvDataBankBase+"preview.webp") {
+				t.Fatalf("missing archive fields: %+v", m)
+			}
+		})
+	}
+}
+
 func TestFC2Live(t *testing.T) {
 	codes := os.Getenv("MIYABI_TEST_FC2_CODES")
 	if codes == "" {
@@ -91,7 +163,8 @@ func TestFC2Live(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !codeid.IsFormatEquivalent(code, m.Detail.Code) || m.Detail.ID != "" || m.Detail.ReleaseDate == "" || len(m.Images) == 0 {
-				t.Fatal("missing identity or core metadata")
+				t.Fatalf("missing identity or core metadata: code=%q, release=%q, duration=%d, images=%d",
+					m.Detail.Code, m.Detail.ReleaseDate, m.Detail.Duration, len(m.Images))
 			}
 			t.Logf("%s: release %s, duration %d, previews %d", code, m.Detail.ReleaseDate, m.Detail.Duration, len(m.Detail.PreviewImages))
 			for _, candidate := range m.Images {

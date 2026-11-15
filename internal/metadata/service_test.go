@@ -124,6 +124,23 @@ func TestJavDBAmbiguityRequiresASelectionEvenWhenFANZAFails(t *testing.T) {
 	}
 }
 
+func TestFC2VerificationIsReportedWhenNoSourceCanConfirmTheNumber(t *testing.T) {
+	fc2 := &sourceStub{id: "fc2", fetch: func(context.Context, string) (domain.MovieMetadata, error) {
+		return domain.MovieMetadata{}, ErrFC2VerificationRequired
+	}}
+	catalogue := &sourceStub{id: "javdb", fetch: func(context.Context, string) (domain.MovieMetadata, error) {
+		return domain.MovieMetadata{}, ErrNotFound
+	}}
+	s := newTestService(t, fc2, catalogue)
+	_, err := s.Resolve(t.Context(), domain.MovieRef{Code: "FC2-PPV-1234567", Refresh: true})
+	if !errors.Is(err, ErrFC2VerificationRequired) || !strings.Contains(domain.PublicMessage(err), "FC2 官方要求年龄验证") {
+		t.Fatalf("verification failure was not reported: %v", err)
+	}
+	if _, retry := domain.RetryDelay(err); retry {
+		t.Fatalf("verification failure should not trigger automatic retries: %v", err)
+	}
+}
+
 func completeFixture(provider, code string) domain.MovieMetadata {
 	m := fixture(provider, code, provider+" title")
 	m.Detail.ReleaseDate, m.Detail.Duration = "2026-01-01", 120

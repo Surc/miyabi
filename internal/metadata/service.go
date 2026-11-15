@@ -24,6 +24,9 @@ var ErrNotFound = errors.New("metadata not found")
 // ErrAmbiguousJavDB indicates that an unlinked number matches multiple JavDB entries.
 var ErrAmbiguousJavDB = domain.E(domain.KindConflict, "JavDB 同番号对应多个影片", nil)
 
+// ErrFC2VerificationRequired identifies FC2 pages that require age verification.
+var ErrFC2VerificationRequired = domain.E(domain.KindUnauthorized, "FC2 官方要求完成年龄验证", nil)
+
 // Source returns confirmed identities, never the closest unverified search hit.
 type Source interface {
 	ID() string
@@ -194,6 +197,9 @@ func (s *Service) Resolve(ctx context.Context, ref domain.MovieRef) (domain.Movi
 		cause := errors.Join(failures...)
 		if errors.Is(cause, ErrAmbiguousJavDB) {
 			return domain.MovieMetadata{}, domain.E(domain.KindConflict, "JavDB 有多个同番号条目，请选择对应的 JavDB 条目后重新刮削", cause)
+		}
+		if errors.Is(cause, ErrFC2VerificationRequired) {
+			return domain.MovieMetadata{}, domain.E(domain.KindUpstream, "FC2 官方要求年龄验证，备用来源未能确认该影片", cause)
 		}
 		message := "刮削来源查询失败: " + strings.Join(failedSources, "、") + "，请检查网络和代理设置"
 		return domain.MovieMetadata{}, domain.E(domain.KindUpstream, message, cause)
