@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ApiError, apiGet } from './client'
+import { ApiError, apiGet, apiPost } from './client'
 import { readCachedRating } from './browse-cache'
 
 export type CommentSource = 'javdb' | 'javlibrary'
@@ -43,6 +43,10 @@ export function useJavLibraryRating(code: string) {
     refetchInterval: 300_000,
     retry: false
   })
+}
+
+export function requestJavLibraryVerification(action: 'open' | 'confirm') {
+  return apiPost<{ ok: true }>(`/api/extensions/movie/javlibrary-browser/${action}`)
 }
 
 export function useMovieComments(source: CommentSource, javdbId: string, code: string) {

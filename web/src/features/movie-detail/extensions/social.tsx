@@ -1,14 +1,38 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { RotateCwIcon, StarIcon } from 'lucide-react'
-import { ApiError } from '@/api/client'
-import { useJavLibraryRating, useMovieComments, type CommentSource } from '@/api/movie-extras'
+import { ApiError, describeApiError } from '@/api/client'
+import {
+  requestJavLibraryVerification,
+  useJavLibraryRating,
+  useMovieComments,
+  type CommentSource
+} from '@/api/movie-extras'
 import { InlineError } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export function JavLibraryRating({ code }: { code: string }) {
   const query = useJavLibraryRating(code)
   const { error, refetch, isError, isFetching } = query
+  const [guideOpen, setGuideOpen] = useState(false)
+  const verification = useMutation({
+    mutationFn: requestJavLibraryVerification,
+    onSuccess: (_, action) => {
+      if (action !== 'confirm') return
+      setGuideOpen(false)
+      void refetch()
+    }
+  })
   const verificationRequired =
     isError &&
     error instanceof ApiError &&
@@ -20,14 +44,13 @@ export function JavLibraryRating({ code }: { code: string }) {
     (error.code === 'JAVLIBRARY_BROWSER_DISCONNECTED' ||
       (!error.code && error.message === '当前电脑的 JavLibrary 验证服务尚未连接 Miyabi'))
   const needsBrowser = verificationRequired || browserDisconnected
-  const retryLabel = needsBrowser ? '打开 JavLibrary 验证页' : '重试评分'
 
   useEffect(() => {
-    if (!needsBrowser) return
+    if (!needsBrowser || guideOpen) return
     const retry = () => void refetch({ cancelRefetch: false })
     window.addEventListener('focus', retry)
     return () => window.removeEventListener('focus', retry)
-  }, [needsBrowser, refetch])
+  }, [needsBrowser, guideOpen, refetch])
 
   let value = '加载中…'
   if (!code.trim()) value = '缺少番号'
@@ -46,26 +69,66 @@ export function JavLibraryRating({ code }: { code: string }) {
       </dt>
       <dd className="flex items-center gap-1 text-sm font-semibold whitespace-nowrap tabular-nums sm:text-base">
         {value}
-        {needsBrowser ? (
-          <Button asChild size="icon-xs" variant="ghost">
-            <a
-              href="http://127.0.0.1:18082/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={retryLabel}
-              title={retryLabel}
-            >
-              <RotateCwIcon />
-            </a>
-          </Button>
+        {needsBrowser || guideOpen ? (
+          <Dialog
+            open={guideOpen}
+            onOpenChange={open => {
+              setGuideOpen(open)
+              if (open) verification.mutate('open')
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="打开 JavLibrary 验证引导"
+                title="打开 JavLibrary 验证引导"
+                disabled={verification.isPending}
+              >
+                <RotateCwIcon />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>JavLibrary 验证</DialogTitle>
+                <DialogDescription>
+                  请在专用 Edge 中完成验证，再回来点「验证完成」。确认成功后会自动刷新评分。
+                </DialogDescription>
+              </DialogHeader>
+              {verification.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {describeApiError(verification.error)}
+                </p>
+              ) : null}
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  disabled={verification.isPending}
+                  onClick={() => verification.mutate('open')}
+                >
+                  {verification.isPending && verification.variables === 'open'
+                    ? '正在打开专用 Edge…'
+                    : '打开专用 Edge'}
+                </Button>
+                <Button
+                  disabled={verification.isPending}
+                  onClick={() => verification.mutate('confirm')}
+                >
+                  {verification.isPending && verification.variables === 'confirm'
+                    ? '正在确认…'
+                    : '验证完成'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         ) : isError ? (
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label={retryLabel}
-            title={retryLabel}
+            aria-label="重试评分"
+            title="重试评分"
             disabled={isFetching}
-            onClick={() => void query.refetch()}
+            onClick={() => void refetch()}
           >
             <RotateCwIcon />
           </Button>
@@ -73,9 +136,7 @@ export function JavLibraryRating({ code }: { code: string }) {
       </dd>
       {needsBrowser ? (
         <dd className="max-w-44 text-center text-xs text-muted-foreground">
-          {browserDisconnected
-            ? '请先启动本机验证服务，再点刷新。'
-            : '点刷新打开验证页，确认后返回。'}
+          {browserDisconnected ? '请先启动本机验证服务，再点刷新。' : '点刷新打开验证引导。'}
         </dd>
       ) : null}
     </div>

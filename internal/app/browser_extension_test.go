@@ -82,46 +82,107 @@ func TestBrowserRelayServesRatingsForTheConnectingComputer(t *testing.T) {
 	const ratingPath = "/api/extensions/movie/javlibrary-rating?code=ABP-123"
 	const browsePath = "/api/extensions/browse/ratings/javlibrary?code=FSDSS-437"
 	const relayPath = "/api/extensions/movie/javlibrary-browser"
-	router := api.NewRouter(api.Dependencies{Access: api.NewAccessGateService("", ""), MovieExtras: extras, JavLibraryRelay: relay, BrowseExtension: browse})
+	const openPath = relayPath + "/open"
+	const confirmPath = relayPath + "/confirm"
+	gate := api.NewAccessGateService("test-password", "")
+	session, _, err := gate.GenerateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := &http.Cookie{Name: "miyabi_token", Value: session}
+	router := api.NewRouter(api.Dependencies{Access: gate, MovieExtras: extras, JavLibraryRelay: relay, BrowseExtension: browse})
 	server := httptest.NewServer(router)
 	defer server.Close()
-	request := func(path, remote string) *httptest.ResponseRecorder {
+	request := func(method, path, remote string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequest(method, path, nil)
 		req.RemoteAddr = remote
 		req.Header.Set("X-Forwarded-For", "127.0.0.1")
+		req.AddCookie(cookie)
 		result := httptest.NewRecorder()
 		router.ServeHTTP(result, req)
 		return result
 	}
-	if result := request(relayPath, "127.0.0.1:56789"); result.Code != http.StatusUnauthorized {
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, openPath, nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("verification without a Miyabi session: %d", unauthorized.Code)
+	}
+	foreign := httptest.NewRequest(http.MethodPost, openPath, nil)
+	foreign.AddCookie(cookie)
+	foreign.Header.Set("Origin", "https://external.example")
+	forbidden := httptest.NewRecorder()
+	router.ServeHTTP(forbidden, foreign)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin verification: %d", forbidden.Code)
+	}
+	if result := request(http.MethodGet, relayPath, "127.0.0.1:56789"); result.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated relay returned %d", result.Code)
 	}
-	if result := request(browsePath, "127.0.0.1:56789"); result.Code != http.StatusBadGateway || !strings.Contains(result.Body.String(), "尚未连接") {
+	if result := request(http.MethodGet, browsePath, "127.0.0.1:56789"); result.Code != http.StatusBadGateway || !strings.Contains(result.Body.String(), "尚未连接") {
 		t.Fatalf("offline browser: %d %s", result.Code, result.Body)
+	}
+	if result := request(http.MethodPost, openPath, "127.0.0.1:56789"); result.Code != http.StatusBadGateway || !strings.Contains(result.Body.String(), "JAVLIBRARY_BROWSER_DISCONNECTED") {
+		t.Fatalf("offline verification: %d %s", result.Code, result.Body)
 	}
 
 	// The API needs only the helper's token. Node's WebSocket client sends no Origin.
 	address := "ws" + strings.TrimPrefix(server.URL, "http") + relayPath
-	conn, _, err := websocket.DefaultDialer.DialContext(t.Context(), address, fhttp.Header{"Authorization": {"Bearer " + token}})
-	if err != nil {
-		t.Fatal(err)
+	connect := func(control bool) *websocket.Conn {
+		t.Helper()
+		header := fhttp.Header{"Authorization": {"Bearer " + token}}
+		if control {
+			header.Set("X-Miyabi-Browser-Control", "1")
+		}
+		conn, _, err := websocket.DefaultDialer.DialContext(t.Context(), address, header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		if deadline, ok := t.Deadline(); ok {
+			_ = conn.SetReadDeadline(deadline)
+			_ = conn.SetWriteDeadline(deadline)
+		}
+		// A heartbeat round-trip confirms registration before routing any action.
+		if err := conn.WriteJSON(struct{}{}); err != nil {
+			t.Fatal(err)
+		}
+		var heartbeat struct{}
+		if err := conn.ReadJSON(&heartbeat); err != nil {
+			t.Fatal(err)
+		}
+		return conn
 	}
+	legacy := connect(false)
+	if result := request(http.MethodPost, openPath, "127.0.0.1:56789"); result.Code != http.StatusConflict || !strings.Contains(result.Body.String(), "更新") {
+		t.Fatalf("legacy helper returned %d %s", result.Code, result.Body)
+	}
+	legacy.Close()
+	conn := connect(true)
 	defer conn.Close()
-	if deadline, ok := t.Deadline(); ok {
-		_ = conn.SetReadDeadline(deadline)
-		_ = conn.SetWriteDeadline(deadline)
-	}
-	// A heartbeat round-trip confirms registration before sending rating requests.
-	if err := conn.WriteJSON(struct{}{}); err != nil {
-		t.Fatal(err)
-	}
-	var heartbeat struct{}
-	if err := conn.ReadJSON(&heartbeat); err != nil {
-		t.Fatal(err)
+	if result := request(http.MethodPost, openPath, "192.0.2.4:56789"); result.Code != http.StatusBadGateway {
+		t.Fatalf("verification on the wrong computer: %d %s", result.Code, result.Body)
 	}
 	replies := make(chan error, 1)
 	go func() {
+		for _, control := range []struct{ action, failure string }{{"open", ""}, {"confirm", "verification_required"}, {"confirm", ""}} {
+			var job struct {
+				ID     uint64 `json:"id"`
+				Action string `json:"action"`
+				URL    string `json:"url"`
+			}
+			if err := conn.ReadJSON(&job); err != nil {
+				replies <- err
+				return
+			}
+			if job.Action != control.action || job.URL != "" {
+				t.Errorf("expected %s without a page URL, got %+v", control.action, job)
+			}
+			if err := conn.WriteJSON(map[string]any{"id": job.ID, "error": control.failure}); err != nil {
+				replies <- err
+				return
+			}
+		}
 		for _, code := range []string{"ABP-123", "FSDSS-437"} {
 			var job struct {
 				ID  uint64 `json:"id"`
@@ -142,17 +203,30 @@ func TestBrowserRelayServesRatingsForTheConnectingComputer(t *testing.T) {
 		}
 		replies <- nil
 	}()
+	for _, step := range []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{openPath, http.StatusOK, `"ok":true`},
+		{confirmPath, http.StatusConflict, "JAVLIBRARY_VERIFICATION_REQUIRED"},
+		{confirmPath, http.StatusOK, `"ok":true`},
+	} {
+		if result := request(http.MethodPost, step.path, "[::ffff:127.0.0.1]:56789"); result.Code != step.status || !strings.Contains(result.Body.String(), step.body) {
+			t.Fatalf("%s: %d %s", step.path, result.Code, result.Body)
+		}
+	}
 
 	var direct domain.ExternalRating
-	result := request(ratingPath, "[::ffff:127.0.0.1]:56789")
+	result := request(http.MethodGet, ratingPath, "[::ffff:127.0.0.1]:56789")
 	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &direct) != nil || !direct.Found || direct.Score == nil || *direct.Score != 8.4 {
 		t.Fatalf("browser rating: %d %s", result.Code, result.Body)
 	}
-	if result = request(ratingPath, "192.0.2.4:56789"); result.Code != http.StatusBadGateway {
+	if result = request(http.MethodGet, ratingPath, "192.0.2.4:56789"); result.Code != http.StatusBadGateway {
 		t.Fatalf("rating leaked across computers or trusted a spoofed header: %d %s", result.Code, result.Body)
 	}
 	var cached catalogue.BrowseCached[domain.ExternalRating]
-	result = request(browsePath, "127.0.0.1:56789")
+	result = request(http.MethodGet, browsePath, "127.0.0.1:56789")
 	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &cached) != nil || !cached.Data.Found || cached.Data.Score == nil || *cached.Data.Score != 8.4 {
 		t.Fatalf("browse rating: %d %s", result.Code, result.Body)
 	}

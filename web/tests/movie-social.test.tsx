@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { ApiError } from '@/api/client'
@@ -11,7 +12,18 @@ import {
 import { MovieHero } from '@/features/movie-detail/hero'
 import type { DiscoverMovieDetail } from '@/api/discover'
 
-vi.mock('@/api/movie-extras', () => ({ useJavLibraryRating: vi.fn(), useMovieComments: vi.fn() }))
+vi.mock('@/api/movie-extras', () => ({
+  requestJavLibraryVerification: vi.fn(),
+  useJavLibraryRating: vi.fn(),
+  useMovieComments: vi.fn()
+}))
+
+function renderWithQueries(node: ReactNode) {
+  return renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>{node}</QueryClientProvider>
+  )
+}
+
 beforeEach(() => {
   vi.mocked(useJavLibraryRating).mockReturnValue({ isPending: true } as ReturnType<
     typeof useJavLibraryRating
@@ -20,33 +32,42 @@ beforeEach(() => {
     typeof useMovieComments
   >)
 })
-test('JavLibrary is an independent ten-point rating beside saved FANZA data', () => {
-  vi.mocked(useJavLibraryRating).mockReturnValue({
-    data: { source: 'javlibrary', found: true, max: 10, score: 8.5 }
-  } as ReturnType<typeof useJavLibraryRating>)
+test.each([
+  { source: 'fanza', label: 'FANZA', unavailable: false },
+  { source: 'javdb', label: 'JavDB', unavailable: true }
+])('JavLibrary rating does not change the $label rating', ({ source, label, unavailable }) => {
+  const rating = vi.mocked(useJavLibraryRating, { partial: true })
+  if (unavailable) {
+    rating.mockReturnValue({
+      isError: true,
+      error: new ApiError('断开', 502, 'JAVLIBRARY_BROWSER_DISCONNECTED')
+    })
+  } else {
+    rating.mockReturnValue({ data: { source: 'javlibrary', found: true, max: 10, score: 8.5 } })
+  }
   const movie = {
     code: 'ABP-123',
     title: 'Saved film',
     cover: '',
     rating: 4.2,
     rating_max: 5,
-    rating_source: 'fanza',
+    rating_source: source,
     duration: 0,
     release_date: '',
     actors: [],
     tags: []
   } as unknown as DiscoverMovieDetail
-  const html = renderToStaticMarkup(
+  const html = renderWithQueries(
     <MovieHero
       movie={movie}
       libraryStatus="done"
       extraStats={<JavLibraryRating code={movie.code} />}
     />
   )
-  expect(html).toContain('FANZA 评分')
+  expect(html).toContain(`${label} 评分`)
   expect(html).toContain('4.2 / 5')
   expect(html).toContain('JavLibrary 评分')
-  expect(html).toContain('8.5 / 10')
+  expect(html).toContain(unavailable ? '暂不可用' : '8.5 / 10')
   expect(movie.rating).toBe(4.2)
 })
 
@@ -94,13 +115,13 @@ test.each([
   vi.mocked(useJavLibraryRating).mockReturnValue({
     data: { source: 'javlibrary', found, max: 10, score }
   } as ReturnType<typeof useJavLibraryRating>)
-  expect(renderToStaticMarkup(<JavLibraryRating code="ABP-123" />)).toContain(label)
+  expect(renderWithQueries(<JavLibraryRating code="ABP-123" />)).toContain(label)
 })
 test('rating errors remain retryable and distinct from unrated', () => {
   vi.mocked(useJavLibraryRating).mockReturnValue({ isError: true, isFetching: false } as ReturnType<
     typeof useJavLibraryRating
   >)
-  const html = renderToStaticMarkup(<JavLibraryRating code="ABP-123" />)
+  const html = renderWithQueries(<JavLibraryRating code="ABP-123" />)
   expect(html).toContain('暂不可用')
   expect(html).toContain('重试评分')
   expect(html).not.toContain('暂无评分')
@@ -110,12 +131,12 @@ test.each([
   [new ApiError('验证', 502, 'JAVLIBRARY_VERIFICATION_REQUIRED'), '需要验证'],
   [new ApiError('JavLibrary 需要在已连接的浏览器中完成人工验证', 502), '需要验证'],
   [new ApiError('断开', 502, 'JAVLIBRARY_BROWSER_DISCONNECTED'), '请先启动本机验证服务']
-])('rating recovery opens the local verification page for %s', (error, label) => {
+])('rating recovery offers an in-page verification guide for %s', (error, label) => {
   vi.mocked(useJavLibraryRating, { partial: true }).mockReturnValue({ isError: true, error })
-  const html = renderToStaticMarkup(<JavLibraryRating code="ABP-123" />)
+  const html = renderWithQueries(<JavLibraryRating code="ABP-123" />)
   expect(html).toContain(label)
-  expect(html).toContain('href="http://127.0.0.1:18082/" target="_blank" rel="noopener noreferrer"')
-  expect(html).toContain('aria-label="打开 JavLibrary 验证页"')
+  expect(html).not.toContain('href=')
+  expect(html).toContain('aria-label="打开 JavLibrary 验证引导"')
 })
 test.each(['film', ''])('JavLibrary comments stay disabled for JavDB ID "%s"', javdbId => {
   vi.mocked(useMovieComments).mockClear()

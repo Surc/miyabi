@@ -89,6 +89,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 	protected := api.Group("", authMiddleware(deps.Access))
 	registerTop(protected, deps.TopSettings)
+	registerJavLibraryVerification(protected, deps.JavLibraryRelay, browserRating)
 	registerMovieExtras(protected, deps.MovieExtras, browserRating)
 	registerBrowseExtension(protected, deps.BrowseExtension, browserRating)
 	registerEmbyPlayback(protected, deps.EmbyPlayback)

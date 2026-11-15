@@ -15,6 +15,7 @@ import (
 )
 
 var ErrBrowserDisconnected = failure("browser", "client_not_connected")
+var ErrBrowserControlUnsupported = failure("browser", "client_control_unsupported")
 
 type browserPeerKey struct{}
 
@@ -70,14 +71,14 @@ func (r *BrowserRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	server := websocket.Server{
 		Handshake: func(*websocket.Config, *http.Request) error { return nil },
 		Handler: func(conn *websocket.Conn) {
-			r.servePeer(ip, conn)
+			r.servePeer(ip, conn, req.Header.Get("X-Miyabi-Browser-Control") == "1")
 		},
 	}
 	server.ServeHTTP(w, req)
 }
 
-func (r *BrowserRelay) servePeer(ip string, conn *websocket.Conn) {
-	peer := &browserPeer{conn: conn, slot: make(chan struct{}, 1), done: make(chan struct{})}
+func (r *BrowserRelay) servePeer(ip string, conn *websocket.Conn, supportsControl bool) {
+	peer := &browserPeer{conn: conn, slot: make(chan struct{}, 1), done: make(chan struct{}), supportsControl: supportsControl}
 	conn.MaxPayloadBytes = 6*maxBody + 4096
 	r.mu.Lock()
 	if r.peers == nil {
@@ -113,19 +114,39 @@ func (r *BrowserRelay) Close() {
 	}
 }
 
-func (r *BrowserRelay) fetch(ctx context.Context, target string, timeout time.Duration) (browserPage, error) {
+func (r *BrowserRelay) peer(ctx context.Context) *browserPeer {
 	r.mu.Lock()
-	peer := r.peers[BrowserPeer(ctx)]
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	return r.peers[BrowserPeer(ctx)]
+}
+
+func (r *BrowserRelay) fetch(ctx context.Context, target string, timeout time.Duration) (browserPage, error) {
+	peer := r.peer(ctx)
 	if peer == nil {
 		return browserPage{}, ErrBrowserDisconnected
 	}
-	return peer.fetch(ctx, target, timeout)
+	return peer.call(ctx, "", target, timeout)
+}
+
+func (r *BrowserRelay) ControlVerification(ctx context.Context, action string) error {
+	peer := r.peer(ctx)
+	if peer == nil {
+		return ErrBrowserDisconnected
+	}
+	if !peer.supportsControl {
+		return ErrBrowserControlUnsupported
+	}
+	const timeout = 30 * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	_, err := peer.call(ctx, action, "", timeout)
+	return err
 }
 
 type relayRequest struct {
 	ID     uint64 `json:"id,omitempty"`
 	Cancel uint64 `json:"cancel,omitempty"`
+	Action string `json:"action,omitempty"`
 	browserPageRequest
 }
 
@@ -140,12 +161,13 @@ type browserCall struct {
 }
 
 type browserPeer struct {
-	conn    *websocket.Conn
-	slot    chan struct{}
-	done    chan struct{}
-	writeMu sync.Mutex
-	nextID  uint64
-	pending atomic.Pointer[browserCall]
+	conn            *websocket.Conn
+	slot            chan struct{}
+	done            chan struct{}
+	supportsControl bool
+	writeMu         sync.Mutex
+	nextID          uint64
+	pending         atomic.Pointer[browserCall]
 }
 
 func (p *browserPeer) close() {
@@ -193,7 +215,7 @@ func (p *browserPeer) write(message relayRequest) error {
 	return nil
 }
 
-func (p *browserPeer) fetch(ctx context.Context, target string, timeout time.Duration) (browserPage, error) {
+func (p *browserPeer) call(ctx context.Context, action, target string, timeout time.Duration) (browserPage, error) {
 	select {
 	case <-ctx.Done():
 		return browserPage{}, ctx.Err()
@@ -209,7 +231,8 @@ func (p *browserPeer) fetch(ctx context.Context, target string, timeout time.Dur
 	call := &browserCall{id: p.nextID, reply: make(chan browserPage, 1)}
 	p.pending.Store(call)
 	defer p.pending.Store(nil)
-	if err := p.write(relayRequest{ID: call.id, browserPageRequest: newBrowserPageRequest(ctx, target, timeout)}); err != nil {
+	request := relayRequest{ID: call.id, Action: action, browserPageRequest: newBrowserPageRequest(ctx, target, timeout)}
+	if err := p.write(request); err != nil {
 		return browserPage{}, err
 	}
 	select {

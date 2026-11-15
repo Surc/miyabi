@@ -60,7 +60,9 @@ go test -tags dev -race ./internal/javlibrary ./internal/catalogue ./internal/ap
 
 在飞牛的 `native-v1.json` 中将 `javlibraryBrowser` 配置为 `{ "connectBack": true, "apiToken": "原有的连接密钥" }`，重启应用。独立部署可在 `MIYABI_JAVLIBRARY_BROWSER_CONFIG` 指向的文件中使用 `{ "enabled": true, "connect_back": true, "api_token": "同一个连接密钥" }`。
 
-在 PC 原有的验证服务配置中添加 `"miyabi_url": "http://NAS地址:Miyabi端口"`，沿用原来的 `api_token`、Edge 配置、代理和用户目录。启动命令与本机验证页面照旧。验证服务通过 Miyabi 的网页端口主动连接并自动重连，本机操作页仅监听回环地址。
+在 PC 原有的验证服务配置中添加 `"miyabi_url": "http://NAS地址:Miyabi端口"`，沿用原来的 `api_token`、Edge 配置、代理和用户目录。验证服务通过 Miyabi 的网页端口主动连接并自动重连，本机操作页仍仅监听回环地址。
+
+更新 Miyabi 和 PC 上的验证服务后，在影片详情点 JavLibrary 评分旁的刷新按钮即可打开验证引导。验证服务已连接时，Miyabi 会通知它打开专用 Edge；完成验证后回到详情点「验证完成」，评分会自动刷新。验证服务需要继续运行，验证确认后可以关闭专用 Edge。
 
 在同一台电脑上通过同一个 NAS 地址直连打开 Miyabi。遇到评分缓存未命中时，Miyabi 根据评分请求和验证连接的来源 IP 匹配电脑。电脑局域网地址改变后，验证服务重连即可。经反向代理或 NAT 访问时，Miyabi 可能只看到代理或网关的 IP，此模式适用于来源地址可直接区分的连接。
 

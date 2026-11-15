@@ -20,7 +20,7 @@ export async function runRelay(url, token, session, signal, setConnected) {
 
 function connect(url, token, session, signal, setConnected) {
   return new Promise(resolve => {
-    const socket = new WebSocket(url, { headers: { Authorization: 'Bearer ' + token } });
+    const socket = new WebSocket(url, { headers: { Authorization: 'Bearer ' + token, 'X-Miyabi-Browser-Control': '1' } });
     let lastReceived = Date.now();
     let stopped = false;
     let active;
@@ -55,7 +55,7 @@ function connect(url, token, session, signal, setConnected) {
       if (!message || typeof message !== 'object') { stop(); return; }
       lastReceived = Date.now();
       setConnected(true);
-      const { id, cancel, url, timeout_ms } = message;
+      const { id, cancel, url, timeout_ms, action } = message;
       if (active && cancel === active.id) active.controller.abort();
       if (!id) return;
       if (!Number.isSafeInteger(id) || typeof url !== 'string' || !Number.isInteger(timeout_ms) || timeout_ms < 1 || timeout_ms > 60_000) {
@@ -69,7 +69,13 @@ function connect(url, token, session, signal, setConnected) {
       pending = pending.then(async () => {
         try {
           requestSignal.throwIfAborted();
-          send({ id, ...await session.fetch(url, requestSignal) });
+          if (action === undefined) {
+            send({ id, ...await session.fetch(url, requestSignal) });
+          } else {
+            if (url || (action !== 'open' && action !== 'confirm')) throw new BrowserError('invalid_request', 400);
+            await session[action](requestSignal);
+            send({ id });
+          }
         } catch (error) {
           if (!job.controller.signal.aborted) send({ id, error: error instanceof BrowserError ? error.code : 'browser_unavailable' });
         } finally {
