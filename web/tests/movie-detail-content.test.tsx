@@ -20,6 +20,7 @@ vi.mock('@/api/library', async importOriginal => ({
   useLibraryMovie: vi.fn()
 }))
 vi.mock('@/api/movie-extras', () => ({
+  requestJavLibraryVerification: vi.fn(),
   useJavLibraryRating: () => ({ isPending: true }),
   useMovieComments: () => ({ isPending: true })
 }))

@@ -7,7 +7,7 @@ import { SettingRow, SettingsSection } from './shared'
 
 const descriptions: Record<string, string> = {
   fanza: '优先提供官方高清封面、预览图，并补充影片资料',
-  fc2: 'FC2 商品资料、封面和预览图',
+  fc2: '优先查询 FC2 官方商品页，遇到验证时由 PPVDataBank 补查',
   heyzo: 'HEYZO 官方封面、公开预览原图及影片资料',
   pacopacomama: 'Pacopacomama 官方封面、公开预览原图及影片资料'
 }

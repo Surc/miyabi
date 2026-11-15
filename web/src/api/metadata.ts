@@ -7,7 +7,7 @@ const sourcesKey = ['settings', 'scraping'] as const
 
 export const sourceNames: Record<string, string> = {
   fanza: 'FANZA',
-  fc2: 'FC2 官方',
+  fc2: 'FC2',
   heyzo: 'HEYZO 官方',
   pacopacomama: 'Pacopacomama 官方'
 }
