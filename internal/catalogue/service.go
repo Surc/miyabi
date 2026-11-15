@@ -42,6 +42,7 @@ type Service struct {
 	tags          *responseCache[[]domain.TagCategory]
 	magnets       *responseCache[[]domain.Magnet]
 	javdbComments *responseCache[domain.MovieComments]
+	javdbED2K     *responseCache[[]domain.ED2KResource]
 
 	persistRouteMu   sync.Mutex
 	javdbSessionMu   sync.Mutex
@@ -140,6 +141,7 @@ func newService(database *ent.Client, primary JavDBClient, supplement JavBusSour
 		tags:           newResponseCache[[]domain.TagCategory](tagsCacheSize, tagsCacheTTL),
 		magnets:        newResponseCache[[]domain.Magnet](magnetsCacheSize, magnetsCacheTTL),
 		javdbComments:  newResponseCache[domain.MovieComments](512, 2*time.Minute),
+		javdbED2K:      newResponseCache[[]domain.ED2KResource](64, 2*time.Minute),
 		local:          local,
 		lastSavedRoute: route,
 	}

@@ -30,7 +30,11 @@ import { MovieMagnetsSkeleton } from './skeleton'
 import { sortMagnets, type MagnetOrder } from './extensions/magnet-dates'
 import { MagnetPublication, MagnetSort } from './extensions/magnet-publication'
 
-const sourceLabels: Record<string, string> = { javdb: 'JavDB', javbus: 'JavBus' }
+const sourceLabels: Record<string, string> = {
+  javdb: 'JavDB',
+  javbus: 'JavBus',
+  javdb_comments: 'JavDB 评论区'
+}
 
 const phaseLabels: Record<OfflineSubmission['phase'], string> = {
   available: '一键加入 115',
@@ -57,7 +61,12 @@ export function MovieMagnets({
   for (const page of ed2k.data?.pages ?? []) {
     for (const item of page.items) {
       if (!ed2kLinks.has(item.id)) {
-        ed2kLinks.set(item.id, { ...item, hash: item.id, page: page.page })
+        ed2kLinks.set(item.id, {
+          ...item,
+          hash: item.id,
+          page: page.page,
+          sources: [item.source ?? 'javdb_comments']
+        })
       }
     }
   }
@@ -118,7 +127,7 @@ export function MovieMagnets({
       ) : null}
       {ed2kLinks.size || ed2k.hasNextPage || ed2k.isError ? (
         <section className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-normal">ED2K · JavDB 评论区</h2>
+          <h2 className="text-xl font-semibold tracking-normal">ED2K</h2>
           {Array.from(ed2kLinks.values(), renderResource)}
           {ed2k.isError ? (
             <InlineError

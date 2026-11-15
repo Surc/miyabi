@@ -3,6 +3,7 @@ package offline
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/ppxb/miyabi/internal/codeid"
@@ -32,10 +33,21 @@ func (service *Service) AddED2K(ctx context.Context, movieID, resourceID string,
 	}
 	for _, resource := range resources.Items {
 		if resource.ID == resourceID {
-			return service.add(ctx, movieID, resource.ID, resource.URI)
+			return service.add(ctx, movieID, resource.ID, ed2kDownloadURI(resource))
 		}
 	}
 	return domain.OfflineSubmission{}, domain.E(domain.KindInvalid, "ED2K 资源已变化，请刷新后重试", nil)
+}
+
+func ed2kDownloadURI(resource domain.ED2KResource) string {
+	name, marked := strings.CutSuffix(resource.Name, " LTX")
+	if resource.Source != domain.ED2KSourceJavDB || !marked || !domain.IsVideo(name) {
+		return resource.URI
+	}
+	// JavDB can append its LTX label after the extension in the file link.
+	parts := strings.SplitN(resource.URI, "|", 4)
+	parts[2] = url.PathEscape(name)
+	return strings.Join(parts, "|")
 }
 
 func (service *Service) add(ctx context.Context, movieID, hash, ed2kURI string) (domain.OfflineSubmission, error) {
