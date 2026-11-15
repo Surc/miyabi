@@ -110,6 +110,8 @@ test('legacy external connections remain editable', () => {
     data: { ...defaults, managed: false, mode: 'external' }
   } as ReturnType<typeof useMDCzSettings>)
   const html = renderToStaticMarkup(<MDCzSection />)
+  expect(html).toContain('桥接服务地址')
+  expect(html).toContain('访问密钥')
   expect(html).not.toMatch(/readOnly=""/i)
   expect(html).not.toMatch(/type="password"[^>]*disabled=""/)
 })
@@ -120,6 +122,8 @@ test('bundled WebUI has a settings entry before enhanced scraping is enabled', (
   } as ReturnType<typeof useMDCzSettings>)
   const html = renderToStaticMarkup(<MDCzSection />)
   expect(html).toContain('打开 MDCz 配置')
+  expect(html).not.toContain('桥接服务地址')
+  expect(html).not.toContain('访问密钥')
   expect(html).not.toContain('advanced-configuration')
   expect(html).not.toContain('翻译标题与介绍')
 })

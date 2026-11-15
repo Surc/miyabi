@@ -104,40 +104,44 @@ export function MDCzSection() {
           <details open={current.enabled || editingLegacyConfig} className="rounded-md border p-3">
             <summary className="cursor-pointer text-sm font-medium">MDCz 增强设置</summary>
             <div className="mt-4 space-y-5">
-              <p className="text-xs leading-5 text-muted-foreground">
-                {current.managed
-                  ? 'MDCz 已由安装包管理，可提供影片介绍、翻译和封面角标。连接地址和密钥由安装配置维护。'
-                  : 'MDCz 增强需要桥接服务，可提供影片介绍、翻译和封面角标。'}
-              </p>
+              {webPort ? null : (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {current.managed
+                    ? 'MDCz 已由安装包管理，可提供影片介绍、翻译和封面角标。连接地址和密钥由安装配置维护。'
+                    : 'MDCz 增强需要桥接服务，可提供影片介绍、翻译和封面角标。'}
+                </p>
+              )}
               {current.status === 'unavailable' ? (
                 <p role="alert" className="text-sm text-destructive">
                   MDCz 扩展不可用。媒体库和原版模式仍可使用，请检查安装配置和扩展目录。
                 </p>
               ) : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="space-y-2 text-sm">
-                  <span>桥接服务地址</span>
-                  <Input
-                    type="url"
-                    autoComplete="off"
-                    placeholder="http://mdcz-bridge:3840"
-                    value={current.server_url}
-                    readOnly={current.managed}
-                    onChange={event => update({ server_url: event.target.value })}
-                  />
-                </label>
-                <label className="space-y-2 text-sm">
-                  <span>访问密钥</span>
-                  <Input
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder={current.has_api_key ? '已保存，留空保留' : '填写桥接服务密钥'}
-                    value={current.api_key ?? ''}
-                    disabled={current.managed}
-                    onChange={event => update({ api_key: event.target.value || undefined })}
-                  />
-                </label>
-              </div>
+              {webPort ? null : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-2 text-sm">
+                    <span>桥接服务地址</span>
+                    <Input
+                      type="url"
+                      autoComplete="off"
+                      placeholder="http://mdcz-bridge:3840"
+                      value={current.server_url}
+                      readOnly={current.managed}
+                      onChange={event => update({ server_url: event.target.value })}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span>访问密钥</span>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={current.has_api_key ? '已保存，留空保留' : '填写桥接服务密钥'}
+                      value={current.api_key ?? ''}
+                      disabled={current.managed}
+                      onChange={event => update({ api_key: event.target.value || undefined })}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-3">
                 <Button
                   type="button"
