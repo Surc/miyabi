@@ -87,9 +87,13 @@ func plain(n *html.Node) string {
 }
 
 type filmTarget struct {
-	id   string
-	html bool
+	id     string
+	html   bool
+	title  string
+	bluray bool
 }
+
+var blurayTitleSuffix = regexp.MustCompile(`(?i)\s*[（(](?:ブルーレイディスク|blu-ray(?: disc)?)[）)]\s*$`)
 
 func searchFilm(doc *html.Node, code string) (filmTarget, error) {
 	list := byClass(doc, "videos")
@@ -127,7 +131,17 @@ func searchFilm(doc *html.Node, code string) (filmTarget, error) {
 			invalid = failure("unexpected_page", "search_link_invalid")
 			return
 		}
-		ids[id] = filmTarget{id: id, html: ids[id].html || filmHTMLPath.MatchString(u.Path)}
+		target := ids[id]
+		target.id, target.html = id, target.html || filmHTMLPath.MatchString(u.Path)
+		title := plain(byClass(n, "title"))
+		if title == "" {
+			title = attr(n, "title")
+		}
+		if title != "" {
+			target.bluray = blurayTitleSuffix.MatchString(title)
+			target.title = strings.Join(strings.Fields(blurayTitleSuffix.ReplaceAllString(title, "")), " ")
+		}
+		ids[id] = target
 	})
 	if invalid != nil {
 		return filmTarget{}, invalid
@@ -138,7 +152,26 @@ func searchFilm(doc *html.Node, code string) (filmTarget, error) {
 		}
 	}
 	if len(ids) > 1 {
-		return filmTarget{}, failure("identity", "ambiguous_film")
+		ambiguous := failure("identity", "ambiguous_film")
+		var ordinary filmTarget
+		for _, target := range ids {
+			if target.bluray {
+				continue
+			}
+			if ordinary.id != "" {
+				return filmTarget{}, ambiguous
+			}
+			ordinary = target
+		}
+		if ordinary.title == "" {
+			return filmTarget{}, ambiguous
+		}
+		for _, target := range ids {
+			if target.title != ordinary.title {
+				return filmTarget{}, ambiguous
+			}
+		}
+		return ordinary, nil
 	}
 	for _, target := range ids {
 		return target, nil
@@ -165,7 +198,7 @@ func filmIDFromQuery(query url.Values) string {
 	return ids[0]
 }
 
-var filmHTMLPath = regexp.MustCompile(`^(?:/(?:cn|tw|en|ja)/)?(jav[A-Za-z0-9_-]{1,77})\.html$`)
+var filmHTMLPath = regexp.MustCompile(`^(?:/(?:cn|tw|en|ja)/|\./)?(jav[A-Za-z0-9_-]{1,77})\.html$`)
 
 // Canonical detail URLs now use /cn/<film ID>.html. A query must still decode
 // completely, and an explicit v must agree with the path's identity.

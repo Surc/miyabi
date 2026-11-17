@@ -1,0 +1,37 @@
+[
+  {
+    "name": "ordinary after Japanese Blu-ray",
+    "titles": ["Same film （ブルーレイディスク）", "Same film"],
+    "preferred": 1
+  },
+  {
+    "name": "ordinary before English Blu-ray",
+    "titles": ["Same film", "Same film (Blu-ray Disc)"],
+    "preferred": 0
+  },
+  {
+    "name": "whitespace does not change the film title",
+    "titles": ["  Same   film  (ブルーレイディスク)", "Same film"],
+    "preferred": 1
+  },
+  {
+    "name": "different film titles stay ambiguous",
+    "titles": ["Another film （ブルーレイディスク）", "Same film"],
+    "preferred": -1
+  },
+  {
+    "name": "multiple ordinary editions stay ambiguous",
+    "titles": ["Same film", "Same film", "Same film （ブルーレイディスク）"],
+    "preferred": -1
+  },
+  {
+    "name": "multiple Blu-ray editions stay ambiguous",
+    "titles": ["Same film （ブルーレイディスク）", "Same film (Blu-ray)"],
+    "preferred": -1
+  },
+  {
+    "name": "missing ordinary title stays ambiguous",
+    "titles": ["Same film （ブルーレイディスク）", ""],
+    "preferred": -1
+  }
+]

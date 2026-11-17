@@ -1,6 +1,7 @@
 package javlibrary
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,7 +18,7 @@ func TestLookupCurrentRatedAndUnratedPages(t *testing.T) {
 		{"FSDSS-437", "javme4ivte", 8.4},
 		{"IPZZ-982", "javme33a5a", 0},
 	} {
-		for _, route := range []string{"direct", "search", "legacy redirect"} {
+		for _, route := range []string{"direct", "search", "dot-relative search", "legacy redirect"} {
 			t.Run(test.code+"/"+route, func(t *testing.T) {
 				body, err := os.ReadFile("testdata/" + strings.ToLower(test.code) + ".html")
 				if err != nil {
@@ -34,6 +35,8 @@ func TestLookupCurrentRatedAndUnratedPages(t *testing.T) {
 							http.Redirect(w, r, "/cn/"+test.id+".html", http.StatusFound)
 						case "search":
 							fmt.Fprintf(w, `<div class="videos"><a href="/cn/%s.html"><span class="id">%s</span></a></div>`, test.id, test.code)
+						case "dot-relative search":
+							fmt.Fprintf(w, `<div class="videos"><a href="./%s.html"><span class="id">%s</span></a></div>`, test.id, test.code)
 						case "legacy redirect":
 							fmt.Fprintf(w, `<div class="videos"><a href="?v=%s"><span class="id">%s</span></a></div>`, test.id, test.code)
 						}
@@ -69,10 +72,13 @@ func TestCanonicalFilmIdentityRejectsConflictingQueries(t *testing.T) {
 	for _, test := range []struct{ address, id string }{
 		{"?v=javme4ivte", "javme4ivte"},
 		{"javme4ivte.html", "javme4ivte"},
+		{"./javme4ivte.html", "javme4ivte"},
 		{"/cn/javme4ivte.html", "javme4ivte"},
 		{"/ja/javme4ivte.html?lang=ja", "javme4ivte"},
 		{"/cn/javme4ivte.html?v=javme4ivte", "javme4ivte"},
 		{"/cn/javme4ivte.html?v=other", ""},
+		{"./javme4ivte.html?v=other", ""},
+		{"../javme4ivte.html", ""},
 		{"/cn/javme4ivte.html?v=javme4ivte&v=javme4ivte", ""},
 		{"/cn/javme4ivte.html?v=", ""},
 		{"/cn/javme4ivte.html?unused=%zz", ""},
@@ -88,6 +94,45 @@ func TestCanonicalFilmIdentityRejectsConflictingQueries(t *testing.T) {
 			}
 			if got := filmIDFromURL(u); got != test.id {
 				t.Fatalf("got %q, want %q", got, test.id)
+			}
+		})
+	}
+}
+
+func TestSearchPrefersOrdinaryEditionWithTheSameTitle(t *testing.T) {
+	body, err := os.ReadFile("testdata/search-editions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name      string   `json:"name"`
+		Titles    []string `json:"titles"`
+		Preferred int      `json:"preferred"`
+	}
+	if err := json.Unmarshal(body, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range cases {
+		t.Run(test.Name, func(t *testing.T) {
+			var html strings.Builder
+			html.WriteString(`<div class="videos">`)
+			for index, title := range test.Titles {
+				fmt.Fprintf(&html, `<a href="./javfixture%d.html"><span class="id">IPX-906</span><span class="title">%s</span></a>`, index, title)
+			}
+			html.WriteString(`</div>`)
+			doc, err := parseDocument([]byte(html.String()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := searchFilm(doc, "IPX-906")
+			if test.Preferred < 0 {
+				if err == nil || target.id != "" {
+					t.Fatalf("ambiguous editions picked %+v: %v", target, err)
+				}
+				return
+			}
+			if err != nil || target.id != fmt.Sprintf("javfixture%d", test.Preferred) || !target.html {
+				t.Fatalf("preferred ordinary edition: %+v %v", target, err)
 			}
 		})
 	}

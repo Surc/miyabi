@@ -2,10 +2,33 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BrowserError, BrowserSession, CDP, browserArguments, connectBrowser, initialPage, pageURL } from './session.mjs';
+import { BrowserError, BrowserSession, CDP, browserArguments, connectBrowser, initialPage, pageURL, preferredSearchEdition, prepareBrowserProfile } from './session.mjs';
+
+test('dedicated profile disables history without changing saved cookies or other preferences', async t => {
+  const profile = await mkdtemp(join(tmpdir(), 'miyabi-private-history-'));
+  t.after(() => rm(profile, { recursive: true, force: true }));
+  const config = { profile_dir: profile };
+  await prepareBrowserProfile(config);
+  const preferences = join(profile, 'Default', 'Preferences');
+  await writeFile(preferences, JSON.stringify({ history: { saving_disabled: false, other: 'retained' }, other: { retained: true } }));
+  await mkdir(join(profile, 'Default', 'Network'));
+  const cookiePath = join(profile, 'Default', 'Network', 'Cookies');
+  await writeFile(cookiePath, 'saved verification cookie fixture');
+  await prepareBrowserProfile(config);
+  await prepareBrowserProfile(config);
+  assert.deepEqual(JSON.parse(await readFile(preferences, 'utf8')), {
+    history: { saving_disabled: true, other: 'retained' }, other: { retained: true },
+  });
+  assert.equal(await readFile(cookiePath, 'utf8'), 'saved verification cookie fixture');
+});
+
+test('ordinary edition selection agrees with the native parser fixtures', async () => {
+  const cases = JSON.parse(await readFile(new URL('../../internal/javlibrary/testdata/search-editions.json', import.meta.url), 'utf8'));
+  for (const entry of cases) assert.equal(preferredSearchEdition(entry.titles), entry.preferred, entry.name);
+});
 
 test('dedicated browser starts without a window on a concrete loopback debugging port', () => {
   const config = { profile_dir: 'dedicated-profile', browser_path: 'edge', proxy_url: 'http://127.0.0.1:7890', port: 18082 };
@@ -13,6 +36,7 @@ test('dedicated browser starts without a window on a concrete loopback debugging
   assert.ok(args.includes('--remote-debugging-address=127.0.0.1'));
   assert.ok(args.includes('--remote-debugging-port=18083'));
   assert.ok(args.includes('--user-data-dir=dedicated-profile'));
+  assert.ok(args.includes('--profile-directory=Default'));
   assert.ok(args.includes('--no-startup-window'));
   assert.ok(!args.includes('--new-window'));
   assert.ok(!args.includes(initialPage));
@@ -48,7 +72,9 @@ class FakeCDP extends EventEmitter {
     super();
     this.commands = [];
     this.page = { url: initialPage, ready: true, challenge: false, template: true, html: '<div class="videos"></div>' };
+    this.closedVerificationPages = false;
   }
+  async closeVerificationPages() { this.closedVerificationPages = true; }
   async send(method, params) {
     this.commands.push({ method, params });
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } };
@@ -83,6 +109,7 @@ test('ratings use the hidden page after the visible window closes and stop when 
   await session.confirm(signal);
   const manual = connections[0].cdp;
   const rating = connections[1].cdp;
+  assert.equal(rating.closedVerificationPages, true);
   manual.close();
   assert.equal(session.status().state, 'ready');
   await session.open(signal);
@@ -137,7 +164,7 @@ test('confirmation attaches to a valid film in another tab of the dedicated brow
   t.after(() => new Promise(resolve => server.close(resolve)));
   const debugPort = server.address().port;
   const config = { profile_dir: profile, port: debugPort === 18082 ? 18084 : 18082, debug_port: debugPort };
-  await writeFile(join(profile, 'MiyabiDevTools.json'), JSON.stringify({ port: config.debug_port, browserPath, keepAlive: true }));
+  await writeFile(join(profile, 'MiyabiDevTools.json'), JSON.stringify({ port: config.debug_port, browserPath, keepAlive: true, noHistory: true }));
   t.mock.method(CDP, 'connect', async address => {
     const cdp = new FakeCDP();
     const path = new URL(address).pathname;
@@ -147,9 +174,19 @@ test('confirmation attaches to a valid film in another tab of the dedicated brow
     if (path === browserPath) {
       owner = cdp;
       t.mock.method(owner, 'send', async (method, params) => {
-        assert.equal(method, 'Target.createTarget');
-        assert.deepEqual(params, { url: 'about:blank', hidden: true, background: true });
-        return { targetId: 'hidden-rating' };
+        if (method === 'Target.createTarget') {
+          assert.deepEqual(params, { url: 'about:blank', hidden: true, background: true });
+          return { targetId: 'hidden-rating' };
+        }
+        if (method === 'Target.getTargets') return { targetInfos: [
+          { type: 'page', targetId: 'visible-verification', url: initialPage },
+          { type: 'page', targetId: 'hidden-rating', url: filmURL },
+          { type: 'other', targetId: 'other-hidden', url: filmURL },
+          { type: 'page', targetId: 'unrelated', url: 'https://example.test/' },
+        ] };
+        assert.equal(method, 'Target.closeTarget');
+        assert.deepEqual(params, { targetId: 'visible-verification' });
+        return { success: true };
       });
     }
     return cdp;

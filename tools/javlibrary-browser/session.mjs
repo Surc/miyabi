@@ -1,5 +1,5 @@
 import { EventEmitter, once } from 'node:events';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -43,8 +43,22 @@ function browserPort(config) {
 export function browserArguments(config) {
   return [
     `--user-data-dir=${config.profile_dir}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${browserPort(config)}`,
-    '--no-first-run', '--no-default-browser-check', `--proxy-server=${config.proxy_url}`, '--no-startup-window',
+    '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', `--proxy-server=${config.proxy_url}`, '--no-startup-window',
   ];
+}
+
+// Call only while the dedicated browser is stopped so its preference writer
+// cannot race with this update. Cookies remain in the same profile.
+export async function prepareBrowserProfile(config) {
+  const profile = join(config.profile_dir, 'Default');
+  await mkdir(profile, { recursive: true, mode: 0o700 });
+  const path = join(profile, 'Preferences');
+  let preferences = {};
+  try { preferences = JSON.parse(await readFile(path, 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  preferences.history = { ...preferences.history, saving_disabled: true };
+  await writeFile(path + '.miyabi-tmp', JSON.stringify(preferences), { mode: 0o600 });
+  await rename(path + '.miyabi-tmp', path);
 }
 
 export class BrowserError extends Error {
@@ -105,6 +119,14 @@ async function hiddenPage(endpoint, signal) {
     const { targetId } = await owner.send('Target.createTarget', { url: 'about:blank', hidden: true, background: true }, signal);
     const page = await CDP.connect(new URL('/devtools/page/' + encodeURIComponent(targetId), endpoint).href, signal);
     page.targetId = targetId;
+    page.closeVerificationPages = async signal => {
+      const { targetInfos } = await owner.send('Target.getTargets', {}, signal);
+      const visiblePages = targetInfos.filter(target => target.type === 'page' && target.targetId !== targetId && manualPageURL(target.url));
+      for (const target of visiblePages) {
+        const { success } = await owner.send('Target.closeTarget', { targetId: target.targetId }, signal);
+        if (!success) throw new BrowserError('browser_command_failed');
+      }
+    };
     // Chromium removes the hidden target when its owning socket closes.
     page.once('disconnected', () => owner.close());
     owner.once('disconnected', () => page.close());
@@ -115,15 +137,24 @@ async function hiddenPage(endpoint, signal) {
   }
 }
 
-async function closeLegacyBrowser(endpoint, signal) {
+export async function closeDedicatedBrowser(endpoint, signal) {
   const owner = await CDP.connect(endpoint.href, signal);
   try {
+    const { processInfo } = await owner.send('SystemInfo.getProcessInfo', {}, signal);
+    const browser = processInfo.find(process => process.type === 'browser');
+    if (!browser) throw new BrowserError('browser_unavailable', 503);
     await Promise.all([
       once(owner, 'disconnected', { signal }),
       owner.send('Browser.close', {}, signal).catch(error => {
         if (error.code !== 'browser_closed') throw error;
       }),
     ]);
+    // A disconnected socket may precede the browser's final preference flush.
+    for (;;) {
+      try { process.kill(browser.id, 0); }
+      catch (error) { if (error.code === 'ESRCH') break; throw error; }
+      await delay(100, undefined, { signal });
+    }
   } finally {
     owner.close();
   }
@@ -156,15 +187,16 @@ export async function connectBrowser(config, signal, { background = false, verif
   } catch {
     signal.throwIfAborted();
   }
-  if (!endpoint || record.keepAlive !== true) {
+  if (!endpoint || record.keepAlive !== true || record.noHistory !== true) {
     if (verify || background) throw new BrowserError('verification_required', 409);
-    if (endpoint) await closeLegacyBrowser(endpoint, signal);
+    if (endpoint) await closeDedicatedBrowser(endpoint, signal);
     await access(config.browser_path);
     const probe = createServer();
     await new Promise((resolve, reject) => {
       probe.once('error', () => reject(new BrowserError('debug_port_in_use', 503)));
       probe.listen(port, '127.0.0.1', () => probe.close(resolve));
     });
+    await prepareBrowserProfile(config);
     signal.throwIfAborted();
     const child = spawn(config.browser_path, browserArguments(config), { detached: true, stdio: 'ignore', windowsHide: false });
     child.on('error', () => {});
@@ -173,7 +205,7 @@ export async function connectBrowser(config, signal, { background = false, verif
       try { endpoint = await discover(); break; }
       catch { await delay(200, undefined, { signal }); }
     }
-    await writeFile(recordPath, JSON.stringify({ port, browserPath: endpoint.pathname, keepAlive: true }), { mode: 0o600 });
+    await writeFile(recordPath, JSON.stringify({ port, browserPath: endpoint.pathname, keepAlive: true, noHistory: true }), { mode: 0o600 });
   }
   if (background) {
     // Older engines may ignore unknown parameters and open a visible tab.
@@ -188,8 +220,38 @@ export async function connectBrowser(config, signal, { background = false, verif
   return connectTab(manual ?? await getJSON(`/json/new?${encodeURIComponent(initialPage)}`, 'PUT'), port, signal);
 }
 
+export function preferredSearchEdition(titles) {
+  const suffix = /\s*[（(](?:ブルーレイディスク|blu-ray(?: disc)?)[）)]\s*$/iu;
+  const entries = titles.map(title => ({
+    bluray: suffix.test(title),
+    title: title.replace(suffix, '').replace(/\s+/gu, ' ').trim(),
+  }));
+  const ordinary = entries.filter(entry => !entry.bluray);
+  if (ordinary.length !== 1 || !ordinary[0].title || entries.some(entry => entry.title !== ordinary[0].title)) return -1;
+  return entries.indexOf(ordinary[0]);
+}
+
 const snapshotExpression = `(() => {
-  const html = document.documentElement?.outerHTML || '';
+  const root = document.documentElement?.cloneNode(true);
+  // Keep relative search links compatible with older Miyabi parsers.
+  for (const link of root?.querySelectorAll('.videos a[href^="./"]') || []) {
+    link.setAttribute('href', link.getAttribute('href').slice(2));
+  }
+  const groups = new Map();
+  for (const card of root?.querySelectorAll('.videos .video') || []) {
+    const code = card.querySelector('.id')?.textContent?.trim().toUpperCase();
+    if (!code) continue;
+    const title = card.querySelector('.title')?.textContent || card.querySelector('a[title]')?.getAttribute('title') || '';
+    if (!groups.has(code)) groups.set(code, []);
+    groups.get(code).push({ card, title });
+  }
+  // Preserve the ordinary edition preference for deployed parsers as well.
+  for (const entries of groups.values()) {
+    const preferred = (${preferredSearchEdition.toString()})(entries.map(entry => entry.title));
+    if (preferred < 0) continue;
+    entries.forEach((entry, index) => { if (index !== preferred) entry.card.remove(); });
+  }
+  const html = root?.outerHTML || '';
   return {url:location.href, ready:document.readyState !== 'loading',
     oversized:html.length > ${maxHTML}, html:html.length <= ${maxHTML} ? html : '',
     challenge:html.includes('_cf_chl_opt') || !!document.querySelector('#challenge-form,#cf-challenge-running'),
@@ -318,6 +380,7 @@ export class BrowserSession {
         if (!isVerifiedPage(await readPage(cdp, signal))) throw new BrowserError('verification_required', 409);
       }
       const background = await this.attach(signal, { background: true });
+      await background.closeVerificationPages(signal);
       if (this.cdp !== background) throw new BrowserError('browser_unavailable', 503);
       this.verified = true;
     } catch (error) {
