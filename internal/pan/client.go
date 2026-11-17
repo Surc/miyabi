@@ -265,7 +265,15 @@ func apiRequest[T apiPayload](client *Client, request *resty.Request, method, en
 	if err != nil {
 		return result, err
 	}
-	if err := json.Unmarshal(response.Body(), &result); err != nil {
+	body := response.Body()
+	if err := json.Unmarshal(body, &result); err != nil {
+		// Error responses can use an empty array where success returns an object.
+		var envelope apiResponse
+		if json.Unmarshal(body, &envelope) == nil {
+			if apiErr := envelope.err(); apiErr != nil {
+				return result, apiErr
+			}
+		}
 		return result, fmt.Errorf("decode 115 %s: %w", action, err)
 	}
 	return result, result.err()

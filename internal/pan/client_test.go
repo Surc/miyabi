@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,25 @@ import (
 	"github.com/go-resty/resty/v2"
 	"golang.org/x/time/rate"
 )
+
+func TestAccountPreservesAuthorizationErrorWithArrayData(t *testing.T) {
+	client := New()
+	t.Cleanup(client.Close)
+	client.http.SetTransport(offlineRoundTrip(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"state":false,"message":"access_token 格式错误","code":40140123,"data":[]}`)),
+			Request:    request,
+		}, nil
+	}))
+
+	_, err := client.Account(t.Context(), "invalid-token")
+	var upstream *apiError
+	if !errors.Is(err, ErrUnauthorized) || !errors.As(err, &upstream) || upstream.Code != 40140123 {
+		t.Fatalf("expected 115 authorization error 40140123, got %v", err)
+	}
+}
 
 func TestPanTransport_RateLimitsRetries(t *testing.T) {
 	var requestTimes []time.Time
