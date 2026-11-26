@@ -1,32 +1,101 @@
-import type { LibraryMovie } from '@/api/library'
-import { MovieCard } from '@/components/movie'
+import { PlayIcon } from 'lucide-react'
+
+import { MovieCard, MovieCoverCaption, MovieRatingPill } from '@/components/movie'
+import { Badge } from '@/components/ui/badge'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { LibraryVersionBadge } from '@/components/movie/library-version-badge'
-import { MovieSubtitleBadge } from '@/components/movie/movie-badges'
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
-import { LibraryMovieStatus } from './movie-status'
 import { LibraryMovieActions } from './movie-actions'
 
-export function LibraryMovieCard({ movie, busy = false }: { movie: LibraryMovie; busy?: boolean }) {
+/** The fields the library card actually renders; kept narrow so callers pass
+ * only what the card needs (e.g. a history item) without fabricating a movie. */
+export type LibraryMovieCardData = {
+  id: number
+  code: string
+  javdb_id?: string
+  title: string
+  cover?: string
+  rating: number
+  actors: Array<{ name: string }>
+  source?: string
+  has_subtitle?: boolean
+  has_uncensored?: boolean
+  has_cracked?: boolean
+  finished?: boolean
+}
+
+export function LibraryMovieCard({
+  movie,
+  onPlay,
+  progress
+}: {
+  movie: LibraryMovieCardData
+  onPlay?: () => void
+  progress?: number
+}) {
+  const title = movie.title || movie.code
+  const actors = movie.actors
+    .map(actor => actor.name)
+    .filter(Boolean)
+    .join(' / ')
+
   return (
-    <div className="relative h-full min-w-0">
-      <MovieDetailTrigger
-        movie={{ libraryId: movie.id }}
-        className="block h-full min-w-0 rounded-2xl outline-ring"
-      >
-        <MovieCard
-          movie={movie}
-          titleTooltip={false}
-          coverOverlay={<LibraryVersionBadge id={movie.id} />}
+    <ContextMenu>
+      <ContextMenuTrigger className="block h-full min-w-0">
+        <MovieDetailTrigger
+          movie={{ libraryId: movie.id }}
+          className="group relative block h-full min-w-0 rounded-2xl outline-ring"
+          onClick={event => {
+            if (onPlay) {
+              event.preventDefault()
+              onPlay()
+            }
+          }}
         >
-          <div className="flex min-h-7 flex-wrap items-center gap-1.5 pr-9">
-            <LibraryMovieStatus movie={movie} />
-            <MovieSubtitleBadge movie={movie} />
-          </div>
-        </MovieCard>
-      </MovieDetailTrigger>
-      <div className="absolute right-2 bottom-2">
-        <LibraryMovieActions movie={movie} disabled={busy} />
-      </div>
-    </div>
+          <MovieCard
+            movie={movie}
+            hideContent
+            state={
+              movie.source === '115' ||
+              movie.has_subtitle ||
+              movie.has_uncensored ||
+              movie.has_cracked ||
+              movie.finished ? (
+                <>
+                  {movie.source === '115' ? <Badge variant="frosted">115</Badge> : null}
+                  {movie.has_subtitle ? <Badge variant="frosted">中文</Badge> : null}
+                  {movie.has_uncensored || movie.has_cracked ? (
+                    <Badge variant="frosted">无码</Badge>
+                  ) : null}
+                  {movie.finished ? <Badge variant="success">已看完</Badge> : null}
+                </>
+              ) : undefined
+            }
+            coverOverlay={
+              <>
+                <LibraryVersionBadge id={movie.id} />
+                <MovieRatingPill rating={movie.rating} />
+                <MovieCoverCaption title={title} subtitle={actors || 'N/A'}>
+                  {progress !== undefined ? (
+                    <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/25">
+                      <div
+                        className="h-full bg-success"
+                        style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </MovieCoverCaption>
+              </>
+            }
+          />
+          <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="grid size-12 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm">
+              <PlayIcon className="size-6 fill-current" />
+            </span>
+          </span>
+        </MovieDetailTrigger>
+      </ContextMenuTrigger>
+      <LibraryMovieActions movie={movie} />
+    </ContextMenu>
   )
 }

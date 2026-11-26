@@ -35,7 +35,7 @@ func (s *ed2kCommentsStub) MovieComments(_ context.Context, _ string, page int) 
 
 func TestED2KResourcesMatchMovieAndShareCommentPage(t *testing.T) {
 	upstream := &ed2kCommentsStub{}
-	service := newService(nil, upstream, nil, nil, persistedRoute{})
+	service := newService(nil, upstream, nil, nil, persistedRoute{}, nil)
 	extras := NewMovieExtras(service)
 	defer extras.Close()
 
@@ -86,7 +86,7 @@ func TestED2KResourcesPreferNativeDuplicateAndKeepAvailableSource(t *testing.T) 
 				reader.web = []domain.ED2KResource{webLink}
 			}
 			reader.err = test.reviewErr
-			service := newService(nil, reader, nil, nil, persistedRoute{})
+			service := newService(nil, reader, nil, nil, persistedRoute{}, nil)
 			page, err := service.ED2KResources(t.Context(), "1AArv", 1)
 			if err != nil || page.HasMore != test.more || len(page.Items) != 1 ||
 				page.Items[0].ID != webLink.ID || page.Items[0].Source != test.wantSource {

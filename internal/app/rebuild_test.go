@@ -30,7 +30,6 @@ func TestFailedRebuildMarksMovieFailedUntilSuccessfulRetry(t *testing.T) {
 	f.scrape = scrape.New(f.store.Client, f.driveService, meta, f.images, f.tasks, scrape.Dependencies{
 		ExportManager: export.NewManager(export.Config{EmbyDir: f.embyDir, PublicURL: "http://127.0.0.1:8080"}),
 	})
-	t.Cleanup(f.scrape.Close)
 	f.tasks.Registry().Register(tasks.NewHandler(tasks.KindScrape, f.scrape.Scrape, f.scrape.Finished).WithRetry(domain.RetryDelay))
 	f.drive.addFile("101", "10", "042126_100.mp4", 2<<30, []byte("video"))
 	if _, err := f.library.StartScan(ctx); err != nil {
@@ -82,6 +81,12 @@ func TestRebuildReplacesSavedMetadataAndPublishesNewPreviews(t *testing.T) {
 			ctx := t.Context()
 			official := &workflowSource{id: tc.provider, body: f.catalogue.cover}
 			catalogue := &workflowSource{id: "javdb", body: f.catalogue.cover}
+			// With JavDB ranked above the default providers, the merged field source
+			// is JavDB unless the official provider is FANZA (which ranks first).
+			mergedSource := official.id
+			if tc.provider != "fanza" {
+				mergedSource = "javdb"
+			}
 			if tc.provider == "fanza" {
 				catalogue.fetchError = metadata.ErrNotFound
 			} else {
@@ -95,7 +100,6 @@ func TestRebuildReplacesSavedMetadataAndPublishesNewPreviews(t *testing.T) {
 			f.scrape = scrape.New(f.store.Client, f.driveService, meta, f.images, f.tasks, scrape.Dependencies{
 				ExportManager: export.NewManager(export.Config{EmbyDir: f.embyDir, PublicURL: "http://127.0.0.1:8080"}),
 			})
-			t.Cleanup(f.scrape.Close)
 			f.tasks.Registry().Register(tasks.NewHandler(tasks.KindScrape, f.scrape.Scrape, f.scrape.Finished).WithRetry(domain.RetryDelay))
 			f.drive.addFile("101", "10", tc.code+".mp4", 2<<30, []byte("video"))
 			if _, err := f.library.StartScan(ctx); err != nil {
@@ -123,12 +127,12 @@ func TestRebuildReplacesSavedMetadataAndPublishesNewPreviews(t *testing.T) {
 			f.runQueue(t)
 			after := f.store.Client.Movie.Query().WithActors().WithTags().OnlyX(ctx)
 			if after.ID != before.ID || after.ScrapeStatus != movie.ScrapeStatusDone ||
-				after.Metadata.FieldSources["title"] != "javdb" || after.Edges.Tags[0].Provider != "javdb" || after.Edges.Actors[0].Provider != "javdb" ||
+				after.Metadata.FieldSources["title"] != mergedSource || after.Edges.Tags[0].Provider != mergedSource || after.Edges.Actors[0].Provider != mergedSource ||
 				len(after.Metadata.Previews) != 2 || official.queries != 2 || catalogue.queries != 2 {
 				t.Fatalf("rebuild reused old metadata: id=%d status=%s fields=%v previews=%d calls=%d/%d", after.ID, after.ScrapeStatus, after.Metadata.FieldSources, len(after.Metadata.Previews), official.queries, catalogue.queries)
 			}
 			local, err := f.library.Movie(ctx, after.ID)
-			if err != nil || len(local.PreviewImages) != 2 || local.Tags[0].Provider != "javdb" {
+			if err != nil || len(local.PreviewImages) != 2 || local.Tags[0].Provider != mergedSource {
 				t.Fatalf("local detail not refreshed: %+v %v", local, err)
 			}
 			path := filepath.Join(export.EmbyMovieDir(f.embyDir, after.Code), after.Code+".nfo")
@@ -143,7 +147,7 @@ func TestRebuildReplacesSavedMetadataAndPublishesNewPreviews(t *testing.T) {
 					previews++
 				}
 			}
-			if err != nil || previews != 2 || doc.Tags[0].Provider != "javdb" {
+			if err != nil || previews != 2 || doc.Tags[0].Provider != mergedSource {
 				t.Fatalf("export not refreshed: %+v %v", doc, err)
 			}
 			infos, err := f.library.ListTasks(ctx)

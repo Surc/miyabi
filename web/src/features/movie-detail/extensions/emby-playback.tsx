@@ -43,21 +43,24 @@ function EmbyPlayback({ code, android }: { code: string; android: boolean }) {
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
         {ready ? (
-          <Button asChild>
-            <a
-              href={url}
-              target={android ? undefined : '_blank'}
-              rel={android ? undefined : 'noopener noreferrer'}
-              onClick={event => {
-                if (!isEmbyPlaybackFresh(query.dataUpdatedAt)) {
-                  event.preventDefault()
-                  void query.refetch()
-                }
-              }}
-            >
-              <PlayIcon />
-              {label}
-            </a>
+          <Button
+            nativeButton={false}
+            render={
+              <a
+                href={url}
+                target={android ? undefined : '_blank'}
+                rel={android ? undefined : 'noopener noreferrer'}
+                onClick={event => {
+                  if (!isEmbyPlaybackFresh(query.dataUpdatedAt)) {
+                    event.preventDefault()
+                    void query.refetch()
+                  }
+                }}
+              />
+            }
+          >
+            <PlayIcon />
+            {label}
           </Button>
         ) : (
           <Button disabled>

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
@@ -30,11 +31,17 @@ type persistedRoute struct {
 
 // Service combines JavDB catalogue data with Miyabi's local library and workflow state.
 type Service struct {
-	database   *ent.Client
-	local      LocalState
-	javdb      JavDBClient
-	javbus     JavBusSource
-	aggregator *magnet.Aggregator
+	database     *ent.Client
+	local        LocalState
+	javdb        JavDBClient
+	javbus       JavBusSource
+	sukebei      magnet.Source
+	extraMagnets []magnet.Source
+	aggregator   *magnet.Aggregator
+
+	magnetMu       sync.RWMutex
+	magnetToggles  map[string]*magnet.Toggle
+	magnetSettings []domain.SourceToggle
 
 	proxy         *netx.ProxyManager
 	lists         *responseCache[[]domain.Movie]
@@ -60,6 +67,8 @@ func New(
 	proxy *netx.ProxyManager,
 	local LocalState,
 	supplement JavBusSource,
+	sukebei magnet.Source,
+	extraMagnets ...magnet.Source,
 ) (*Service, error) {
 	deviceUUID, found, err := database.LoadSetting[string](ctx, db, javdbDeviceSetting)
 	if err != nil {
@@ -95,26 +104,41 @@ func New(
 	}
 	client.SetSessionToken(string(token))
 
-	service := newService(db, client, supplement, local, route)
+	// Wire the real JavDB client as an opportunistic magnet source. It only
+	// queries when a movie's JavDB id is known and skips silently otherwise.
+	magnetSources := make([]magnet.Source, 0, len(extraMagnets)+1)
+	magnetSources = append(magnetSources, extraMagnets...)
+	magnetSources = append(magnetSources, javdb.NewMagnetSource(client))
+	service := newService(db, client, supplement, local, route, sukebei, magnetSources...)
 	service.javdbSessionPath = sessionPath
 	service.proxy = proxy
+	if err := service.restoreMagnetSettings(ctx); err != nil {
+		return nil, err
+	}
 	return service, nil
 }
 
 // NewWithClients assembles explicit clients using the same cache and aggregation
-// pipeline as New. JavDB is required; JavBus may be nil. Close releases both clients.
+// pipeline as New. JavDB is required for catalogue metadata; JavBus and Sukebei
+// supply magnets and either may be nil. Close releases all clients.
 func NewWithClients(
 	ctx context.Context,
 	db *ent.Client,
 	primary JavDBClient,
 	supplement JavBusSource,
 	local LocalState,
+	sukebei magnet.Source,
+	extraMagnets ...magnet.Source,
 ) (*Service, error) {
 	route, _, err := database.LoadSetting[persistedRoute](ctx, db, javdbRouteSetting)
 	if err != nil {
 		return nil, err
 	}
-	return newService(db, primary, supplement, local, route), nil
+	service := newService(db, primary, supplement, local, route, sukebei, extraMagnets...)
+	if err := service.restoreMagnetSettings(ctx); err != nil {
+		return nil, err
+	}
+	return service, nil
 }
 
 // Response caches absorb repeated page loads; entries are small and short-lived
@@ -126,16 +150,31 @@ const (
 	magnetsCacheSize, magnetsCacheTTL = 64, time.Minute
 )
 
-func newService(database *ent.Client, primary JavDBClient, supplement JavBusSource, local LocalState, route persistedRoute) *Service {
-	sources := []magnet.Source{primary}
+func newService(database *ent.Client, primary JavDBClient, supplement JavBusSource, local LocalState, route persistedRoute, sukebei magnet.Source, extraMagnets ...magnet.Source) *Service {
+	// Magnet sources are the supplementary providers plus any extra sources. JavDB
+	// (wired by New) is one extra source that self-skips without a JavDB id.
+	sources := make([]magnet.Source, 0, 2+len(extraMagnets))
 	if supplement != nil {
 		sources = append(sources, supplement)
 	}
+	if sukebei != nil {
+		sources = append(sources, sukebei)
+	}
+	for _, extra := range extraMagnets {
+		if extra != nil {
+			sources = append(sources, extra)
+		}
+	}
+	toggled, toggles, magnetSettings := applyMagnetToggles(sources)
 	return &Service{
 		database:       database,
 		javdb:          primary,
 		javbus:         supplement,
-		aggregator:     magnet.NewAggregator(sources, 0),
+		sukebei:        sukebei,
+		extraMagnets:   extraMagnets,
+		magnetToggles:  toggles,
+		magnetSettings: magnetSettings,
+		aggregator:     magnet.NewAggregator(toggled, 0),
 		lists:          newResponseCache[[]domain.Movie](listCacheSize, listCacheTTL),
 		details:        newResponseCache[domain.MovieDetail](detailCacheSize, detailCacheTTL),
 		tags:           newResponseCache[[]domain.TagCategory](tagsCacheSize, tagsCacheTTL),
@@ -152,13 +191,19 @@ func (service *Service) Close() {
 	if service.javbus != nil {
 		service.javbus.Close()
 	}
+	if service.sukebei != nil {
+		if closer, ok := service.sukebei.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
+	for _, extra := range service.extraMagnets {
+		if closer, ok := extra.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
 }
 
-func (service *Service) Search(
-	ctx context.Context,
-	keyword string,
-	options domain.SearchOptions,
-) ([]Movie, error) {
+func (service *Service) Search(ctx context.Context, keyword string, options domain.SearchOptions) ([]Movie, error) {
 	keyword = strings.TrimSpace(keyword)
 	key := fmt.Sprintf("search:%q:%#v", keyword, options)
 	movies, err := cachedJavDB(ctx, service, service.lists, key, func(ctx context.Context) ([]domain.Movie, error) {
@@ -167,7 +212,16 @@ func (service *Service) Search(
 	if err != nil {
 		return nil, fmt.Errorf("search JavDB: %w", err)
 	}
-	return projectMovies(ctx, movies), nil
+	projected := projectMovies(ctx, movies)
+	for i := range projected {
+		projected[i].ID = movies[i].ID
+	}
+	return projected, nil
+}
+
+func (service *Service) HasJavDBSession() bool {
+	client, ok := service.javdb.(interface{ HasSession() bool })
+	return ok && client.HasSession()
 }
 
 func (service *Service) Browse(
@@ -182,6 +236,14 @@ func (service *Service) Browse(
 		return nil, fmt.Errorf("browse JavDB: %w", err)
 	}
 	return projectMovies(ctx, movies), nil
+}
+
+func (service *Service) ResolveMovieID(ctx context.Context, code string) (string, error) {
+	id, err := service.javdb.ResolveMovieID(ctx, code)
+	if err != nil {
+		return "", fmt.Errorf("resolve JavDB movie ID: %w", err)
+	}
+	return id, nil
 }
 
 func (service *Service) CatalogueDetail(ctx context.Context, movieID string) (domain.MovieDetail, error) {
@@ -225,12 +287,20 @@ func (service *Service) MovieCode(ctx context.Context, movieID string) (string, 
 }
 
 func (service *Service) MovieSummary(ctx context.Context, movieID string) (domain.MovieSummary, error) {
-	detail, err := service.MovieDetail(ctx, movieID)
+	catalogueID := movieID
+	if codeid.Valid(movieID) {
+		var err error
+		catalogueID, err = service.ResolveMovieID(ctx, movieID)
+		if err != nil {
+			return domain.MovieSummary{}, err
+		}
+	}
+	detail, err := service.MovieDetail(ctx, catalogueID)
 	if err != nil {
 		return domain.MovieSummary{}, err
 	}
 	return domain.MovieSummary{
-		ID:          detail.ID,
+		ID:          movieID,
 		Code:        detail.Code,
 		Title:       detail.Title,
 		Cover:       detail.Cover,
@@ -269,15 +339,34 @@ func (service *Service) Tags(ctx context.Context, zone domain.Zone) ([]domain.Ta
 	return categories, nil
 }
 
-func (service *Service) ResolveMovieID(ctx context.Context, code string) (string, error) {
-	id, err := service.javdb.ResolveMovieID(ctx, code)
-	if err != nil {
-		return "", fmt.Errorf("resolve JavDB movie ID: %w", err)
+// ProjectMetadataDetail converts resolved multi-source metadata into the discover
+// detail response, deriving release status the same way as the catalogue path.
+func ProjectMetadataDetail(meta domain.MovieMetadata) MovieDetail {
+	movie := meta.Detail.Movie
+	if movie.Actors == nil {
+		movie.Actors = []domain.Actor{}
 	}
-	if err := service.persistActiveRoute(ctx); err != nil {
-		return "", err
+	if movie.Tags == nil {
+		movie.Tags = []domain.Tag{}
 	}
-	return id, nil
+	if movie.PreviewImages == nil {
+		movie.PreviewImages = []domain.PreviewImage{}
+	}
+	actorMovies := meta.Detail.ActorMovies
+	if actorMovies == nil {
+		actorMovies = []domain.MovieReference{}
+	}
+	relatedMovies := meta.Detail.RelatedMovies
+	if relatedMovies == nil {
+		relatedMovies = []domain.MovieReference{}
+	}
+	projected := projectMovies(context.Background(), []domain.Movie{movie})
+	return MovieDetail{
+		Movie:         projected[0],
+		Zone:          meta.Detail.Zone,
+		ActorMovies:   actorMovies,
+		RelatedMovies: relatedMovies,
+	}
 }
 
 func projectMovies(
@@ -292,6 +381,7 @@ func projectMovies(
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	result := make([]Movie, len(source))
 	for index, item := range source {
+		item.ID = codeid.Normalize(item.Code)
 		releaseStatus := ReleaseUnknown
 		item.ReleaseDate = strings.TrimSpace(item.ReleaseDate)
 		if item.ReleaseDate != "" {

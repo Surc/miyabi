@@ -29,6 +29,7 @@ export function useDiscoverED2K(movieID: string) {
         signal
       ),
     getNextPageParam: page => (page.has_more && page.page < 1000 ? page.page + 1 : undefined),
+    enabled: movieID !== '',
     staleTime: 2 * 60_000,
     retry: false
   })

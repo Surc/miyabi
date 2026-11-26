@@ -73,16 +73,18 @@ function JavLibraryVerification({
         if (open) verification.mutate('open')
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          aria-label="打开 JavLibrary 验证引导"
-          title="打开 JavLibrary 验证引导"
-          disabled={verification.isPending}
-        >
-          <RotateCwIcon />
-        </Button>
+      <DialogTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="打开 JavLibrary 验证引导"
+            title="打开 JavLibrary 验证引导"
+            disabled={verification.isPending}
+          />
+        }
+      >
+        <RotateCwIcon />
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

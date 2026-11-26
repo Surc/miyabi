@@ -4,15 +4,32 @@ package domain
 type MovieRef struct {
 	Refresh bool   `json:"refresh,omitempty"`
 	Code    string `json:"code"`
-	JavDBID string `json:"javdb_id"`
 	Zone    Zone   `json:"zone,omitempty"`
+	// JavdbID carries a known JavDB catalogue id so the JavDB magnet source can
+	// query opportunistically; empty means "no JavDB id, skip".
+	JavDBID string `json:"javdb_id,omitempty"`
+}
+
+// NormalizeRating10 converts a source rating to a 10-point scale.
+// Sources that do not report a maximum are treated as 5-point scales.
+func NormalizeRating10(rating, max float64) float64 {
+	if rating <= 0 {
+		return 0
+	}
+	if max <= 0 {
+		max = 5
+	}
+	value := rating * 10 / max
+	if value > 10 {
+		return 10
+	}
+	return value
 }
 
 // LocalMovie represents the identity and library ID of a movie indexed locally.
 type LocalMovie struct {
-	ID      int
-	Code    string
-	JavDBID *string
+	ID   int
+	Code string
 }
 
 // Zone is a movie category/section.
@@ -66,10 +83,16 @@ const (
 )
 
 // MovieReference is the compact recommendation returned with a movie detail.
+// MovieReference is a lightweight but renderable movie entry (library
+// recommendations and source suggestions).
 type MovieReference struct {
-	ID        string `json:"id"`
-	Code      string `json:"code"`
-	Thumbnail string `json:"thumbnail"`
+	ID          string  `json:"id"`
+	Code        string  `json:"code"`
+	Thumbnail   string  `json:"thumbnail"`
+	Cover       string  `json:"cover,omitempty"`
+	Title       string  `json:"title,omitempty"`
+	ReleaseDate string  `json:"release_date,omitempty"`
+	Rating      float64 `json:"rating,omitempty"`
 }
 
 // MovieDetail represents full details of a movie.
@@ -138,7 +161,6 @@ type Director struct {
 
 // Movie is the core domain movie model.
 type Movie struct {
-	Plot          string            `json:"plot,omitempty"`
 	Sources       []SourceID        `json:"sources,omitempty"`
 	FieldSources  map[string]string `json:"field_sources,omitempty"`
 	RatingSource  string            `json:"rating_source,omitempty"`
@@ -147,6 +169,7 @@ type Movie struct {
 	Code          string            `json:"code"`
 	Title         string            `json:"title"`
 	OriginTitle   string            `json:"origin_title"`
+	Plot          string            `json:"plot,omitempty"`
 	ReleaseDate   string            `json:"release_date"`
 	Duration      int               `json:"duration"`
 	Rating        float64           `json:"rating"`
@@ -156,6 +179,8 @@ type Movie struct {
 	PreviewVideo  string            `json:"preview_video"`
 	MagnetsCount  int               `json:"magnets_count"`
 	HasSubtitle   bool              `json:"has_subtitle"`
+	HasUncensored bool              `json:"has_uncensored,omitempty"`
+	HasCracked    bool              `json:"has_cracked,omitempty"`
 	HasPreview    bool              `json:"has_preview"`
 	Actors        []Actor           `json:"actors"`
 	Tags          []Tag             `json:"tags"`

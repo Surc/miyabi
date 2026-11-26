@@ -1,5 +1,5 @@
 import { ImageIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { imageURL } from '@/api/client'
 import { cn } from 'cn'
@@ -7,10 +7,10 @@ import { useSettingsStore } from '@/stores/settings'
 
 type MediaImageProps = {
   source: string
+  alt?: string
   original?: string
   loading?: 'eager' | 'lazy'
   blurredBackground?: boolean
-  onReady?: () => void
   onImageLoad?: (image: HTMLImageElement) => void
   className?: string
 }
@@ -28,10 +28,10 @@ export function MediaImage(props: MediaImageProps) {
 
 function MediaImageContent({
   source,
+  alt,
   original,
   loading = 'lazy',
   blurredBackground = false,
-  onReady,
   onImageLoad,
   concealed,
   className
@@ -39,10 +39,6 @@ function MediaImageContent({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const showImage = !concealed && source.length > 0 && status !== 'error'
   const ready = !showImage || status === 'ready'
-
-  useEffect(() => {
-    if (ready) onReady?.()
-  }, [ready, onReady])
 
   const imageProps = {
     src: imageURL(source),
@@ -65,16 +61,18 @@ function MediaImageContent({
           ) : null}
           <img
             {...imageProps}
+            alt={alt}
             className={cn('relative size-full', className)}
             onLoad={async event => {
               const image = event.currentTarget
               onImageLoad?.(image)
               try {
-                if (typeof image.decode === 'function') await image.decode()
-                setStatus('ready')
+                await image.decode()
               } catch {
-                setStatus('error')
+                // onLoad already confirmed the image is displayable; a decode
+                // failure must not be treated as a load error.
               }
+              setStatus('ready')
             }}
             onError={() => setStatus('error')}
           />

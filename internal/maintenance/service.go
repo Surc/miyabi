@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"github.com/ppxb/miyabi/internal/domain"
@@ -13,15 +17,82 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/task"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
+	"github.com/ppxb/miyabi/internal/logging"
 	"github.com/ppxb/miyabi/internal/tasks"
 )
 
 var ErrCacheBusy = domain.E(domain.KindBusy, "封面正在处理或缓存正在清理，请稍后重试", nil)
 
+// retainedTTL bounds how stale the display-only "unused" cache stats may be.
+// Pruning never uses this cache; ClearCache always recomputes references.
+const retainedTTL = 30 * time.Minute
+
 type Info struct {
 	DataDirectory     string                `json:"data_directory"`
 	DatabaseSizeBytes int64                 `json:"database_size_bytes"`
 	Cache             mediaimage.CacheStats `json:"cache"`
+}
+
+// LogInfo is the tail of the runtime log file.
+type LogInfo struct {
+	Path      string   `json:"path"`
+	Lines     []string `json:"lines"`
+	SizeBytes int64    `json:"size_bytes"`
+}
+
+// Logs reads the newest lines of the runtime log without loading the whole file.
+func (service *Service) Logs(ctx context.Context, limit int) (LogInfo, error) {
+	path := logging.Path(service.directory)
+	result := LogInfo{Path: path, Lines: []string{}}
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return result, nil
+	}
+	if err != nil {
+		return result, fmt.Errorf("stat runtime log: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return result, errors.New("runtime log path is not a regular file")
+	}
+	result.SizeBytes = info.Size()
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+	const readLimit = 256 << 10
+	start := int64(0)
+	if info.Size() > readLimit {
+		start = info.Size() - readLimit
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return result, fmt.Errorf("open runtime log: %w", err)
+	}
+	defer file.Close()
+	if start > 0 {
+		if _, err := file.Seek(start, io.SeekStart); err != nil {
+			return result, fmt.Errorf("seek runtime log: %w", err)
+		}
+	}
+	data, err := io.ReadAll(io.LimitReader(file, readLimit+1))
+	if err != nil {
+		return result, fmt.Errorf("read runtime log: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	// The first line is partial when starting in the middle of the file.
+	if start > 0 && len(lines) > 0 {
+		lines = lines[1:]
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	if len(lines) == 1 && lines[0] == "" {
+		lines = []string{}
+	}
+	result.Lines = lines
+	return result, nil
 }
 
 // ArtworkLocker excludes pruning while new images gain durable references.
@@ -35,6 +106,11 @@ type Service struct {
 	db        *ent.Client
 	images    *mediaimage.Cache
 	scrape    ArtworkLocker
+
+	mu         sync.Mutex
+	retained   map[string]bool
+	retainedAt time.Time
+	now        func() time.Time
 }
 
 func New(directory string, db *ent.Client, images *mediaimage.Cache, scrapeSvc ArtworkLocker) (*Service, error) {
@@ -42,15 +118,40 @@ func New(directory string, db *ent.Client, images *mediaimage.Cache, scrapeSvc A
 	if err != nil {
 		return nil, fmt.Errorf("resolve data directory: %w", err)
 	}
-	return &Service{directory: absolute, db: db, images: images, scrape: scrapeSvc}, nil
+	return &Service{directory: absolute, db: db, images: images, scrape: scrapeSvc, now: time.Now}, nil
 }
 
 func (service *Service) Info(ctx context.Context) (Info, error) {
-	retained, err := service.retainedArtwork(ctx)
+	retained, err := service.cachedRetainedArtwork(ctx)
 	if err != nil {
 		return Info{}, err
 	}
 	return service.info(ctx, retained)
+}
+
+// cachedRetainedArtwork reuses the last reference snapshot for a short window so
+// repeatedly opening the settings page does not rescan the whole movie table.
+func (service *Service) cachedRetainedArtwork(ctx context.Context) (map[string]bool, error) {
+	service.mu.Lock()
+	if service.retained != nil && service.now().Sub(service.retainedAt) < retainedTTL {
+		cached := service.retained
+		service.mu.Unlock()
+		return cached, nil
+	}
+	service.mu.Unlock()
+	retained, err := service.retainedArtwork(ctx)
+	if err != nil {
+		return nil, err
+	}
+	service.storeRetained(retained)
+	return retained, nil
+}
+
+func (service *Service) storeRetained(retained map[string]bool) {
+	service.mu.Lock()
+	service.retained = retained
+	service.retainedAt = service.now()
+	service.mu.Unlock()
 }
 
 func (service *Service) ClearCache(ctx context.Context) (Info, error) {
@@ -69,6 +170,7 @@ func (service *Service) ClearCache(ctx context.Context) (Info, error) {
 	if err := service.images.Prune(ctx, retained); err != nil {
 		return Info{}, err
 	}
+	service.storeRetained(retained)
 	return service.info(ctx, retained)
 }
 

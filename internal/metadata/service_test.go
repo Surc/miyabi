@@ -61,7 +61,7 @@ func TestRefreshBypassesSuccessfulAndMissingSourceCaches(t *testing.T) {
 	}
 }
 
-func TestRefreshDoesNotPublishOfficialOnlyDataWhenJavDBFails(t *testing.T) {
+func TestRefreshAcceptsCompleteOfficialDataWhenJavDBFails(t *testing.T) {
 	official := &sourceStub{id: "fanza", fetch: func(_ context.Context, code string) (domain.MovieMetadata, error) {
 		return completeFixture("fanza", code), nil
 	}}
@@ -70,11 +70,8 @@ func TestRefreshDoesNotPublishOfficialOnlyDataWhenJavDBFails(t *testing.T) {
 	}}
 	s := newTestService(t, official, catalogue)
 	m, err := s.Resolve(t.Context(), domain.MovieRef{Code: "IPZZ-960", Refresh: true})
-	if err == nil || m.Detail.Code != "" {
-		t.Fatalf("partial rebuild accepted: %+v %v", m, err)
-	}
-	if _, retry := domain.RetryDelay(err); !retry {
-		t.Fatalf("source failure cannot retry: %v", err)
+	if err != nil || m.Detail.Code != "IPZZ-960" || m.Detail.Title != "fanza title" {
+		t.Fatalf("complete official result rejected: %+v %v", m, err)
 	}
 }
 
@@ -161,7 +158,7 @@ func TestCompleteOfficialMetadataStillQueriesJavDBAndReusesCache(t *testing.T) {
 	s := newTestService(t, primary, fallback)
 	for range 2 {
 		m, err := s.Resolve(t.Context(), domain.MovieRef{Code: "ABP-123"})
-		if err != nil || m.Detail.Title != "javdb title" || m.Detail.ID != "ABP-123" || m.Detail.Actors[0].Provider != "javdb" || m.Detail.Tags[0].Provider != "javdb" {
+		if err != nil || m.Detail.Title != "fanza title" || m.Detail.ID != "ABP-123" || m.Detail.Actors[0].Provider != "fanza" || m.Detail.Tags[0].Provider != "fanza" {
 			t.Fatalf("result=%+v err=%v", m, err)
 		}
 	}
@@ -176,27 +173,30 @@ func TestCompleteOfficialMetadataStillQueriesJavDBAndReusesCache(t *testing.T) {
 	if fallback.calls.Load() != 1 {
 		t.Fatal("image fallback did not reuse source cache")
 	}
-	if err := s.UpdateSettings(t.Context(), []SourceSetting{{ID: "fanza", Enabled: true}, {ID: "javdb", Enabled: false}}); err == nil {
-		t.Fatal("fallback accepted a user-controlled switch")
+	if err := s.UpdateSettings(t.Context(), []domain.SourceToggle{{ID: "fanza", Enabled: true}, {ID: "javdb", Enabled: false}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Fallback(t.Context(), domain.MovieRef{Code: "ABP-123"}); err == nil {
+		t.Fatal("disabled javdb should not be used as a fallback")
 	}
 }
 
-func TestJavDBMetadataTakesPriorityAndReturnsItsConfirmedIdentity(t *testing.T) {
-	var order []string
+func TestOfficialMetadataWinsAndJavDBConfirmsIdentity(t *testing.T) {
 	primary := &sourceStub{id: "fanza", fetch: func(_ context.Context, code string) (domain.MovieMetadata, error) {
-		order = append(order, "fanza")
 		return fixture("fanza", code, "Official title"), nil
 	}}
 	fallback := &sourceStub{id: "javdb", fetch: func(_ context.Context, code string) (domain.MovieMetadata, error) {
-		order = append(order, "javdb")
 		m := completeFixture("javdb", code)
 		m.Detail.Sources[0].ID = "catalogue-id"
 		return m, nil
 	}}
 	s := newTestService(t, primary, fallback)
 	m, err := s.Resolve(t.Context(), domain.MovieRef{Code: "ABP-123"})
-	if err != nil || !reflect.DeepEqual(order, []string{"fanza", "javdb"}) || m.Detail.Title != "javdb title" || m.Detail.ID != "catalogue-id" || m.Detail.FieldSources["title"] != "javdb" || m.Detail.FieldSources["actors"] != "javdb" {
-		t.Fatalf("merge=%+v order=%v err=%v", m, order, err)
+	if err != nil || m.Detail.Title != "Official title" || m.Detail.ID != "catalogue-id" || m.Detail.FieldSources["title"] != "fanza" || m.Detail.FieldSources["actors"] != "javdb" {
+		t.Fatalf("merge=%+v err=%v", m, err)
+	}
+	if primary.calls.Load() != 1 || fallback.calls.Load() != 1 {
+		t.Fatalf("sources were not all queried: primary=%d javdb=%d", primary.calls.Load(), fallback.calls.Load())
 	}
 }
 
@@ -257,9 +257,9 @@ func TestPrimaryFailureCanUseSameIdentityFallbackButNeverWeakerIdentity(t *testi
 	}
 }
 
-func TestFANZAFirstAndJavDBLastSurviveSavedSettings(t *testing.T) {
+func TestFANZAFirstAndJavDBSecondSurviveSavedSettings(t *testing.T) {
 	old := newTestService(t, &sourceStub{id: "fc2"})
-	if err := old.UpdateSettings(t.Context(), []SourceSetting{{ID: "fc2", Enabled: false}}); err != nil {
+	if err := old.UpdateSettings(t.Context(), []domain.SourceToggle{{ID: "fc2", Enabled: false}}); err != nil {
 		t.Fatal(err)
 	}
 	s, err := New(t.Context(), old.db, &sourceStub{id: "fanza"}, &sourceStub{id: "fc2"}, &sourceStub{id: "javdb"})
@@ -267,22 +267,23 @@ func TestFANZAFirstAndJavDBLastSurviveSavedSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	want := []SourceSetting{{ID: "fanza", Enabled: true}, {ID: "fc2", Enabled: false}}
+	want := []domain.SourceToggle{{ID: "fanza", Enabled: true}, {ID: "javdb", Enabled: true}, {ID: "fc2", Enabled: false}}
 	if !reflect.DeepEqual(s.Settings(), want) {
 		t.Fatalf("order=%v", s.Settings())
 	}
-	if err := s.UpdateSettings(t.Context(), []SourceSetting{want[1], want[0]}); err == nil {
+	reversed := []domain.SourceToggle{want[1], want[0], want[2]}
+	if err := s.UpdateSettings(t.Context(), reversed); err == nil {
 		t.Fatal("FANZA can lose its priority")
 	}
 }
 
-func TestJavDBIsHiddenAndAlwaysEnabled(t *testing.T) {
+func TestJavDBHonorsSavedSwitch(t *testing.T) {
 	store, err := database.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := database.SaveSetting(t.Context(), store.Client, "metadata.sources", []SourceSetting{
+	if err := database.SaveSetting(t.Context(), store.Client, "metadata.sources", []domain.SourceToggle{
 		{ID: "javdb", Enabled: false}, {ID: "fanza", Enabled: false},
 	}); err != nil {
 		t.Fatal(err)
@@ -299,17 +300,16 @@ func TestJavDBIsHiddenAndAlwaysEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	want := []SourceSetting{{ID: "fanza", Enabled: false}}
+	want := []domain.SourceToggle{{ID: "fanza", Enabled: false}, {ID: "javdb", Enabled: false}}
 	if !reflect.DeepEqual(s.Settings(), want) {
-		t.Fatalf("public settings include fallback: %v", s.Settings())
+		t.Fatalf("public settings = %v", s.Settings())
 	}
 	if err := s.UpdateSettings(t.Context(), want); err != nil {
 		t.Fatal(err)
 	}
 	for _, resolve := range []func(context.Context, domain.MovieRef) (domain.MovieMetadata, error){s.Resolve, s.Fallback} {
-		m, err := resolve(t.Context(), domain.MovieRef{Code: "ABP-123"})
-		if err != nil || m.Detail.Sources[0].Provider != "javdb" {
-			t.Fatalf("fallback disabled by settings: %+v %v", m, err)
+		if _, err := resolve(t.Context(), domain.MovieRef{Code: "ABP-123"}); err == nil {
+			t.Fatal("disabled javdb still resolved")
 		}
 	}
 }
@@ -385,7 +385,7 @@ func TestSourceSettingsFollowRegisteredSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	saved := []SourceSetting{{ID: "removed", Enabled: true}, {ID: "retained", Enabled: false}}
+	saved := []domain.SourceToggle{{ID: "removed", Enabled: true}, {ID: "retained", Enabled: false}}
 	if err := database.SaveSetting(t.Context(), store.Client, "metadata.sources", saved); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestSourceSettingsFollowRegisteredSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	want := []SourceSetting{{ID: "retained", Enabled: false}, {ID: "added", Enabled: true}}
+	want := []domain.SourceToggle{{ID: "retained", Enabled: false}, {ID: "added", Enabled: true}}
 	if got := s.Settings(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("settings = %+v, want %+v", got, want)
 	}
@@ -433,7 +433,7 @@ func TestResolveWithoutJavDBMergesInPriorityOrderAndPersistsCache(t *testing.T) 
 	if primary.calls.Load() != 1 || secondary.calls.Load() != 1 {
 		t.Fatal("hot cache fetched sources again")
 	}
-	if err := s.UpdateSettings(t.Context(), []SourceSetting{{ID: "secondary", Enabled: true}, {ID: "primary", Enabled: false}}); err != nil {
+	if err := s.UpdateSettings(t.Context(), []domain.SourceToggle{{ID: "secondary", Enabled: true}, {ID: "primary", Enabled: false}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Resolve(t.Context(), domain.MovieRef{Code: "ABP-123"})
@@ -541,7 +541,7 @@ func TestConfirmedMissIsCachedAndSourceSettingsValidate(t *testing.T) {
 	if source.calls.Load() != 1 {
 		t.Fatalf("negative cache missed: %d", source.calls.Load())
 	}
-	if err := s.UpdateSettings(t.Context(), []SourceSetting{{ID: "unknown", Enabled: true}}); err == nil {
+	if err := s.UpdateSettings(t.Context(), []domain.SourceToggle{{ID: "unknown", Enabled: true}}); err == nil {
 		t.Fatal("unknown source accepted")
 	}
 }

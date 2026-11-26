@@ -58,8 +58,10 @@ func IsPrivateOrLoopbackIP(ip net.IP) bool {
 	return false
 }
 
-// ValidateSafeURL checks that the URL scheme is http/https and does not resolve to private/loopback IPs.
-func ValidateSafeURL(ctx context.Context, rawURL string) (*url.URL, error) {
+// validateSafeURLShape checks only syntax and literals: http/https, a non-empty
+// host, no localhost, and no private/loopback IP literal. It never resolves DNS,
+// so it is cheap; callers that can be proxied must use ValidateSafeURL instead.
+func validateSafeURLShape(rawURL string) (*url.URL, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
@@ -79,11 +81,23 @@ func ValidateSafeURL(ctx context.Context, rawURL string) (*url.URL, error) {
 		return nil, errors.New("access to localhost is prohibited")
 	}
 
-	// If hostname is directly an IP literal
-	if ip := net.ParseIP(hostname); ip != nil {
-		if IsPrivateOrLoopbackIP(ip) {
-			return nil, fmt.Errorf("access to private/loopback IP %s is prohibited", ip)
-		}
+	if ip := net.ParseIP(hostname); ip != nil && IsPrivateOrLoopbackIP(ip) {
+		return nil, fmt.Errorf("access to private/loopback IP %s is prohibited", ip)
+	}
+
+	return parsed, nil
+}
+
+// ValidateSafeURL checks that the URL scheme is http/https and does not resolve to private/loopback IPs.
+func ValidateSafeURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	parsed, err := validateSafeURLShape(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	hostname := parsed.Hostname()
+	// A public IP literal was already checked by the shape validation.
+	if net.ParseIP(hostname) != nil {
 		return parsed, nil
 	}
 
@@ -95,9 +109,29 @@ func ValidateSafeURL(ctx context.Context, rawURL string) (*url.URL, error) {
 	return parsed, nil
 }
 
-// NewSafeTransport creates an http.Transport with SSRF protection at dial time.
+// NewSafeTransport creates an http.Transport with SSRF protection. Direct
+// connections are checked and pinned at dial time; proxied requests have their
+// target validated before being handed to the proxy.
 func NewSafeTransport(proxyManager *ProxyManager) *http.Transport {
 	transport := NewTransport(proxyManager)
+	if proxy := transport.Proxy; proxy != nil {
+		// The transport calls Proxy for every request, including each redirect
+		// hop. A proxied request dials the proxy itself, so the dial-time check
+		// below cannot see the target: resolve and validate it here instead.
+		transport.Proxy = func(req *http.Request) (*url.URL, error) {
+			proxyURL, err := proxy(req)
+			if err != nil || proxyURL == nil {
+				return proxyURL, err
+			}
+			if _, err := ValidateSafeURL(req.Context(), req.URL.String()); err != nil {
+				if req.Response != nil {
+					return nil, fmt.Errorf("redirect blocked: %w", err)
+				}
+				return nil, err
+			}
+			return proxyURL, nil
+		}
+	}
 
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
@@ -107,8 +141,8 @@ func NewSafeTransport(proxyManager *ProxyManager) *http.Transport {
 	// Enforce SSRF protection at TCP dial time to prevent DNS rebinding attacks
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		// When traffic is routed through a proxy, addr is the proxy server itself
-		// (e.g. 127.0.0.1:7890 or a LAN proxy). Direct SSRF checks apply strictly
-		// to direct connections, as the proxy handles upstream resolution.
+		// (e.g. 127.0.0.1:7890 or a LAN proxy); the target was already validated
+		// in transport.Proxy, so only direct connections are checked here.
 		if proxyManager != nil && proxyManager.Resolve() != nil {
 			return dialer.DialContext(ctx, network, addr)
 		}
@@ -164,8 +198,9 @@ func NewSafeDownloadClient(proxyManager *ProxyManager, timeout time.Duration) *h
 			if len(via) >= MaxRedirects {
 				return fmt.Errorf("stopped after %d redirects", MaxRedirects)
 			}
-			// Re-validate target URL on every redirect hop
-			if _, err := ValidateSafeURL(req.Context(), req.URL.String()); err != nil {
+			// The redirect hop is fully validated again by the transport (Proxy
+			// hook or dial-time check), so a cheap shape check is enough here.
+			if _, err := validateSafeURLShape(req.URL.String()); err != nil {
 				return fmt.Errorf("redirect blocked: %w", err)
 			}
 			return nil
@@ -176,6 +211,8 @@ func NewSafeDownloadClient(proxyManager *ProxyManager, timeout time.Duration) *h
 // SafeDownload verifies the URL and enforces the 5MB response body limit.
 // Use NewSafeDownloadClient for dial-time and redirect protection.
 func SafeDownload(ctx context.Context, client *http.Client, targetURL string) ([]byte, error) {
+	// Keep the full check: SafeDownload cannot tell whether client routes through
+	// a proxy, and proxied transports skip dial-time SSRF checks.
 	if _, err := ValidateSafeURL(ctx, targetURL); err != nil {
 		return nil, fmt.Errorf("safe url check failed: %w", err)
 	}

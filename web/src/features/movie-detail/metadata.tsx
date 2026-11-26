@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import type { JavDBEntityType, JavDBZone } from '@/api/discover'
+import type { EntityType, Zone } from '@/api/discover'
 import { Badge } from '@/components/ui/badge'
 import { MetadataLink } from './metadata-link'
 
@@ -13,25 +13,31 @@ export type MovieMetadataValues = {
   director?: MetadataEntity
   actors: (MetadataEntity & { gender?: string })[]
   tags: MetadataEntity[]
-  zone?: JavDBZone | 'unknown'
+  zone?: Zone | 'unknown'
 }
 
 export function MovieMetadata({ movie }: { movie: MovieMetadataValues }) {
+  const actors = movie.actors ?? []
+  const tags = movie.tags ?? []
   return (
     <dl className="space-y-3 text-sm">
-      {movie.maker ? (
-        <EntityRow label="厂牌">
+      <EntityRow label="厂牌">
+        {movie.maker ? (
           <EntityLink kind="maker" entity={movie.maker} />
-        </EntityRow>
-      ) : null}
-      {movie.series ? (
-        <EntityRow label="系列">
+        ) : (
+          <span className="text-muted-foreground">N/A</span>
+        )}
+      </EntityRow>
+      <EntityRow label="系列">
+        {movie.series ? (
           <EntityLink kind="series" entity={movie.series} />
-        </EntityRow>
-      ) : null}
-      {movie.actors.length > 0 ? (
+        ) : (
+          <span className="text-muted-foreground">N/A</span>
+        )}
+      </EntityRow>
+      {actors.length > 0 ? (
         <EntityRow label="演员">
-          {movie.actors.map((actor, index) => (
+          {actors.map((actor, index) => (
             <span
               key={`${actor.provider}:${actor.id || actor.name}:${index}`}
               className={cn(
@@ -46,25 +52,19 @@ export function MovieMetadata({ movie }: { movie: MovieMetadataValues }) {
           ))}
         </EntityRow>
       ) : null}
-      {movie.director ? (
-        <EntityRow label="导演">
+      <EntityRow label="导演">
+        {movie.director ? (
           <EntityLink kind="director" entity={movie.director} />
-        </EntityRow>
-      ) : null}
-      {movie.tags.length > 0 ? (
+        ) : (
+          <span className="text-muted-foreground">N/A</span>
+        )}
+      </EntityRow>
+      {tags.length > 0 ? (
         <div className="flex items-start gap-4">
           <dt className="w-10 shrink-0 pt-0.5 leading-5 text-muted-foreground">标签</dt>
           <dd className="flex min-w-0 flex-wrap gap-2">
-            {movie.tags.map((tag, index) =>
-              !tag.id || tag.provider !== 'javdb' || movie.zone === 'unknown' ? (
-                <Badge
-                  key={`${tag.provider}:${tag.id || tag.name}:${index}`}
-                  variant="outline"
-                  className="h-auto max-w-full break-words whitespace-normal"
-                >
-                  {tag.name}
-                </Badge>
-              ) : (
+            {tags.map((tag, index) =>
+              tag.id && tag.provider === 'javdb' && movie.zone !== 'unknown' ? (
                 <MetadataLink
                   key={tag.id}
                   kind="tag"
@@ -73,6 +73,14 @@ export function MovieMetadata({ movie }: { movie: MovieMetadataValues }) {
                   zone={movie.zone}
                   badge
                 />
+              ) : (
+                <Badge
+                  key={`${tag.provider}:${tag.id || tag.name}:${index}`}
+                  variant="outline"
+                  className="h-auto max-w-full break-words whitespace-normal"
+                >
+                  {tag.name}
+                </Badge>
               )
             )}
           </dd>
@@ -82,7 +90,7 @@ export function MovieMetadata({ movie }: { movie: MovieMetadataValues }) {
   )
 }
 
-function EntityLink({ kind, entity }: { kind: JavDBEntityType; entity: MetadataEntity }) {
+function EntityLink({ kind, entity }: { kind: EntityType; entity: MetadataEntity }) {
   return entity.id && entity.provider === 'javdb' ? (
     <MetadataLink kind={kind} id={entity.id} name={entity.name} />
   ) : (

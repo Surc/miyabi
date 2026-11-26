@@ -82,7 +82,27 @@ func fetchWebMovie(ctx context.Context, client netx.FingerprintHTTPClient, movie
 }
 
 func fetchWebMovieHTML(ctx context.Context, client netx.FingerprintHTTPClient, movieID string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, webBaseURL+"/v/"+url.PathEscape(movieID), nil)
+	return fetchWebDocument(ctx, client, webBaseURL+"/v/"+url.PathEscape(movieID))
+}
+
+func (c *Client) fetchWebHTML(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	if c.fingerprint == nil {
+		return nil, errors.New("JavDB web client is unavailable")
+	}
+	if err := c.waitRequest(ctx, time.Now().Add(maxRateLimitWait)); err != nil {
+		return nil, err
+	}
+	addr := webBaseURL + path
+	if encoded := query.Encode(); encoded != "" {
+		addr += "?" + encoded
+	}
+	body, err := fetchWebDocument(ctx, c.fingerprint, addr)
+	c.deferWebRateLimit(err)
+	return body, err
+}
+
+func fetchWebDocument(ctx context.Context, client netx.FingerprintHTTPClient, addr string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, addr, nil)
 	if err != nil {
 		return nil, err
 	}

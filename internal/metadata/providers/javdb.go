@@ -16,6 +16,7 @@ type JavDBCatalogue interface {
 	Search(context.Context, string, domain.SearchOptions) ([]catalogue.Movie, error)
 	CatalogueDetail(context.Context, string) (domain.MovieDetail, error)
 	RefreshCatalogueDetail(context.Context, string) (domain.MovieDetail, error)
+	ResolveMovieID(context.Context, string) (string, error)
 	Media(context.Context, string) (domain.Media, error)
 }
 
@@ -31,6 +32,14 @@ func (s *JavDB) Media(ctx context.Context, url string) (domain.Media, error) {
 func (s *JavDB) Fetch(ctx context.Context, ref domain.MovieRef) (domain.MovieMetadata, error) {
 	code := codeid.Normalize(ref.Code)
 	id := ref.JavDBID
+	session, hasSessionStatus := s.catalogue.(interface{ HasJavDBSession() bool })
+	if id == "" && (!hasSessionStatus || !session.HasJavDBSession()) {
+		var err error
+		id, err = s.catalogue.ResolveMovieID(ctx, code)
+		if err != nil {
+			return domain.MovieMetadata{}, err
+		}
+	}
 	if id == "" {
 		var candidates []domain.Movie
 		for _, query := range codeid.Queries(code) {

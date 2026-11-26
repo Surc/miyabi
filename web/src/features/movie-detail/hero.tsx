@@ -40,6 +40,10 @@ export function MovieHero({
             <Badge variant="outline" className="tabular-nums">
               {movie.code}
             </Badge>
+            {libraryStatus && movie.has_subtitle ? <Badge variant="outline">中文</Badge> : null}
+            {libraryStatus && (movie.has_uncensored || movie.has_cracked) ? (
+              <Badge variant="outline">无码</Badge>
+            ) : null}
             {libraryStatus ? (
               <Badge variant={libraryStatus === 'done' ? 'library' : 'secondary'}>
                 {{ done: '已入库', pending: '待刮削', failed: '刮削失败' }[libraryStatus]}
@@ -53,9 +57,6 @@ export function MovieHero({
           <h1 className="text-xl leading-snug font-bold tracking-normal sm:text-2xl">
             {movieDisplayTitle(movie.code, movie.title)}
           </h1>
-          {movie.origin_title && movie.origin_title !== movie.title ? (
-            <p className="text-sm leading-6 text-muted-foreground">{movie.origin_title}</p>
-          ) : null}
         </div>
 
         {actions}

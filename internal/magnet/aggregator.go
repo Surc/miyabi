@@ -12,13 +12,30 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 )
 
-const defaultAggregatorTimeout = 8 * time.Second
+const (
+	defaultAggregatorTimeout = 8 * time.Second
+	// breakerThreshold consecutive failures put a source into a cooldown of
+	// breakerCooldown, so an unreachable source stops costing a full timeout on
+	// every query. The first query after the cooldown probes it again.
+	breakerThreshold = 3
+	breakerCooldown  = 5 * time.Minute
+)
+
+// errCoolingDown reports a source left out while its breaker is open.
+var errCoolingDown = errors.New("cooling down after repeated failures")
+
+type breaker struct {
+	failures  int
+	openUntil time.Time
+}
 
 // Aggregator queries every source concurrently, merges records that share an
 // infohash, enriches them with inferred tags, and orders the result.
 type Aggregator struct {
-	sources []Source
-	timeout time.Duration
+	sources  []Source
+	timeout  time.Duration
+	mu       sync.Mutex
+	breakers []breaker
 }
 
 // NewAggregator creates an Aggregator. Each source gets its own timeout;
@@ -27,7 +44,31 @@ func NewAggregator(sources []Source, timeout time.Duration) *Aggregator {
 	if timeout <= 0 {
 		timeout = defaultAggregatorTimeout
 	}
-	return &Aggregator{sources: sources, timeout: timeout}
+	return &Aggregator{sources: sources, timeout: timeout, breakers: make([]breaker, len(sources))}
+}
+
+func (a *Aggregator) admit(i int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !time.Now().Before(a.breakers[i].openUntil)
+}
+
+// record updates a source's breaker with a query outcome and reports whether
+// this failure opened it.
+func (a *Aggregator) record(i int, err error) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	b := &a.breakers[i]
+	if err == nil {
+		b.failures = 0
+		return false
+	}
+	b.failures++
+	if b.failures < breakerThreshold {
+		return false
+	}
+	b.openUntil = time.Now().Add(breakerCooldown)
+	return true
 }
 
 type queryResult struct {
@@ -58,21 +99,47 @@ func (a *Aggregator) FindDetailed(ctx context.Context, ref domain.MovieRef) ([]d
 	var wg sync.WaitGroup
 	for i, src := range a.sources {
 		wg.Go(func() {
+			if !a.admit(i) {
+				results[i] = queryResult{source: src.Name(), err: errCoolingDown}
+				return
+			}
 			sourceCtx, cancel := context.WithTimeout(ctx, a.timeout)
 			defer cancel()
 			magnets, err := src.Find(sourceCtx, ref)
 			results[i] = queryResult{source: src.Name(), magnets: magnets, err: err}
+			// A switched-off or challenged source says nothing about its health,
+			// and a caller that went away is not the source's fault.
+			if ctx.Err() != nil || errors.Is(err, ErrSkipped) || errors.Is(err, domain.ErrBlocked) {
+				return
+			}
+			if a.record(i, err) {
+				slog.WarnContext(ctx, "magnet source cooling down after repeated failures",
+					"source", src.Name(), "failures", breakerThreshold, "cooldown", breakerCooldown)
+			}
 		})
 	}
 	wg.Wait()
 
 	var failures []error
 	var skipped int
+	var blocked int
 	merged := make(map[string]*domain.Magnet)
 	var order []string
 	for _, res := range results {
 		if errors.Is(res.err, ErrSkipped) {
 			skipped++
+			continue
+		}
+		// A source answering with a bot challenge has no usable content; treat it
+		// as an empty result instead of a failure so the movie shows "no magnets".
+		if errors.Is(res.err, domain.ErrBlocked) {
+			slog.WarnContext(ctx, "magnet source blocked by challenge; treating as no result",
+				"source", res.source, "code", ref.Code)
+			blocked++
+			continue
+		}
+		if errors.Is(res.err, errCoolingDown) {
+			failures = append(failures, fmt.Errorf("%s: %w", res.source, res.err))
 			continue
 		}
 		if res.err != nil {
@@ -91,7 +158,7 @@ func (a *Aggregator) FindDetailed(ctx context.Context, ref domain.MovieRef) ([]d
 		}
 	}
 
-	activeSources := len(a.sources) - skipped
+	activeSources := len(a.sources) - skipped - blocked
 	if activeSources > 0 && len(failures) == activeSources {
 		return nil, false, domain.E(domain.KindUpstream, "所有磁力来源均不可用", errors.Join(failures...))
 	}
@@ -122,12 +189,12 @@ func (a *Aggregator) FindDetailed(ctx context.Context, ref domain.MovieRef) ([]d
 		}
 		return compareMagnets(a, b)
 	})
-	return result, len(failures) > 0, nil
+	return result, len(failures) > 0 || blocked > 0, nil
 }
 
 // mergeMagnet folds a second record of the same infohash into existing:
-// sources accumulate with JavDB first, flags OR together, size and file count
-// take the maximum, the JavDB name wins, and the earliest date is kept.
+// sources accumulate, flags OR together, size and file count take the maximum,
+// the first non-empty name wins, and the earliest date is kept.
 func mergeMagnet(existing *domain.Magnet, incoming domain.Magnet, source string) {
 	existing.Sources = mergeSources(existing.Sources, append([]string{source}, incoming.Sources...))
 	existing.HasSubtitle = existing.HasSubtitle || incoming.HasSubtitle
@@ -135,10 +202,7 @@ func mergeMagnet(existing *domain.Magnet, incoming domain.Magnet, source string)
 	existing.Size = max(existing.Size, incoming.Size)
 	existing.FilesCount = max(existing.FilesCount, incoming.FilesCount)
 
-	fromJavDB := source == domain.MagnetSourceJavDB || slices.Contains(incoming.Sources, domain.MagnetSourceJavDB)
-	if fromJavDB && incoming.Name != "" {
-		existing.Name = incoming.Name
-	} else if existing.Name == "" {
+	if existing.Name == "" {
 		existing.Name = incoming.Name
 	}
 
@@ -157,11 +221,7 @@ func mergeSources(existing, incoming []string) []string {
 		if source == "" || slices.Contains(existing, source) {
 			continue
 		}
-		if source == domain.MagnetSourceJavDB {
-			existing = append([]string{source}, existing...)
-		} else {
-			existing = append(existing, source)
-		}
+		existing = append(existing, source)
 	}
 	return existing
 }

@@ -82,6 +82,7 @@ export function notifyUnauthorized(): void {
 export function imageURL(source: string) {
   if (/^\/api\/extensions\/browse\/movies\/[^/?#]+\/image$/.test(source)) return source
   if (source.startsWith('/api/library/artwork/')) return source
+  if (source.startsWith('/api/actors/')) return source
   if (/^\/api\/library\/movies\/\d+\/previews\/\d+(?:\?v=\d+)?$/.test(source)) return source
   // Invalidate the encoded image responses cached before the backend decoded them.
   return `/api/image?v=3&url=${encodeURIComponent(source)}`

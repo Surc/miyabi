@@ -21,6 +21,42 @@ func (f ActorFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActorMutation", m)
 }
 
+// The ActorAliasFunc type is an adapter to allow the use of ordinary
+// function as ActorAlias mutator.
+type ActorAliasFunc func(context.Context, *ent.ActorAliasMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ActorAliasFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ActorAliasMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActorAliasMutation", m)
+}
+
+// The ActorImageFunc type is an adapter to allow the use of ordinary
+// function as ActorImage mutator.
+type ActorImageFunc func(context.Context, *ent.ActorImageMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ActorImageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ActorImageMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActorImageMutation", m)
+}
+
+// The ActorProfileFunc type is an adapter to allow the use of ordinary
+// function as ActorProfile mutator.
+type ActorProfileFunc func(context.Context, *ent.ActorProfileMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ActorProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ActorProfileMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActorProfileMutation", m)
+}
+
 // The EmbyNotificationFunc type is an adapter to allow the use of ordinary
 // function as EmbyNotification mutator.
 type EmbyNotificationFunc func(context.Context, *ent.EmbyNotificationMutation) (ent.Value, error)
@@ -93,6 +129,18 @@ func (f OfflineDownloadFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Va
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.OfflineDownloadMutation", m)
 }
 
+// The PanAccountFunc type is an adapter to allow the use of ordinary
+// function as PanAccount mutator.
+type PanAccountFunc func(context.Context, *ent.PanAccountMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PanAccountFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PanAccountMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PanAccountMutation", m)
+}
+
 // The SettingFunc type is an adapter to allow the use of ordinary
 // function as Setting mutator.
 type SettingFunc func(context.Context, *ent.SettingMutation) (ent.Value, error)
@@ -103,6 +151,18 @@ func (f SettingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, err
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SettingMutation", m)
+}
+
+// The StorageSourceFunc type is an adapter to allow the use of ordinary
+// function as StorageSource mutator.
+type StorageSourceFunc func(context.Context, *ent.StorageSourceMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f StorageSourceFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.StorageSourceMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.StorageSourceMutation", m)
 }
 
 // The SubscriptionFunc type is an adapter to allow the use of ordinary
@@ -163,6 +223,18 @@ func (f ViewedMovieFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value,
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ViewedMovieMutation", m)
+}
+
+// The WatchHistoryFunc type is an adapter to allow the use of ordinary
+// function as WatchHistory mutator.
+type WatchHistoryFunc func(context.Context, *ent.WatchHistoryMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WatchHistoryFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WatchHistoryMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WatchHistoryMutation", m)
 }
 
 // Condition is a hook condition function.

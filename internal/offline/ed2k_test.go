@@ -53,9 +53,9 @@ func TestED2KSubmissionRecoversByLinkAndCancelsByRemoteHash(t *testing.T) {
 	if record.Hash != id || record.InfoHash != "" || record.Recovery.ED2KURI != uri {
 		t.Fatalf("unexpected pending task: %+v", record)
 	}
-	service = New(service.database, service.catalogue, service.drive, service.tasks, service.library, service.submitTimeout)
+	service = New(service.database, service.catalogue, service.drive, service.tasks, service.library, nil, service.submitTimeout)
 	service.now = func() time.Time { return record.Recovery.RetryAt }
-	if err := service.Recover(ctx); err != nil {
+	if err := service.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	saved := service.database.OfflineDownload.GetX(ctx, record.ID)

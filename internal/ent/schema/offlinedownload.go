@@ -35,6 +35,7 @@ func (OfflineDownload) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("account_id", "status", "hash"),
 		index.Fields("account_id", "directory_id", "hash", "id"),
+		index.Fields("account_id", "code", "hash", "id"),
 		index.Fields("account_id", "javdb_id", "hash", "id"),
 	}
 }

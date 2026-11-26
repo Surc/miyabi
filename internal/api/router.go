@@ -41,6 +41,10 @@ type Dependencies struct {
 	Frontend        fs.FS
 	STRMToken       string
 	TrustedProxies  []string
+	Play            PlayManager
+	Logs            LogReader
+	Sources         SourceManager
+	Actors          ActorManager
 }
 
 // NewRouter requires an Access gate, including when password protection is disabled.
@@ -51,9 +55,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 		deps.Logger = slog.Default()
 	}
 
-	if len(deps.TrustedProxies) > 0 {
-		_ = router.SetTrustedProxies(deps.TrustedProxies)
-	} else {
+	if err := router.SetTrustedProxies(deps.TrustedProxies); err != nil {
+		// Config validation should prevent this; fall back to trusting no proxy.
+		deps.Logger.Error("apply trusted proxies", "error", err)
 		_ = router.SetTrustedProxies(nil)
 	}
 
@@ -87,6 +91,15 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			c.Request = c.Request.WithContext(javlibrary.WithBrowserPeer(c.Request.Context(), c.Request.RemoteAddr))
 		}
 	}
+	// External players cannot send the session cookie; serve a subtitle as
+	// UTF-8 text using the same token policy as the STRM relay.
+	api.GET("/subtitle-file/:trackID", noStore(), subtitleFileHandler(deps.Subtitles, deps.STRMToken, deps.Access))
+	// Local media for external players (no session cookie) and the built-in
+	// player; uses the same token/session policy as the STRM relay.
+	localHandler := localStreamHandler(deps.Play, deps.STRMToken, deps.Access)
+	api.GET("/play-local/:fileID", noStore(), localHandler)
+	api.HEAD("/play-local/:fileID", noStore(), localHandler)
+
 	protected := api.Group("", authMiddleware(deps.Access))
 	registerTop(protected, deps.TopSettings)
 	registerJavLibraryVerification(protected, deps.JavLibraryRelay, browserRating)
@@ -101,11 +114,17 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerJavDBSession(settingsAPI, deps.Catalogue)
 	settingsAPI.GET("/scraping", metadataSettingsHandler(deps.Metadata))
 	settingsAPI.PUT("/scraping", metadataUpdateHandler(deps.Metadata))
+	settingsAPI.GET("/magnet-sources", magnetSourceSettingsHandler(deps.Catalogue))
+	settingsAPI.PUT("/magnet-sources", magnetSourceUpdateHandler(deps.Catalogue))
+	settingsAPI.GET("/actor-sources", actorSourceSettingsHandler(deps.Actors))
+	settingsAPI.PUT("/actor-sources", actorSourceUpdateHandler(deps.Actors))
 	settingsAPI.GET("/system", dataInfoHandler(deps.Maintenance))
 	settingsAPI.DELETE("/cache", dataClearCacheHandler(deps.Maintenance))
+	if deps.Logs != nil {
+		settingsAPI.GET("/logs", dataLogsHandler(deps.Logs))
+	}
 	settingsAPI.GET("/network", networkHandler(deps.Network))
 	settingsAPI.PUT("/network", networkUpdateHandler(deps.Network))
-	settingsAPI.POST("/network/test", networkTestHandler(deps.Network))
 	if deps.Subtitles != nil {
 		settingsAPI.GET("/subtitles", subtitleSettingsHandler(deps.Subtitles))
 		settingsAPI.PUT("/subtitles", subtitleSettingsUpdateHandler(deps.Subtitles))
@@ -116,15 +135,58 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	settingsAPI.POST("/emby/test", embyTestHandler(deps.Emby))
 	settingsAPI.GET("/subscription", subscriptionSettingsGetHandler(deps.Monitor))
 	settingsAPI.PUT("/subscription", subscriptionSettingsUpdateHandler(deps.Monitor))
+	settingsAPI.GET("/sources", sourceListHandler(deps.Sources))
+	settingsAPI.PUT("/sources", sourceUpdateHandler(deps.Sources, deps.Library))
+
+	// MPV bridge installer scripts, downloaded from the Outputs settings page.
+	protected.GET("/mpv-bridge/install.ps1", noStore(), mpvBridgeScriptHandler(mpvBridgeInstall, "install-mpv-bridge.ps1"))
+	protected.GET("/mpv-bridge/uninstall.ps1", noStore(), mpvBridgeScriptHandler(mpvBridgeUninstall, "uninstall-mpv-bridge.ps1"))
 
 	protected.GET("/library/movies", libraryMoviesHandler(deps.Library))
+	protected.GET("/library/browse", libraryBrowseHandler(deps.Library))
+	protected.GET("/library/filter-options", libraryFilterOptionsHandler(deps.Library))
+	protected.GET("/library/top-rated", libraryTopRatedHandler(deps.Library))
 	protected.GET("/library/movies/:id", libraryMovieHandler(deps.Library))
 	protected.POST("/library/movies/:id/scrape", libraryMovieScrapeHandler(deps.Library))
 	protected.GET("/library/movies/:id/previews/:index", libraryPreviewHandler(deps.Library, deps.Metadata, deps.BrowseExtension))
 	registerLibrarySubtitles(protected, deps.Library)
+	subtitlesAPI := protected.Group("/library/movies/:id/player-subtitles", noStore())
+	subtitlesAPI.GET("", subtitleListHandler(deps.Subtitles))
+	subtitlesAPI.GET("/search", subtitleSearchHandler(deps.Subtitles))
+	subtitlesAPI.POST("/preview", subtitlePreviewHandler(deps.Subtitles))
+	subtitlesAPI.POST("", subtitleSaveHandler(deps.Subtitles))
+	subtitlesAPI.DELETE("/:subtitleID", subtitleDeleteHandler(deps.Subtitles))
+	subtitlesAPI.GET("/:subtitleID/cues", subtitleCuesHandler(deps.Subtitles))
 	protected.POST("/library/scan", libraryScanHandler(deps.Library, deps.Emby))
+	protected.POST("/library/sync", librarySyncHandler(deps.Library))
+	protected.GET("/library/pending", libraryPendingHandler(deps.Library))
 	protected.POST("/library/rebuild", libraryRebuildHandler(deps.Library))
 	protected.GET("/library/artwork/:key", libraryArtworkHandler(deps.Artwork))
+
+	actorsAPI := protected.Group("/actors", noStore())
+	{
+		actorsAPI.GET("", actorListHandler(deps.Actors))
+		actorsAPI.GET("/:key", actorDetailHandler(deps.Actors, deps.Library))
+		actorsAPI.GET("/:key/avatar", actorAvatarHandler(deps.Actors))
+		actorsAPI.GET("/:key/image/:index", actorImageHandler(deps.Actors))
+	}
+
+	playAPI := protected.Group("/play", noStore())
+	playAPI.GET("/files", playFilesHandler(deps.Play))
+	playAPI.GET("/start", playStartMovieHandler(deps.Play))
+	playAPI.GET("/qualities", playQualitiesHandler(deps.Play))
+	playAPI.GET("/:id", playStartHandler(deps.Play))
+	playAPI.DELETE("/:id", playReleaseHandler(deps.Play))
+	playAPI.GET("/:id/stream/:resource", playStreamHandler(deps.Play))
+	playAPI.HEAD("/:id/stream/:resource", playStreamHandler(deps.Play))
+	playAPI.POST("/progress", playProgressHandler(deps.Play))
+
+	// Builds the miyabi-mpv:// deep link used by the movie card context menu.
+	protected.GET("/mpv-link", noStore(), mpvLinkHandler(deps.Play, deps.Subtitles, deps.STRMToken))
+
+	protected.GET("/history", noStore(), historyHandler(deps.Play))
+	protected.POST("/history/remove", historyRemoveHandler(deps.Play))
+	protected.DELETE("/history", historyClearHandler(deps.Play))
 
 	protected.GET("/tasks", noStore(), tasksHandler(deps.Tasks))
 	protected.POST("/tasks/:id/retry", taskRetryHandler(deps.Tasks))
@@ -146,13 +208,13 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	subscriptionsAPI.GET("/actors/:id/feed", subscriptionActorFeedHandler(deps.Monitor))
 
 	protected.GET("/discover/movies", discoverBrowseHandler(deps.Catalogue))
+	protected.GET("/discover/search", discoverSearchHandler(deps.Catalogue))
 	protected.POST("/discover/movie-states", noStore(), discoverMovieStatesHandler(deps.Catalogue))
 	protected.GET("/discover/viewed", noStore(), discoverViewedHandler(deps.Library))
 	protected.POST("/discover/viewed", discoverAddViewedHandler(deps.Library))
-	protected.GET("/discover/search", discoverSearchHandler(deps.Catalogue))
 	protected.GET("/discover/tags", discoverTagsHandler(deps.Catalogue))
-	protected.GET("/discover/movies/:id", discoverMovieHandler(deps.Catalogue))
 	protected.GET("/discover/movies/resolve", discoverResolveMovieHandler(deps.Catalogue))
+	protected.GET("/discover/movies/:id", discoverMovieHandler(deps.Catalogue, deps.Metadata))
 	protected.GET("/discover/movies/:id/magnets", discoverMagnetsHandler(deps.Catalogue))
 	protected.GET("/discover/movies/:id/ed2k", noStore(), discoverED2KHandler(deps.Catalogue))
 	protected.POST("/discover/movies/:id/offline", offlineAddHandler(deps.Offline))
@@ -163,13 +225,14 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	}
 
 	panAPI := protected.Group("/pan", noStore())
-	panAPI.GET("/account", panAccountHandler(deps.Drive))
-	panAPI.DELETE("/account", panDisconnectHandler(deps.Drive))
+	panAPI.GET("/accounts", panAccountsHandler(deps.Drive))
+	panAPI.GET("/accounts/:accountID", panAccountStatusHandler(deps.Drive))
+	panAPI.GET("/accounts/:accountID/files", panAccountFilesHandler(deps.Drive))
+	panAPI.PUT("/accounts/:accountID/directory", panAccountSelectDirectoryHandler(deps.Drive))
+	panAPI.DELETE("/accounts/:accountID/directory", panAccountClearDirectoryHandler(deps.Drive))
+	panAPI.DELETE("/accounts/:accountID", panAccountDisconnectHandler(deps.Drive))
 	panAPI.POST("/login", panBeginLoginHandler(deps.Drive))
 	panAPI.GET("/login/:id", panLoginStatusHandler(deps.Drive))
-	panAPI.GET("/files", panFilesHandler(deps.Drive))
-	panAPI.PUT("/directory", panSelectDirectoryHandler(deps.Drive))
-	panAPI.DELETE("/directory", panClearDirectoryHandler(deps.Drive))
 
 	if deps.Frontend != nil {
 		installFrontend(router, deps.Frontend)

@@ -37,9 +37,14 @@ func (Actor) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("movies", Movie.Type).
 			Ref("actors"),
+		edge.To("profile", ActorProfile.Type).
+			Unique(),
 	}
 }
 
 func (Actor) Indexes() []ent.Index {
-	return []ent.Index{index.Fields("provider", "source_id").Unique()}
+	return []ent.Index{
+		index.Fields("provider", "source_id").Unique(),
+		index.Edges("profile"),
+	}
 }

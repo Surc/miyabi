@@ -15,6 +15,7 @@ export function MoviePreviews({
   // The viewer stays mounted so its closing animation can play; the index outlives `open`.
   const [viewerOpen, setViewerOpen] = useState(false)
   const [viewerIndex, setViewerIndex] = useState(0)
+  const items = images ?? []
 
   const openViewer = (index: number) => {
     setViewerIndex(index)
@@ -51,7 +52,7 @@ export function MoviePreviews({
         </div>
       )}
       <MoviePreviewViewer
-        images={images}
+        images={items}
         index={viewerIndex}
         open={viewerOpen}
         onIndexChange={setViewerIndex}

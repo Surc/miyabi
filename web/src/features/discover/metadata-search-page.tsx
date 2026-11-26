@@ -61,7 +61,7 @@ export function MetadataSearchPage({
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent position="popper" align="end">
+            <SelectContent alignItemWithTrigger={false} align="end">
               <SelectGroup>
                 <SelectItem value="all">全部分区</SelectItem>
                 {DISCOVER_ZONES.map(zone => (

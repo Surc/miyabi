@@ -19,19 +19,118 @@ var (
 		{Name: "name_zht", Type: field.TypeString, Nullable: true},
 		{Name: "gender", Type: field.TypeEnum, Enums: []string{"female", "male", "unknown"}, Default: "unknown"},
 		{Name: "avatar", Type: field.TypeString, Nullable: true},
+		{Name: "actor_profile", Type: field.TypeInt, Nullable: true},
 	}
 	// ActorsTable holds the schema information for the "actors" table.
 	ActorsTable = &schema.Table{
 		Name:       "actors",
 		Columns:    ActorsColumns,
 		PrimaryKey: []*schema.Column{ActorsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "actors_actor_profiles_profile",
+				Columns:    []*schema.Column{ActorsColumns[9]},
+				RefColumns: []*schema.Column{ActorProfilesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "actor_provider_source_id",
 				Unique:  true,
 				Columns: []*schema.Column{ActorsColumns[3], ActorsColumns[4]},
 			},
+			{
+				Name:    "actor_actor_profile",
+				Unique:  false,
+				Columns: []*schema.Column{ActorsColumns[9]},
+			},
 		},
+	}
+	// ActorAliasColumns holds the columns for the "actor_alias" table.
+	ActorAliasColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "alias", Type: field.TypeString},
+		{Name: "normalized", Type: field.TypeString},
+		{Name: "actor_profile_aliases", Type: field.TypeInt, Nullable: true},
+	}
+	// ActorAliasTable holds the schema information for the "actor_alias" table.
+	ActorAliasTable = &schema.Table{
+		Name:       "actor_alias",
+		Columns:    ActorAliasColumns,
+		PrimaryKey: []*schema.Column{ActorAliasColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "actor_alias_actor_profiles_aliases",
+				Columns:    []*schema.Column{ActorAliasColumns[5]},
+				RefColumns: []*schema.Column{ActorProfilesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "actoralias_normalized",
+				Unique:  false,
+				Columns: []*schema.Column{ActorAliasColumns[4]},
+			},
+		},
+	}
+	// ActorImagesColumns holds the columns for the "actor_images" table.
+	ActorImagesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "provider", Type: field.TypeString, Default: ""},
+		{Name: "source_id", Type: field.TypeString, Default: ""},
+		{Name: "url", Type: field.TypeString},
+		{Name: "role", Type: field.TypeString, Default: ""},
+		{Name: "position", Type: field.TypeInt, Default: 0},
+		{Name: "actor_profile_images", Type: field.TypeInt, Nullable: true},
+	}
+	// ActorImagesTable holds the schema information for the "actor_images" table.
+	ActorImagesTable = &schema.Table{
+		Name:       "actor_images",
+		Columns:    ActorImagesColumns,
+		PrimaryKey: []*schema.Column{ActorImagesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "actor_images_actor_profiles_images",
+				Columns:    []*schema.Column{ActorImagesColumns[8]},
+				RefColumns: []*schema.Column{ActorProfilesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
+	}
+	// ActorProfilesColumns holds the columns for the "actor_profiles" table.
+	ActorProfilesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "match_key", Type: field.TypeString, Unique: true},
+		{Name: "name", Type: field.TypeString},
+		{Name: "name_zht", Type: field.TypeString, Nullable: true},
+		{Name: "gender", Type: field.TypeEnum, Enums: []string{"female", "male", "unknown"}, Default: "unknown"},
+		{Name: "avatar", Type: field.TypeString, Nullable: true},
+		{Name: "summary", Type: field.TypeString, Nullable: true},
+		{Name: "birthday", Type: field.TypeString, Nullable: true},
+		{Name: "height", Type: field.TypeInt, Nullable: true},
+		{Name: "cup_size", Type: field.TypeString, Nullable: true},
+		{Name: "measurements", Type: field.TypeString, Nullable: true},
+		{Name: "blood_type", Type: field.TypeString, Nullable: true},
+		{Name: "nationality", Type: field.TypeString, Nullable: true},
+		{Name: "hobby", Type: field.TypeString, Nullable: true},
+		{Name: "skill", Type: field.TypeString, Nullable: true},
+		{Name: "debut_date", Type: field.TypeString, Nullable: true},
+		{Name: "source_url", Type: field.TypeString, Nullable: true},
+		{Name: "enriched_at", Type: field.TypeTime, Nullable: true},
+	}
+	// ActorProfilesTable holds the schema information for the "actor_profiles" table.
+	ActorProfilesTable = &schema.Table{
+		Name:       "actor_profiles",
+		Columns:    ActorProfilesColumns,
+		PrimaryKey: []*schema.Column{ActorProfilesColumns[0]},
 	}
 	// EmbyNotificationsColumns holds the columns for the "emby_notifications" table.
 	EmbyNotificationsColumns = []*schema.Column{
@@ -70,6 +169,7 @@ var (
 		{Name: "parent_id", Type: field.TypeString, Default: ""},
 		{Name: "account_id", Type: field.TypeString, Default: ""},
 		{Name: "root_id", Type: field.TypeString, Default: ""},
+		{Name: "upload_time", Type: field.TypeInt64, Default: 0},
 		{Name: "path", Type: field.TypeString, Default: ""},
 		{Name: "scan_id", Type: field.TypeString, Default: ""},
 		{Name: "movie_files", Type: field.TypeInt, Nullable: true},
@@ -82,7 +182,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "files_movies_files",
-				Columns:    []*schema.Column{FilesColumns[13]},
+				Columns:    []*schema.Column{FilesColumns[14]},
 				RefColumns: []*schema.Column{MoviesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -91,12 +191,12 @@ var (
 			{
 				Name:    "file_account_id_root_id_scan_id",
 				Unique:  false,
-				Columns: []*schema.Column{FilesColumns[9], FilesColumns[10], FilesColumns[12]},
+				Columns: []*schema.Column{FilesColumns[9], FilesColumns[10], FilesColumns[13]},
 			},
 			{
 				Name:    "file_movie_files_account_id_root_id",
 				Unique:  false,
-				Columns: []*schema.Column{FilesColumns[13], FilesColumns[9], FilesColumns[10]},
+				Columns: []*schema.Column{FilesColumns[14], FilesColumns[9], FilesColumns[10]},
 			},
 		},
 	}
@@ -174,6 +274,7 @@ var (
 		{Name: "series_id", Type: field.TypeString, Nullable: true},
 		{Name: "series_name", Type: field.TypeString, Nullable: true},
 		{Name: "rating", Type: field.TypeFloat64, Nullable: true},
+		{Name: "rating10", Type: field.TypeFloat64, Default: 0},
 		{Name: "cover", Type: field.TypeString, Nullable: true},
 		{Name: "poster", Type: field.TypeString, Nullable: true},
 		{Name: "fanarts", Type: field.TypeJSON},
@@ -196,6 +297,11 @@ var (
 				Name:    "movie_created_at_id",
 				Unique:  false,
 				Columns: []*schema.Column{MoviesColumns[1], MoviesColumns[0]},
+			},
+			{
+				Name:    "movie_rating10_id",
+				Unique:  false,
+				Columns: []*schema.Column{MoviesColumns[17], MoviesColumns[0]},
 			},
 		},
 	}
@@ -236,11 +342,35 @@ var (
 				Columns: []*schema.Column{OfflineDownloadsColumns[7], OfflineDownloadsColumns[8], OfflineDownloadsColumns[5], OfflineDownloadsColumns[0]},
 			},
 			{
+				Name:    "offlinedownload_account_id_code_hash_id",
+				Unique:  false,
+				Columns: []*schema.Column{OfflineDownloadsColumns[7], OfflineDownloadsColumns[3], OfflineDownloadsColumns[5], OfflineDownloadsColumns[0]},
+			},
+			{
 				Name:    "offlinedownload_account_id_javdb_id_hash_id",
 				Unique:  false,
 				Columns: []*schema.Column{OfflineDownloadsColumns[7], OfflineDownloadsColumns[4], OfflineDownloadsColumns[5], OfflineDownloadsColumns[0]},
 			},
 		},
+	}
+	// PanAccountsColumns holds the columns for the "pan_accounts" table.
+	PanAccountsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "account_id", Type: field.TypeString, Unique: true},
+		{Name: "access_token", Type: field.TypeString, Default: ""},
+		{Name: "refresh_token", Type: field.TypeString, Default: ""},
+		{Name: "expires_at", Type: field.TypeTime, Nullable: true},
+		{Name: "directory_id", Type: field.TypeString, Default: ""},
+		{Name: "directory_name", Type: field.TypeString, Default: ""},
+		{Name: "directory_path", Type: field.TypeString, Default: ""},
+	}
+	// PanAccountsTable holds the schema information for the "pan_accounts" table.
+	PanAccountsTable = &schema.Table{
+		Name:       "pan_accounts",
+		Columns:    PanAccountsColumns,
+		PrimaryKey: []*schema.Column{PanAccountsColumns[0]},
 	}
 	// SettingsColumns holds the columns for the "settings" table.
 	SettingsColumns = []*schema.Column{
@@ -255,6 +385,23 @@ var (
 		Name:       "settings",
 		Columns:    SettingsColumns,
 		PrimaryKey: []*schema.Column{SettingsColumns[0]},
+	}
+	// StorageSourcesColumns holds the columns for the "storage_sources" table.
+	StorageSourcesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Unique: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "kind", Type: field.TypeString},
+		{Name: "name", Type: field.TypeString},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "config", Type: field.TypeJSON, Nullable: true},
+		{Name: "position", Type: field.TypeInt, Default: 0},
+	}
+	// StorageSourcesTable holds the schema information for the "storage_sources" table.
+	StorageSourcesTable = &schema.Table{
+		Name:       "storage_sources",
+		Columns:    StorageSourcesColumns,
+		PrimaryKey: []*schema.Column{StorageSourcesColumns[0]},
 	}
 	// SubscriptionsColumns holds the columns for the "subscriptions" table.
 	SubscriptionsColumns = []*schema.Column{
@@ -400,7 +547,8 @@ var (
 	// ViewedMoviesColumns holds the columns for the "viewed_movies" table.
 	ViewedMoviesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
-		{Name: "javdb_id", Type: field.TypeString, Unique: true},
+		{Name: "code", Type: field.TypeString, Unique: true, Nullable: true},
+		{Name: "javdb_id", Type: field.TypeString, Unique: true, Nullable: true},
 		{Name: "viewed_at", Type: field.TypeTime},
 	}
 	// ViewedMoviesTable holds the schema information for the "viewed_movies" table.
@@ -412,7 +560,30 @@ var (
 			{
 				Name:    "viewedmovie_viewed_at_id",
 				Unique:  false,
-				Columns: []*schema.Column{ViewedMoviesColumns[2], ViewedMoviesColumns[0]},
+				Columns: []*schema.Column{ViewedMoviesColumns[3], ViewedMoviesColumns[0]},
+			},
+		},
+	}
+	// WatchHistoriesColumns holds the columns for the "watch_histories" table.
+	WatchHistoriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "movie_id", Type: field.TypeInt, Unique: true},
+		{Name: "file_id", Type: field.TypeString, Default: ""},
+		{Name: "position", Type: field.TypeFloat64, Default: 0},
+		{Name: "duration", Type: field.TypeFloat64, Default: 0},
+		{Name: "settings", Type: field.TypeJSON, Nullable: true},
+		{Name: "watched_at", Type: field.TypeTime},
+	}
+	// WatchHistoriesTable holds the schema information for the "watch_histories" table.
+	WatchHistoriesTable = &schema.Table{
+		Name:       "watch_histories",
+		Columns:    WatchHistoriesColumns,
+		PrimaryKey: []*schema.Column{WatchHistoriesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "watchhistory_watched_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{WatchHistoriesColumns[6], WatchHistoriesColumns[0]},
 			},
 		},
 	}
@@ -469,24 +640,33 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		ActorsTable,
+		ActorAliasTable,
+		ActorImagesTable,
+		ActorProfilesTable,
 		EmbyNotificationsTable,
 		FilesTable,
 		LocalScanEntriesTable,
 		MetadataCachesTable,
 		MoviesTable,
 		OfflineDownloadsTable,
+		PanAccountsTable,
 		SettingsTable,
+		StorageSourcesTable,
 		SubscriptionsTable,
 		SubtitlesTable,
 		TagsTable,
 		TasksTable,
 		ViewedMoviesTable,
+		WatchHistoriesTable,
 		MovieActorsTable,
 		MovieTagsTable,
 	}
 )
 
 func init() {
+	ActorsTable.ForeignKeys[0].RefTable = ActorProfilesTable
+	ActorAliasTable.ForeignKeys[0].RefTable = ActorProfilesTable
+	ActorImagesTable.ForeignKeys[0].RefTable = ActorProfilesTable
 	FilesTable.ForeignKeys[0].RefTable = MoviesTable
 	LocalScanEntriesTable.ForeignKeys[0].RefTable = FilesTable
 	SubtitlesTable.ForeignKeys[0].RefTable = MoviesTable

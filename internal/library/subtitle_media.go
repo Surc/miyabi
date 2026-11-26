@@ -51,8 +51,8 @@ func (s *Service) MovieSubtitles(ctx context.Context, id int) ([]SubtitleVideo, 
 
 func (s *Service) withSubtitleMedia(ctx context.Context, id int, run func(*os.Root, string, []SubtitleVideo) error) error {
 	return s.exportMgr.WithConfig(func(cfg export.Config) error {
-		load := func(source *domain.LibrarySource) error {
-			scope := libraryScope(source)
+		load := func(mounts []domain.LibrarySource) error {
+			scope := fileScope(s.mergeSources(ctx, mounts))
 			record, err := s.database.Movie.Query().Where(movie.IDEQ(id), movie.HasFilesWith(scope)).
 				WithFiles(func(query *ent.FileQuery) { query.Where(scope) }).Only(ctx)
 			if ent.IsNotFound(err) {
@@ -83,7 +83,7 @@ func (s *Service) withSubtitleMedia(ctx context.Context, id int, run func(*os.Ro
 			return run(root, dir, videos)
 		}
 		if s.drive != nil {
-			return s.drive.WithCurrentSource(ctx, load)
+			return s.drive.WithMounts(ctx, load)
 		}
 		return load(nil)
 	})

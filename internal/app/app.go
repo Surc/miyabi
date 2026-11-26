@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ppxb/miyabi"
+	"github.com/ppxb/miyabi/internal/actors"
 	"github.com/ppxb/miyabi/internal/api"
 	"github.com/ppxb/miyabi/internal/catalogue"
 	"github.com/ppxb/miyabi/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/ppxb/miyabi/internal/drive"
 	"github.com/ppxb/miyabi/internal/emby"
 	"github.com/ppxb/miyabi/internal/export"
+	"github.com/ppxb/miyabi/internal/freejavbt"
 	"github.com/ppxb/miyabi/internal/gfriends"
 	mediaimage "github.com/ppxb/miyabi/internal/image"
 	"github.com/ppxb/miyabi/internal/javbus"
@@ -32,8 +34,12 @@ import (
 	"github.com/ppxb/miyabi/internal/network"
 	"github.com/ppxb/miyabi/internal/netx"
 	"github.com/ppxb/miyabi/internal/offline"
+	"github.com/ppxb/miyabi/internal/playback"
+	"github.com/ppxb/miyabi/internal/projectjav"
+	"github.com/ppxb/miyabi/internal/source"
 	"github.com/ppxb/miyabi/internal/strm"
 	"github.com/ppxb/miyabi/internal/subtitle"
+	"github.com/ppxb/miyabi/internal/sukebei"
 	"github.com/ppxb/miyabi/internal/tasks"
 	"github.com/ppxb/miyabi/internal/top"
 )
@@ -55,16 +61,19 @@ type App struct {
 	offline   *offline.Service
 	monitors  *monitor.Service
 	driveSvc  *drive.Drive
+	play      *playback.Service
 	catalogue *catalogue.Service
 	extras    *catalogue.MovieExtras
 	scrape    *scrape.Service
 	metadata  *metadata.Service
 	embySvc   *emby.Service
+	library   *library.Service
+	export    *export.Manager
 }
 
 // New initializes all services, database connections, and registers task handlers.
 // cfg must be initialized by config.Load or supplied with explicit configuration.
-func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
+func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 	rating, err := newExternalRating()
 	if err != nil {
 		return nil, fmt.Errorf("initialize movie rating: %w", err)
@@ -77,14 +86,23 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		}
 	}()
 	ctx := context.Background()
+	var cleanup []func()
+	defer func() {
+		if err != nil {
+			for i := len(cleanup) - 1; i >= 0; i-- {
+				cleanup[i]()
+			}
+		}
+	}()
+
 	store, err := database.Open(ctx, cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	cleanup = append(cleanup, func() { _ = store.Close() })
 
 	networkSvc, err := network.New(ctx, store.Client)
 	if err != nil {
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize network service: %w", err)
 	}
 	if rating == nil {
@@ -95,14 +113,13 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	taskSvc := tasks.NewService(store.Client, taskRegistry)
 	driveSvc, err := drive.New(ctx, store.Client)
 	if err != nil {
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize drive service: %w", err)
 	}
+	cleanup = append(cleanup, driveSvc.Close)
+	sourceSvc := source.New(store.Client, driveSvc)
 
 	images, err := mediaimage.NewCache(cfg.DataDir)
 	if err != nil {
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize images cache: %w", err)
 	}
 
@@ -114,57 +131,105 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		defer cancel()
 		return scrape.PublicationCommitted(checkCtx, store.Client, publication)
 	})
-	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()))
+	subtitleSvc := subtitle.NewService(store.Client, subtitle.NewFinder(networkSvc.ProxyManager()),
+		filepath.Join(cfg.DataDir, "subtitles"), func() string { return exportMgr.Config().EmbyDir }, nil)
 	subtitleSvc.SetExportManager(exportMgr)
 	exportMgr.SetBeforeWriteRecovery(func(cfg export.Config) error {
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return subtitleSvc.RecoverLocked(recoveryCtx, cfg)
 	})
-	libSvc := library.New(store.Client, driveSvc, taskSvc, images, library.Options{ExportManager: exportMgr, Subtitles: subtitleSvc})
+
+	playSvc := playback.New(store.Client, driveSvc, 8*time.Hour, sourceSvc.LocalRoots)
+	libSvc := library.New(store.Client, driveSvc, taskSvc, images, library.Options{
+		ExportManager: exportMgr,
+		Subtitles:     subtitleSvc,
+		Sources:       sourceSvc.LibrarySources,
+		LocalSources: func(ctx context.Context) ([]library.LocalScanTarget, error) {
+			targets, err := sourceSvc.LocalTargets(ctx)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]library.LocalScanTarget, 0, len(targets))
+			for _, target := range targets {
+				result = append(result, library.LocalScanTarget{Path: target.Path, MetadataOnly: target.MetadataOnly})
+			}
+			return result, nil
+		},
+	})
 	javbusClient, err := javbus.New(javbus.Options{Proxy: networkSvc.ProxyManager()})
 	if err != nil {
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, err
 	}
-	catalogueSvc, err := catalogue.New(ctx, store.Client, cfg.DataDir, networkSvc.ProxyManager(), libSvc, javbusClient)
+	sukebeiClient, err := sukebei.New(sukebei.Options{Proxy: networkSvc.ProxyManager()})
 	if err != nil {
-		javbusClient.Close()
-		driveSvc.Close()
-		_ = store.Close()
+		return nil, fmt.Errorf("initialize Sukebei magnet source: %w", err)
+	}
+	freejavbtClient, err := freejavbt.New(freejavbt.Options{Proxy: networkSvc.ProxyManager()})
+	if err != nil {
+		return nil, fmt.Errorf("initialize freejavbt source: %w", err)
+	}
+	projectjavClient, err := projectjav.New(projectjav.Options{Proxy: networkSvc.ProxyManager()})
+	if err != nil {
+		return nil, fmt.Errorf("initialize ProjectJav magnet source: %w", err)
+	}
+	// catalogue owns the magnet clients and metadata owns its providers: each
+	// service's Close releases what it was given, so they are not registered
+	// separately here. freejavbt is shared by both; its Close is idempotent.
+	catalogueSvc, err := catalogue.New(ctx, store.Client, cfg.DataDir, networkSvc.ProxyManager(), libSvc, javbusClient, sukebeiClient, freejavbtClient, projectjavClient)
+	if err != nil {
 		return nil, fmt.Errorf("initialize catalogue service: %w", err)
 	}
-	fc2Source := providers.NewFC2(networkSvc.ProxyManager())
-	fanzaSource := providers.NewFANZA(networkSvc.ProxyManager())
-	heyzoSource := providers.NewHEYZO(networkSvc.ProxyManager())
-	pacopacomamaSource := providers.NewPacopacomama(networkSvc.ProxyManager())
-	metadataSvc, err := metadata.New(ctx, store.Client, fanzaSource, fc2Source, heyzoSource, pacopacomamaSource, providers.NewJavDB(catalogueSvc))
+	cleanup = append(cleanup, catalogueSvc.Close)
+	proxy := networkSvc.ProxyManager()
+	metadataSvc, err := metadata.New(ctx, store.Client,
+		providers.NewFANZA(proxy),
+		providers.NewFC2(proxy),
+		providers.NewFC2DB(proxy),
+		providers.NewHEYZO(proxy),
+		providers.NewPacopacomama(proxy),
+		providers.NewJavDB(catalogueSvc),
+		providers.NewJavBus(javbusClient, proxy),
+		providers.NewR18(proxy),
+		providers.NewOnePondo(proxy),
+		providers.NewCodeAV(proxy),
+		providers.NewJav321(proxy),
+		providers.NewTokyoHot(proxy),
+		providers.NewHeydouga(proxy),
+		providers.NewCaribbeancom(proxy),
+		providers.NewCaribbeancomPremium(proxy),
+		providers.NewC0930(proxy),
+		providers.NewH0930(proxy),
+		providers.NewH4610(proxy),
+		providers.NewTenMusume(proxy),
+		providers.NewMuraMura(proxy),
+		providers.NewDahlia(proxy),
+		providers.NewDuga(proxy),
+		freejavbtClient,
+	)
 	if err != nil {
-		fanzaSource.Close()
-		fc2Source.Close()
-		heyzoSource.Close()
-		pacopacomamaSource.Close()
-		catalogueSvc.Close()
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, err
 	}
+	cleanup = append(cleanup, metadataSvc.Close)
 
 	mdczSvc, err := newMDCzExtension(ctx, store.Client, cfg.DataDir, metadataSvc)
 	if err != nil {
-		metadataSvc.Close()
-		catalogueSvc.Close()
-		driveSvc.Close()
-		_ = store.Close()
+
 		return nil, fmt.Errorf("initialize MDCz extension: %w", err)
 	}
-	offlineSvc := offline.New(store.Client, catalogueSvc, driveSvc, taskSvc, libSvc, offlineSubmitTimeout)
+	offlineSvc := offline.New(store.Client, catalogueSvc, driveSvc, taskSvc, libSvc, metadataSvc, offlineSubmitTimeout)
 	monitorSvc := monitor.New(store.Client, catalogueSvc, offlineSvc, taskSvc)
 	gfriendsClient := gfriends.New(cfg.DataDir, &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: netx.NewTransport(networkSvc.ProxyManager()),
 	})
+	actorsSvc := actors.New(
+		store.Client,
+		gfriendsClient,
+		cfg.DataDir,
+		netx.NewSafeDownloadClient(networkSvc.ProxyManager(), 30*time.Second),
+		actors.NewAVLeague(networkSvc.ProxyManager()),
+	)
 	syncActors := cfg.EmbySyncActors
 	embySvc, err := emby.NewService(ctx, store.Client, emby.Config{
 		Enabled:    cfg.EmbyEnabled,
@@ -181,28 +246,20 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		ScheduleLocalScan: libSvc.ScheduleLocalScan,
 	})
 	if err != nil {
-		metadataSvc.Close()
-		catalogueSvc.Close()
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize emby service: %w", err)
 	}
+	cleanup = append(cleanup, embySvc.Close)
 	// This is the only cycle: library -> Emby -> catalogue -> library.
 	// Bind it before starting task pools or accepting requests.
 	libSvc.SetMediaNotifier(embySvc)
+	subtitleSvc.SetMediaNotifier(embySvc)
 	scrapeSvc := scrape.New(store.Client, driveSvc, mdczSvc, images, taskSvc, scrape.Dependencies{
 		ArtworkDecorator: mdczSvc,
 		BeginAttempt:     mdczSvc.BeginAttempt,
-		ExportManager:    exportMgr, MediaNotifier: embySvc, Subtitles: subtitleSvc,
+		ExportManager:    exportMgr, MediaNotifier: embySvc, Subtitles: subtitleSvc, Merger: actorsSvc,
 	})
 	maintenanceSvc, err := maintenance.New(cfg.DataDir, store.Client, images, scrapeSvc)
 	if err != nil {
-		scrapeSvc.Close()
-		embySvc.Close()
-		metadataSvc.Close()
-		catalogueSvc.Close()
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize maintenance service: %w", err)
 	}
 
@@ -212,13 +269,6 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	if err := exportMgr.WithConfig(func(export.Config) error { return nil }); err != nil {
 		logger.ErrorContext(ctx, "export publication recovery is blocked", "error", err)
 	}
-	if err := libSvc.ScheduleLocalScan(ctx); err != nil {
-		logger.ErrorContext(ctx, "failed to queue startup Emby directory scan", "error", err)
-	}
-	if exportCfg := exportMgr.Config(); exportCfg.PublicURL != "" && exportCfg.EmbyDir != "" {
-		embySvc.StartStartupSTRMRewrite()
-	}
-
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScan, libSvc.Scan, libSvc.Finished).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScrape, scrapeSvc.Scrape, scrapeSvc.Finished).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindSubtitle, scrapeSvc.ExportSubtitle, nil).WithRetry(database.RetryDelay))
@@ -227,15 +277,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	pools := newTaskPools(taskSvc, logger)
 	extras := catalogue.NewMovieExtrasWithRating(catalogueSvc, rating)
 	ratingOwned = true
+	cleanup = append(cleanup, extras.Close)
 	browseExtension, err := catalogue.NewBrowseExtension(cfg.DataDir, catalogueSvc, extras)
 	if err != nil {
-		extras.Close()
-		embySvc.Close()
-		scrapeSvc.Close()
-		metadataSvc.Close()
-		catalogueSvc.Close()
-		driveSvc.Close()
-		_ = store.Close()
 		return nil, fmt.Errorf("initialize discovery cache: %w", err)
 	}
 
@@ -266,6 +310,10 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Frontend:        miyabi.Frontend(),
 		STRMToken:       cfg.STRMToken,
 		TrustedProxies:  cfg.TrustedProxies,
+		Play:            playSvc,
+		Logs:            maintenanceSvc,
+		Sources:         sourceSvc,
+		Actors:          actorsSvc,
 	})
 
 	server := &http.Server{
@@ -287,21 +335,43 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		offline:   offlineSvc,
 		monitors:  monitorSvc,
 		driveSvc:  driveSvc,
+		play:      playSvc,
 		catalogue: catalogueSvc,
 		extras:    extras,
 		scrape:    scrapeSvc,
 		metadata:  metadataSvc,
 		embySvc:   embySvc,
+		library:   libSvc,
+		export:    exportMgr,
 	}, nil
 }
 
-// Run starts the task pools, the periodic workers and the HTTP server, then
-// blocks until ctx is cancelled or one of them fails. Every exit path shuts
-// the server down gracefully and waits for the workers before returning.
+// start runs the startup side effects that New deliberately leaves out: the
+// account token refresh loop, the startup scans and the STRM rewrite. Sources
+// only get an incremental sync: new files are still discovered, but existing
+// movies are not all re-scraped on every start.
+func (a *App) start(ctx context.Context) {
+	a.driveSvc.StartAccountRefresh(ctx)
+	if err := a.library.ScheduleLocalScan(ctx); err != nil {
+		a.logger.ErrorContext(ctx, "failed to queue startup Emby directory scan", "error", err)
+	}
+	if _, err := a.library.StartIncrementalSync(ctx); err != nil {
+		a.logger.ErrorContext(ctx, "failed to queue startup source sync", "error", err)
+	}
+	if exportCfg := a.export.Config(); exportCfg.PublicURL != "" && exportCfg.EmbyDir != "" {
+		a.embySvc.StartStartupSTRMRewrite()
+	}
+}
+
+// Run runs the startup side effects, starts the task pools, the periodic
+// workers and the HTTP server, then blocks until ctx is cancelled or one of
+// them fails. Every exit path shuts the server down gracefully and waits for
+// the workers before returning.
 func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.server.BaseContext = func(net.Listener) context.Context { return ctx }
+	a.start(ctx)
 
 	var workers sync.WaitGroup
 	poolError := make(chan error, len(a.pools))
@@ -349,26 +419,12 @@ func (a *App) Run(ctx context.Context) error {
 
 // Close releases resources held by the application.
 func (a *App) Close() error {
-	if a.extras != nil {
-		a.extras.Close()
-	}
-	if a.embySvc != nil {
-		a.embySvc.Close()
-	}
-	if a.scrape != nil {
-		a.scrape.Close()
-	}
-	if a.metadata != nil {
-		a.metadata.Close()
-	}
-	if a.catalogue != nil {
-		a.catalogue.Close()
-	}
-	if a.driveSvc != nil {
-		a.driveSvc.Close()
-	}
-	if a.store != nil {
-		return a.store.Close()
-	}
-	return nil
+	a.extras.Close()
+	a.scrape.Close()
+	a.embySvc.Close()
+	a.metadata.Close()
+	a.catalogue.Close()
+	a.play.Close()
+	a.driveSvc.Close()
+	return a.store.Close()
 }

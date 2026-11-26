@@ -61,7 +61,7 @@ func TestSettingsDefaultAndPersistWithoutReenablingSources(t *testing.T) {
 	if saved, err := service.UpdateConfig(t.Context(), want); err != nil || saved != want {
 		t.Fatalf("save = %+v, %v", saved, err)
 	}
-	restarted := NewService(db, NewFinder(nil))
+	restarted := NewService(db, NewFinder(nil), "", nil, nil)
 	if got, err := restarted.Config(t.Context()); err != nil || got != want {
 		t.Fatalf("restarted settings = %+v, %v", got, err)
 	}

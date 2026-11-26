@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -82,7 +81,7 @@ func mapErrorStatus(err error) (int, domain.Kind) {
 		return httpStatusForKind(kind), kind
 	}
 	switch {
-	case ent.IsNotFound(err), errors.Is(err, fs.ErrNotExist):
+	case ent.IsNotFound(err):
 		return http.StatusNotFound, domain.KindNotFound
 	default:
 		return http.StatusInternalServerError, domain.KindUnexpected
@@ -111,7 +110,10 @@ func errorMiddleware(logger *slog.Logger) gin.HandlerFunc {
 
 		status, _ := mapErrorStatus(err)
 		message := domain.PublicMessage(err)
-		if status == http.StatusNotFound && message == "内部服务错误" {
+		if domain.KindOf(err) == domain.KindUnexpected && ent.IsNotFound(err) {
+			// A bare ent.NotFound has no domain kind, so PublicMessage would expose
+			// the generic internal text; use the canonical NotFound message instead.
+			// Domain-classified NotFound errors keep their own custom message.
 			message = "资源不存在"
 		}
 

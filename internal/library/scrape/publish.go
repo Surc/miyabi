@@ -18,22 +18,22 @@ import (
 	"github.com/ppxb/miyabi/internal/tasks"
 )
 
-func (service *Service) publishMovie(ctx context.Context, sess drive.Session, job tasks.Job, input Payload) (*SubtitleTask, error) {
+func (service *Service) publishMovie(ctx context.Context, sess drive.Session, job tasks.Job, input Payload) error {
 	// The unfinished task retains these cache files during remote queries
 	// and local export, until the final transaction publishes movie references.
 	artwork := *input.Artwork
 	poster, err := service.images.ReadURL(artwork.Poster)
 	if err != nil {
-		return nil, fmt.Errorf("read cached poster: %w", err)
+		return fmt.Errorf("read cached poster: %w", err)
 	}
 	fanart, err := service.images.ReadURL(artwork.Fanart)
 	if err != nil {
-		return nil, fmt.Errorf("read cached fanart: %w", err)
+		return fmt.Errorf("read cached fanart: %w", err)
 	}
 	// Verify current video locations before exporting local files.
 	directories, err := service.Directories(ctx, sess, input.MetadataPayload)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	snapshot := &domain.MetadataSnapshot{
 		Code:          input.Code,
@@ -44,7 +44,7 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 	var videos []pan.File
 	for i, directory := range directories {
 		if err := service.verifyVideoPositions(ctx, sess, directory); err != nil {
-			return nil, err
+			return err
 		}
 		for _, entry := range directory.Files {
 			if directory.VideoIDs[entry.ID] {
@@ -52,7 +52,7 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 			}
 		}
 		if err := service.db.Task.UpdateOneID(job.ID).SetProgress((i + 1) * 100 / len(directories)).Exec(ctx); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	// Deduplicate and sort all videos across all directories
@@ -68,7 +68,7 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 	snapshot.Videos = VideoFingerprint(videos)
 	poster, err = service.decorateArtwork(ctx, job.ID, &input, videos, poster)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	artwork = *input.Artwork
 
@@ -198,16 +198,14 @@ func (service *Service) publishMovie(ctx context.Context, sess drive.Session, jo
 			return service.finishPublication(ctx, publication, commitErr)
 		})
 	}); err != nil {
-		return nil, fmt.Errorf("publish movie: %w", err)
+		return fmt.Errorf("publish movie: %w", err)
 	}
-
-	subTask := service.subtitleTask(input.MetadataPayload, videos)
 
 	if service.notifier != nil {
 		service.notifier.NotifyLibraryChanged()
 		service.notifier.WakePool()
 	}
-	return subTask, nil
+	return nil
 }
 
 // Each complete version has its own subtitle target. Whole-movie subtitles

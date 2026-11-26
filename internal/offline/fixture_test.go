@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/drive"
@@ -200,8 +201,18 @@ func loginAccount(t testing.TB, d *drive.Drive, client *panStub, accountID strin
 
 func mountSource(t testing.TB, d *drive.Drive, client *panStub, source domain.LibrarySource) {
 	t.Helper()
-	status, err := d.Account(t.Context())
-	if err != nil || !status.Connected || status.Account == nil || status.Account.ID != source.AccountID {
+	accounts, err := d.Accounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected := false
+	for _, status := range accounts {
+		if status.Connected && status.Account != nil && status.Account.ID == source.AccountID {
+			connected = true
+			break
+		}
+	}
+	if !connected {
 		loginAccount(t, d, client, source.AccountID)
 	}
 	if source.Directory.ID == "" {
@@ -218,7 +229,7 @@ func mountSource(t testing.TB, d *drive.Drive, client *panStub, source domain.Li
 		return pan.FilePage{}, nil
 	}
 	defer func() { client.list = previous }()
-	if _, err := d.SelectDirectory(t.Context(), source.Directory.ID); err != nil {
+	if _, err := d.SelectDirectoryForAccount(t.Context(), source.AccountID, source.Directory.ID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -243,7 +254,6 @@ func libraryBaseFixture(t testing.TB) (*Service, *drive.Drive, *ent.Client, doma
 	}
 
 	scrapeSvc := scrapePkg.New(store.Client, driveSvc, nil, images, taskSvc, scrapePkg.Dependencies{})
-	t.Cleanup(scrapeSvc.Close)
 	taskSvc.Registry().Register(tasks.NewHandler(tasks.KindScan, lib.Scan, lib.Finished))
 	taskSvc.Registry().Register(tasks.NewHandler(tasks.KindScrape, scrapeSvc.Scrape, scrapeSvc.Finished))
 
@@ -253,9 +263,10 @@ func libraryBaseFixture(t testing.TB) (*Service, *drive.Drive, *ent.Client, doma
 		},
 		magnets: map[string][]domain.Magnet{
 			"fixture-movie": {{Hash: offlineHashA}, {Hash: offlineHashB}},
+			"ABP-001":       {{Hash: offlineHashA}, {Hash: offlineHashB}},
 		},
 	}
-	service := New(store.Client, cat, driveSvc, taskSvc, lib, 2*time.Minute)
+	service := New(store.Client, cat, driveSvc, taskSvc, lib, nil, 2*time.Minute)
 	return service, driveSvc, store.Client, source
 }
 
@@ -266,7 +277,6 @@ func offlineFixture(t testing.TB) (*Service, *ent.OfflineDownload, ent.OfflineDo
 		AccountID:   source.AccountID,
 		DirectoryID: source.Directory.ID,
 		Code:        "ABP-001",
-		JavdbID:     "fixture-movie",
 		Hash:        "fixture-hash",
 		InfoHash:    "fixture-hash",
 	}
@@ -291,6 +301,20 @@ func (s *stubCatalogue) ED2KResources(_ context.Context, movieID string, page in
 
 func (s *stubCatalogue) CatalogueMagnets(ctx context.Context, movieID string) ([]domain.Magnet, error) {
 	return s.magnets[movieID], nil
+}
+
+func (s *stubCatalogue) CatalogueMagnetsByCode(ctx context.Context, code string) ([]domain.Magnet, error) {
+	for key, magnets := range s.magnets {
+		if codeid.Normalize(key) == codeid.Normalize(code) {
+			return magnets, nil
+		}
+	}
+	for id, movie := range s.movies {
+		if codeid.Normalize(movie.Code) == codeid.Normalize(code) {
+			return s.magnets[id], nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *stubCatalogue) HasMagnet(ctx context.Context, movieID, hash string) (bool, error) {
@@ -356,7 +380,7 @@ func awaitPanCondition(t *testing.T, ready func() bool) {
 }
 
 func createDownload(db *ent.Client, input ent.OfflineDownload) *ent.OfflineDownloadCreate {
-	return db.OfflineDownload.Create().SetCode(input.Code).SetJavdbID(input.JavdbID).
+	return db.OfflineDownload.Create().SetCode(input.Code).
 		SetHash(input.Hash).SetInfoHash(input.InfoHash).SetAccountID(input.AccountID).SetDirectoryID(input.DirectoryID).
 		SetFileID(input.FileID).SetFileIds(input.FileIds).SetScanTaskID(input.ScanTaskID).SetAwaitingLocation(input.AwaitingLocation)
 }

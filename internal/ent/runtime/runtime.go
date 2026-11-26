@@ -7,19 +7,25 @@ import (
 	"time"
 
 	"github.com/ppxb/miyabi/internal/ent/actor"
+	"github.com/ppxb/miyabi/internal/ent/actoralias"
+	"github.com/ppxb/miyabi/internal/ent/actorimage"
+	"github.com/ppxb/miyabi/internal/ent/actorprofile"
 	"github.com/ppxb/miyabi/internal/ent/embynotification"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/metadatacache"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/offlinedownload"
+	"github.com/ppxb/miyabi/internal/ent/panaccount"
 	"github.com/ppxb/miyabi/internal/ent/schema"
 	"github.com/ppxb/miyabi/internal/ent/setting"
+	"github.com/ppxb/miyabi/internal/ent/storagesource"
 	"github.com/ppxb/miyabi/internal/ent/subscription"
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
 	"github.com/ppxb/miyabi/internal/ent/tag"
 	"github.com/ppxb/miyabi/internal/ent/task"
 	"github.com/ppxb/miyabi/internal/ent/viewedmovie"
+	"github.com/ppxb/miyabi/internal/ent/watchhistory"
 )
 
 // The init function reads all schema descriptors with runtime code
@@ -53,6 +59,87 @@ func init() {
 	actorDescName := actorFields[2].Descriptor()
 	// actor.NameValidator is a validator for the "name" field. It is called by the builders before save.
 	actor.NameValidator = actorDescName.Validators[0].(func(string) error)
+	actoraliasMixin := schema.ActorAlias{}.Mixin()
+	actoraliasMixinFields0 := actoraliasMixin[0].Fields()
+	_ = actoraliasMixinFields0
+	actoraliasFields := schema.ActorAlias{}.Fields()
+	_ = actoraliasFields
+	// actoraliasDescCreatedAt is the schema descriptor for created_at field.
+	actoraliasDescCreatedAt := actoraliasMixinFields0[0].Descriptor()
+	// actoralias.DefaultCreatedAt holds the default value on creation for the created_at field.
+	actoralias.DefaultCreatedAt = actoraliasDescCreatedAt.Default.(func() time.Time)
+	// actoraliasDescUpdatedAt is the schema descriptor for updated_at field.
+	actoraliasDescUpdatedAt := actoraliasMixinFields0[1].Descriptor()
+	// actoralias.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	actoralias.DefaultUpdatedAt = actoraliasDescUpdatedAt.Default.(func() time.Time)
+	// actoralias.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	actoralias.UpdateDefaultUpdatedAt = actoraliasDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// actoraliasDescAlias is the schema descriptor for alias field.
+	actoraliasDescAlias := actoraliasFields[0].Descriptor()
+	// actoralias.AliasValidator is a validator for the "alias" field. It is called by the builders before save.
+	actoralias.AliasValidator = actoraliasDescAlias.Validators[0].(func(string) error)
+	// actoraliasDescNormalized is the schema descriptor for normalized field.
+	actoraliasDescNormalized := actoraliasFields[1].Descriptor()
+	// actoralias.NormalizedValidator is a validator for the "normalized" field. It is called by the builders before save.
+	actoralias.NormalizedValidator = actoraliasDescNormalized.Validators[0].(func(string) error)
+	actorimageMixin := schema.ActorImage{}.Mixin()
+	actorimageMixinFields0 := actorimageMixin[0].Fields()
+	_ = actorimageMixinFields0
+	actorimageFields := schema.ActorImage{}.Fields()
+	_ = actorimageFields
+	// actorimageDescCreatedAt is the schema descriptor for created_at field.
+	actorimageDescCreatedAt := actorimageMixinFields0[0].Descriptor()
+	// actorimage.DefaultCreatedAt holds the default value on creation for the created_at field.
+	actorimage.DefaultCreatedAt = actorimageDescCreatedAt.Default.(func() time.Time)
+	// actorimageDescUpdatedAt is the schema descriptor for updated_at field.
+	actorimageDescUpdatedAt := actorimageMixinFields0[1].Descriptor()
+	// actorimage.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	actorimage.DefaultUpdatedAt = actorimageDescUpdatedAt.Default.(func() time.Time)
+	// actorimage.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	actorimage.UpdateDefaultUpdatedAt = actorimageDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// actorimageDescProvider is the schema descriptor for provider field.
+	actorimageDescProvider := actorimageFields[0].Descriptor()
+	// actorimage.DefaultProvider holds the default value on creation for the provider field.
+	actorimage.DefaultProvider = actorimageDescProvider.Default.(string)
+	// actorimageDescSourceID is the schema descriptor for source_id field.
+	actorimageDescSourceID := actorimageFields[1].Descriptor()
+	// actorimage.DefaultSourceID holds the default value on creation for the source_id field.
+	actorimage.DefaultSourceID = actorimageDescSourceID.Default.(string)
+	// actorimageDescURL is the schema descriptor for url field.
+	actorimageDescURL := actorimageFields[2].Descriptor()
+	// actorimage.URLValidator is a validator for the "url" field. It is called by the builders before save.
+	actorimage.URLValidator = actorimageDescURL.Validators[0].(func(string) error)
+	// actorimageDescRole is the schema descriptor for role field.
+	actorimageDescRole := actorimageFields[3].Descriptor()
+	// actorimage.DefaultRole holds the default value on creation for the role field.
+	actorimage.DefaultRole = actorimageDescRole.Default.(string)
+	// actorimageDescPosition is the schema descriptor for position field.
+	actorimageDescPosition := actorimageFields[4].Descriptor()
+	// actorimage.DefaultPosition holds the default value on creation for the position field.
+	actorimage.DefaultPosition = actorimageDescPosition.Default.(int)
+	actorprofileMixin := schema.ActorProfile{}.Mixin()
+	actorprofileMixinFields0 := actorprofileMixin[0].Fields()
+	_ = actorprofileMixinFields0
+	actorprofileFields := schema.ActorProfile{}.Fields()
+	_ = actorprofileFields
+	// actorprofileDescCreatedAt is the schema descriptor for created_at field.
+	actorprofileDescCreatedAt := actorprofileMixinFields0[0].Descriptor()
+	// actorprofile.DefaultCreatedAt holds the default value on creation for the created_at field.
+	actorprofile.DefaultCreatedAt = actorprofileDescCreatedAt.Default.(func() time.Time)
+	// actorprofileDescUpdatedAt is the schema descriptor for updated_at field.
+	actorprofileDescUpdatedAt := actorprofileMixinFields0[1].Descriptor()
+	// actorprofile.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	actorprofile.DefaultUpdatedAt = actorprofileDescUpdatedAt.Default.(func() time.Time)
+	// actorprofile.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	actorprofile.UpdateDefaultUpdatedAt = actorprofileDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// actorprofileDescMatchKey is the schema descriptor for match_key field.
+	actorprofileDescMatchKey := actorprofileFields[0].Descriptor()
+	// actorprofile.MatchKeyValidator is a validator for the "match_key" field. It is called by the builders before save.
+	actorprofile.MatchKeyValidator = actorprofileDescMatchKey.Validators[0].(func(string) error)
+	// actorprofileDescName is the schema descriptor for name field.
+	actorprofileDescName := actorprofileFields[1].Descriptor()
+	// actorprofile.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	actorprofile.NameValidator = actorprofileDescName.Validators[0].(func(string) error)
 	embynotificationMixin := schema.EmbyNotification{}.Mixin()
 	embynotificationMixinFields0 := embynotificationMixin[0].Fields()
 	_ = embynotificationMixinFields0
@@ -135,12 +222,16 @@ func init() {
 	fileDescRootID := fileFields[7].Descriptor()
 	// file.DefaultRootID holds the default value on creation for the root_id field.
 	file.DefaultRootID = fileDescRootID.Default.(string)
+	// fileDescUploadTime is the schema descriptor for upload_time field.
+	fileDescUploadTime := fileFields[8].Descriptor()
+	// file.DefaultUploadTime holds the default value on creation for the upload_time field.
+	file.DefaultUploadTime = fileDescUploadTime.Default.(int64)
 	// fileDescPath is the schema descriptor for path field.
-	fileDescPath := fileFields[8].Descriptor()
+	fileDescPath := fileFields[9].Descriptor()
 	// file.DefaultPath holds the default value on creation for the path field.
 	file.DefaultPath = fileDescPath.Default.(string)
 	// fileDescScanID is the schema descriptor for scan_id field.
-	fileDescScanID := fileFields[9].Descriptor()
+	fileDescScanID := fileFields[10].Descriptor()
 	// file.DefaultScanID holds the default value on creation for the scan_id field.
 	file.DefaultScanID = fileDescScanID.Default.(string)
 	localscanentryFields := schema.LocalScanEntry{}.Fields()
@@ -200,8 +291,12 @@ func init() {
 	movieDescTitle := movieFields[4].Descriptor()
 	// movie.DefaultTitle holds the default value on creation for the title field.
 	movie.DefaultTitle = movieDescTitle.Default.(string)
+	// movieDescRating10 is the schema descriptor for rating10 field.
+	movieDescRating10 := movieFields[14].Descriptor()
+	// movie.DefaultRating10 holds the default value on creation for the rating10 field.
+	movie.DefaultRating10 = movieDescRating10.Default.(float64)
 	// movieDescFanarts is the schema descriptor for fanarts field.
-	movieDescFanarts := movieFields[16].Descriptor()
+	movieDescFanarts := movieFields[17].Descriptor()
 	// movie.DefaultFanarts holds the default value on creation for the fanarts field.
 	movie.DefaultFanarts = movieDescFanarts.Default.(func() []string)
 	offlinedownloadMixin := schema.OfflineDownload{}.Mixin()
@@ -265,6 +360,45 @@ func init() {
 	offlinedownloadDescAwaitingLocation := offlinedownloadFields[13].Descriptor()
 	// offlinedownload.DefaultAwaitingLocation holds the default value on creation for the awaiting_location field.
 	offlinedownload.DefaultAwaitingLocation = offlinedownloadDescAwaitingLocation.Default.(bool)
+	panaccountMixin := schema.PanAccount{}.Mixin()
+	panaccountMixinFields0 := panaccountMixin[0].Fields()
+	_ = panaccountMixinFields0
+	panaccountFields := schema.PanAccount{}.Fields()
+	_ = panaccountFields
+	// panaccountDescCreatedAt is the schema descriptor for created_at field.
+	panaccountDescCreatedAt := panaccountMixinFields0[0].Descriptor()
+	// panaccount.DefaultCreatedAt holds the default value on creation for the created_at field.
+	panaccount.DefaultCreatedAt = panaccountDescCreatedAt.Default.(func() time.Time)
+	// panaccountDescUpdatedAt is the schema descriptor for updated_at field.
+	panaccountDescUpdatedAt := panaccountMixinFields0[1].Descriptor()
+	// panaccount.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	panaccount.DefaultUpdatedAt = panaccountDescUpdatedAt.Default.(func() time.Time)
+	// panaccount.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	panaccount.UpdateDefaultUpdatedAt = panaccountDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// panaccountDescAccountID is the schema descriptor for account_id field.
+	panaccountDescAccountID := panaccountFields[0].Descriptor()
+	// panaccount.AccountIDValidator is a validator for the "account_id" field. It is called by the builders before save.
+	panaccount.AccountIDValidator = panaccountDescAccountID.Validators[0].(func(string) error)
+	// panaccountDescAccessToken is the schema descriptor for access_token field.
+	panaccountDescAccessToken := panaccountFields[1].Descriptor()
+	// panaccount.DefaultAccessToken holds the default value on creation for the access_token field.
+	panaccount.DefaultAccessToken = panaccountDescAccessToken.Default.(string)
+	// panaccountDescRefreshToken is the schema descriptor for refresh_token field.
+	panaccountDescRefreshToken := panaccountFields[2].Descriptor()
+	// panaccount.DefaultRefreshToken holds the default value on creation for the refresh_token field.
+	panaccount.DefaultRefreshToken = panaccountDescRefreshToken.Default.(string)
+	// panaccountDescDirectoryID is the schema descriptor for directory_id field.
+	panaccountDescDirectoryID := panaccountFields[4].Descriptor()
+	// panaccount.DefaultDirectoryID holds the default value on creation for the directory_id field.
+	panaccount.DefaultDirectoryID = panaccountDescDirectoryID.Default.(string)
+	// panaccountDescDirectoryName is the schema descriptor for directory_name field.
+	panaccountDescDirectoryName := panaccountFields[5].Descriptor()
+	// panaccount.DefaultDirectoryName holds the default value on creation for the directory_name field.
+	panaccount.DefaultDirectoryName = panaccountDescDirectoryName.Default.(string)
+	// panaccountDescDirectoryPath is the schema descriptor for directory_path field.
+	panaccountDescDirectoryPath := panaccountFields[6].Descriptor()
+	// panaccount.DefaultDirectoryPath holds the default value on creation for the directory_path field.
+	panaccount.DefaultDirectoryPath = panaccountDescDirectoryPath.Default.(string)
 	settingMixin := schema.Setting{}.Mixin()
 	settingMixinFields0 := settingMixin[0].Fields()
 	_ = settingMixinFields0
@@ -284,6 +418,41 @@ func init() {
 	settingDescKey := settingFields[0].Descriptor()
 	// setting.KeyValidator is a validator for the "key" field. It is called by the builders before save.
 	setting.KeyValidator = settingDescKey.Validators[0].(func(string) error)
+	storagesourceMixin := schema.StorageSource{}.Mixin()
+	storagesourceMixinFields0 := storagesourceMixin[0].Fields()
+	_ = storagesourceMixinFields0
+	storagesourceFields := schema.StorageSource{}.Fields()
+	_ = storagesourceFields
+	// storagesourceDescCreatedAt is the schema descriptor for created_at field.
+	storagesourceDescCreatedAt := storagesourceMixinFields0[0].Descriptor()
+	// storagesource.DefaultCreatedAt holds the default value on creation for the created_at field.
+	storagesource.DefaultCreatedAt = storagesourceDescCreatedAt.Default.(func() time.Time)
+	// storagesourceDescUpdatedAt is the schema descriptor for updated_at field.
+	storagesourceDescUpdatedAt := storagesourceMixinFields0[1].Descriptor()
+	// storagesource.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	storagesource.DefaultUpdatedAt = storagesourceDescUpdatedAt.Default.(func() time.Time)
+	// storagesource.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	storagesource.UpdateDefaultUpdatedAt = storagesourceDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// storagesourceDescKind is the schema descriptor for kind field.
+	storagesourceDescKind := storagesourceFields[1].Descriptor()
+	// storagesource.KindValidator is a validator for the "kind" field. It is called by the builders before save.
+	storagesource.KindValidator = storagesourceDescKind.Validators[0].(func(string) error)
+	// storagesourceDescName is the schema descriptor for name field.
+	storagesourceDescName := storagesourceFields[2].Descriptor()
+	// storagesource.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	storagesource.NameValidator = storagesourceDescName.Validators[0].(func(string) error)
+	// storagesourceDescEnabled is the schema descriptor for enabled field.
+	storagesourceDescEnabled := storagesourceFields[3].Descriptor()
+	// storagesource.DefaultEnabled holds the default value on creation for the enabled field.
+	storagesource.DefaultEnabled = storagesourceDescEnabled.Default.(bool)
+	// storagesourceDescPosition is the schema descriptor for position field.
+	storagesourceDescPosition := storagesourceFields[5].Descriptor()
+	// storagesource.DefaultPosition holds the default value on creation for the position field.
+	storagesource.DefaultPosition = storagesourceDescPosition.Default.(int)
+	// storagesourceDescID is the schema descriptor for id field.
+	storagesourceDescID := storagesourceFields[0].Descriptor()
+	// storagesource.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	storagesource.IDValidator = storagesourceDescID.Validators[0].(func(string) error)
 	subscriptionMixin := schema.Subscription{}.Mixin()
 	subscriptionMixinFields0 := subscriptionMixin[0].Fields()
 	_ = subscriptionMixinFields0
@@ -456,17 +625,42 @@ func init() {
 	task.DefaultResourceKey = taskDescResourceKey.Default.(string)
 	viewedmovieFields := schema.ViewedMovie{}.Fields()
 	_ = viewedmovieFields
+	// viewedmovieDescCode is the schema descriptor for code field.
+	viewedmovieDescCode := viewedmovieFields[0].Descriptor()
+	// viewedmovie.CodeValidator is a validator for the "code" field. It is called by the builders before save.
+	viewedmovie.CodeValidator = viewedmovieDescCode.Validators[0].(func(string) error)
 	// viewedmovieDescJavdbID is the schema descriptor for javdb_id field.
-	viewedmovieDescJavdbID := viewedmovieFields[0].Descriptor()
+	viewedmovieDescJavdbID := viewedmovieFields[1].Descriptor()
 	// viewedmovie.JavdbIDValidator is a validator for the "javdb_id" field. It is called by the builders before save.
 	viewedmovie.JavdbIDValidator = viewedmovieDescJavdbID.Validators[0].(func(string) error)
 	// viewedmovieDescViewedAt is the schema descriptor for viewed_at field.
-	viewedmovieDescViewedAt := viewedmovieFields[1].Descriptor()
+	viewedmovieDescViewedAt := viewedmovieFields[2].Descriptor()
 	// viewedmovie.DefaultViewedAt holds the default value on creation for the viewed_at field.
 	viewedmovie.DefaultViewedAt = viewedmovieDescViewedAt.Default.(func() time.Time)
+	watchhistoryFields := schema.WatchHistory{}.Fields()
+	_ = watchhistoryFields
+	// watchhistoryDescMovieID is the schema descriptor for movie_id field.
+	watchhistoryDescMovieID := watchhistoryFields[0].Descriptor()
+	// watchhistory.MovieIDValidator is a validator for the "movie_id" field. It is called by the builders before save.
+	watchhistory.MovieIDValidator = watchhistoryDescMovieID.Validators[0].(func(int) error)
+	// watchhistoryDescFileID is the schema descriptor for file_id field.
+	watchhistoryDescFileID := watchhistoryFields[1].Descriptor()
+	// watchhistory.DefaultFileID holds the default value on creation for the file_id field.
+	watchhistory.DefaultFileID = watchhistoryDescFileID.Default.(string)
+	// watchhistoryDescPosition is the schema descriptor for position field.
+	watchhistoryDescPosition := watchhistoryFields[2].Descriptor()
+	// watchhistory.DefaultPosition holds the default value on creation for the position field.
+	watchhistory.DefaultPosition = watchhistoryDescPosition.Default.(float64)
+	// watchhistoryDescDuration is the schema descriptor for duration field.
+	watchhistoryDescDuration := watchhistoryFields[3].Descriptor()
+	// watchhistory.DefaultDuration holds the default value on creation for the duration field.
+	watchhistory.DefaultDuration = watchhistoryDescDuration.Default.(float64)
+	// watchhistoryDescWatchedAt is the schema descriptor for watched_at field.
+	watchhistoryDescWatchedAt := watchhistoryFields[5].Descriptor()
+	// watchhistory.DefaultWatchedAt holds the default value on creation for the watched_at field.
+	watchhistory.DefaultWatchedAt = watchhistoryDescWatchedAt.Default.(func() time.Time)
 }
 
 const (
-	Version = "v0.14.6"                                         // Version of ent codegen.
-	Sum     = "h1:/f2696BpwuWAEEG6PVGWflg6+Inrpq4pRWuNlWz/Skk=" // Sum of ent codegen.
+	Version = "v0.14.6" // Version of ent codegen.
 )

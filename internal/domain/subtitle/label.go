@@ -2,18 +2,23 @@
 package subtitle
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
 
-// Language identifies the Chinese variant of a subtitle. Values are the
-// culture codes Emby reads from subtitle file names.
+// Language identifies a subtitle's language. Values are the culture codes
+// Emby reads from subtitle file names.
 type Language string
 
 const (
 	LangSimplifiedChinese  Language = "zh-CN"
 	LangTraditionalChinese Language = "zh-TW"
-	LangUnknown            Language = ""
+	// English and Japanese only come from providers that label them; text
+	// detection still tells Chinese variants apart only.
+	LangEnglish  Language = "en"
+	LangJapanese Language = "ja"
+	LangUnknown  Language = ""
 )
 
 // VersionTag identifies the release cut a subtitle was timed against.
@@ -33,9 +38,20 @@ var (
 	extendedPattern   = regexp.MustCompile(`(?i)(extended|加长|加長|完整版|完全版)`)
 	// C, UC and CH suffixes mark releases with burned-in Chinese subtitles.
 	hardSubtitlePattern = regexp.MustCompile(`(?i)([-_](?:u?c|ch)(?:[-_. ]|$)|中字|中文字幕)`)
+	// chineseSubtitleTag matches an explicit Chinese language tag or label in a
+	// subtitle or video file name, such as .chs / .zh-CN / 中字.
+	chineseSubtitleTag = regexp.MustCompile(`(?i)(?:[._-](?:chi|chs|cht|zh|zh[-_]?cn|zh[-_]?tw|hans|hant)(?:[._-]|$)|中文字幕|中字)`)
+	// videoChineseSuffix matches a -C/-CH suffix or a CH glued to the number at
+	// the end of a video stem (MEYD-589CH). UC (uncensored) is intentionally not
+	// matched so uncensored releases are not reported as Chinese subtitles.
+	videoChineseSuffix = regexp.MustCompile(`(?i)(?:[-_](?:c|ch)|[0-9]ch)$`)
 
 	traditionalHint = regexp.MustCompile(`(?i)(zh[-_]?(tw|hk|hant)|\bcht\b|繁)`)
 	simplifiedHint  = regexp.MustCompile(`(?i)(zh[-_]?(cn|hans)|\bchs\b|简|簡)`)
+	// English and Japanese tags as in ABP-123.en.srt; Chinese tags win in
+	// bilingual names.
+	englishHint  = regexp.MustCompile(`(?i)[._-](en|eng|english)(?:[._-]|$)`)
+	japaneseHint = regexp.MustCompile(`(?i)[._-](ja|jp|jpn|japanese)(?:[._-]|$)`)
 
 	// Frequency counters for discriminating Simplified vs Traditional Chinese.
 	simplifiedMarkers  = []rune("为与个么开关东风头后发这边过还进时样气应实话说问题现经体万台农国门书车云")
@@ -67,14 +83,29 @@ func HasHardSubtitle(name string) bool {
 	return hardSubtitlePattern.MatchString(name)
 }
 
-// LanguageHint recognizes an explicit Chinese variant in a file name or
-// provider metadata, returning LangUnknown when there is none.
+// HasChineseSubtitle reports whether a video or subtitle file name indicates a
+// Chinese-subtitle release: a -C/-CH style suffix on the video stem, or an
+// explicit Chinese tag on a subtitle or video name.
+func HasChineseSubtitle(name string) bool {
+	stem := strings.TrimSuffix(name, path.Ext(name))
+	if videoChineseSuffix.MatchString(stem) {
+		return true
+	}
+	return chineseSubtitleTag.MatchString(name)
+}
+
+// LanguageHint recognizes an explicit language tag in a file name or provider
+// metadata, returning LangUnknown when there is none.
 func LanguageHint(hint string) Language {
 	switch {
 	case traditionalHint.MatchString(hint):
 		return LangTraditionalChinese
 	case simplifiedHint.MatchString(hint):
 		return LangSimplifiedChinese
+	case englishHint.MatchString(hint):
+		return LangEnglish
+	case japaneseHint.MatchString(hint):
+		return LangJapanese
 	default:
 		return LangUnknown
 	}

@@ -9,6 +9,15 @@ import (
 // Actor is the predicate function for actor builders.
 type Actor func(*sql.Selector)
 
+// ActorAlias is the predicate function for actoralias builders.
+type ActorAlias func(*sql.Selector)
+
+// ActorImage is the predicate function for actorimage builders.
+type ActorImage func(*sql.Selector)
+
+// ActorProfile is the predicate function for actorprofile builders.
+type ActorProfile func(*sql.Selector)
+
 // EmbyNotification is the predicate function for embynotification builders.
 type EmbyNotification func(*sql.Selector)
 
@@ -27,8 +36,14 @@ type Movie func(*sql.Selector)
 // OfflineDownload is the predicate function for offlinedownload builders.
 type OfflineDownload func(*sql.Selector)
 
+// PanAccount is the predicate function for panaccount builders.
+type PanAccount func(*sql.Selector)
+
 // Setting is the predicate function for setting builders.
 type Setting func(*sql.Selector)
+
+// StorageSource is the predicate function for storagesource builders.
+type StorageSource func(*sql.Selector)
 
 // Subscription is the predicate function for subscription builders.
 type Subscription func(*sql.Selector)
@@ -44,3 +59,6 @@ type Task func(*sql.Selector)
 
 // ViewedMovie is the predicate function for viewedmovie builders.
 type ViewedMovie func(*sql.Selector)
+
+// WatchHistory is the predicate function for watchhistory builders.
+type WatchHistory func(*sql.Selector)

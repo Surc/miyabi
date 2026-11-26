@@ -1,6 +1,5 @@
-import * as React from 'react'
+import { Progress as ProgressPrimitive } from '@base-ui/react/progress'
 import { cn } from 'cn'
-import { Progress as ProgressPrimitive } from 'radix-ui'
 
 const indicatorColors = {
   default: 'bg-primary',
@@ -14,11 +13,9 @@ function Progress({
   max = 100,
   variant = 'default',
   ...props
-}: React.ComponentProps<typeof ProgressPrimitive.Root> & {
+}: ProgressPrimitive.Root.Props & {
   variant?: keyof typeof indicatorColors
 }) {
-  const percent = value == null ? null : (value / max) * 100
-
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
@@ -30,16 +27,17 @@ function Progress({
       )}
       {...props}
     >
-      <ProgressPrimitive.Indicator
-        data-slot="progress-indicator"
-        className={cn(
-          'size-full flex-1 transition-transform',
-          indicatorColors[variant],
-          percent === null &&
-            'w-1/3 flex-none animate-[progress-indeterminate_1.5s_ease-in-out_infinite]'
-        )}
-        style={percent === null ? undefined : { transform: `translateX(-${100 - percent}%)` }}
-      />
+      <ProgressPrimitive.Track className="flex size-full items-center overflow-x-hidden">
+        <ProgressPrimitive.Indicator
+          data-slot="progress-indicator"
+          className={cn(
+            'h-full transition-all',
+            indicatorColors[variant],
+            value == null &&
+              'w-1/3 flex-none animate-[progress-indeterminate_1.5s_ease-in-out_infinite]'
+          )}
+        />
+      </ProgressPrimitive.Track>
     </ProgressPrimitive.Root>
   )
 }

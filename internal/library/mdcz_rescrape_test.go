@@ -31,6 +31,8 @@ import (
 
 type ambiguousABF027Catalogue struct{ providers.JavDBCatalogue }
 
+func (ambiguousABF027Catalogue) HasJavDBSession() bool { return true }
+
 func (ambiguousABF027Catalogue) Search(context.Context, string, domain.SearchOptions) ([]catalogue.Movie, error) {
 	return []catalogue.Movie{
 		{Movie: domain.Movie{ID: "45yav", Code: "ABF-027", ReleaseDate: "2011-12-02"}},

@@ -3,6 +3,7 @@ package scrape
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -60,9 +61,15 @@ type Notifier interface {
 	WakePool()
 }
 
-// SubtitleExporter writes a movie's subtitles beside its exported .strm file.
+// SubtitleExporter copies a movie's downloaded subtitles beside its exported .strm file.
 type SubtitleExporter interface {
-	Export(ctx context.Context, movieID int, target subtitlemeta.Target) (int, error)
+	Export(context.Context, int, subtitlemeta.Target) (int, error)
+	SyncExport(ctx context.Context, movieID int) error
+}
+
+// ActorMerger merges same-person actor rows discovered during a movie scrape.
+type ActorMerger interface {
+	MergeMovieCrossLanguage(ctx context.Context, movieID int) (int, error)
 }
 
 const (
@@ -84,6 +91,7 @@ type Service struct {
 	images    *mediaimage.Cache
 	notifier  Notifier
 	subtitles SubtitleExporter
+	merger    ActorMerger
 
 	dirMu    sync.Mutex
 	dirCache map[string]dirCacheEntry
@@ -110,6 +118,7 @@ type Dependencies struct {
 	ExportManager *export.Manager
 	MediaNotifier export.MediaNotifier
 	Subtitles     SubtitleExporter
+	Merger        ActorMerger
 }
 
 // New installs dependencies; the application task pools own background workers.
@@ -127,6 +136,7 @@ func New(db *ent.Client, d *drive.Drive, metadata MetadataSource, images *mediai
 		exportMgr:     deps.ExportManager,
 		mediaNotifier: deps.MediaNotifier,
 		subtitles:     deps.Subtitles,
+		merger:        deps.Merger,
 	}
 	return service
 }
@@ -209,8 +219,7 @@ func (service *Service) Scrape(ctx context.Context, job tasks.Job) error {
 	if err := tasks.Checkpoint(ctx, service.db); err != nil {
 		return err
 	}
-	_, err = service.publishMovie(ctx, sess, job, input)
-	if err != nil {
+	if err := service.publishMovie(ctx, sess, job, input); err != nil {
 		return err
 	}
 	return nil
@@ -239,9 +248,6 @@ func (service *Service) prepareMetadata(ctx context.Context, sess drive.Session,
 			input.PosterVersion = record.MetadataSnapshot.PosterVersion
 		}
 	} else {
-		if id := domain.ValueOrZero(record.JavdbID); id != "" {
-			input.JavDBID = id
-		}
 		if err := service.resolveMetadata(ctx, input); err != nil {
 			return err
 		}
@@ -262,6 +268,14 @@ func (service *Service) prepareMetadata(ctx context.Context, sess drive.Session,
 		return tx.Task.UpdateOneID(taskID).SetPayload(encoded).Exec(ctx)
 	}); err != nil {
 		return fmt.Errorf("save movie metadata checkpoint: %w", err)
+	}
+	if service.notifier != nil {
+		service.notifier.NotifyLibraryChanged()
+	}
+	if service.merger != nil {
+		if _, err := service.merger.MergeMovieCrossLanguage(ctx, input.MovieID); err != nil {
+			slog.WarnContext(ctx, "merge cross-language actors failed", "movie_id", input.MovieID, "error", err)
+		}
 	}
 	return nil
 }

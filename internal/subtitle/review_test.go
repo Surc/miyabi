@@ -87,7 +87,7 @@ func TestAVSubtitlesFailedDetailsDoNotLookLikeMissingSubtitles(t *testing.T) {
 					w.WriteHeader(http.StatusServiceUnavailable)
 				}
 			})
-			service := NewService(nil, NewFinder(nil, WithProviders(provider)))
+			service := NewService(nil, NewFinder(nil, WithProviders(provider)), "", nil, nil)
 			config := DefaultConfig()
 			result, err := service.TestDownload(t.Context(), TestRequest{Code: "ABP-123", Config: &config})
 			if err != nil || result.Status != "failed" || !strings.Contains(strings.Join(result.Errors, " "), "503") {

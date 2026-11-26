@@ -66,6 +66,7 @@ type wireMovieReference struct {
 	ID       string `json:"id"`
 	Number   string `json:"number"`
 	ThumbURL string `json:"thumb_url"`
+	CoverURL string `json:"cover_url"`
 }
 
 type wireMagnetsData struct {
@@ -107,6 +108,7 @@ type wireMovie struct {
 	Number           string             `json:"number"`
 	Title            string             `json:"title"`
 	OriginTitle      string             `json:"origin_title"`
+	Summary          string             `json:"summary"`
 	ReleaseDate      string             `json:"release_date"`
 	Duration         int                `json:"duration"`
 	Score            wireRating         `json:"score"`

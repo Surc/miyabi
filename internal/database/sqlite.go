@@ -55,6 +55,18 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 		client.Close()
 		return nil, fmt.Errorf("initialize database schema: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE movies
+		SET rating10 = MIN(10.0, rating * 10.0 / COALESCE(
+			CASE WHEN json_valid(metadata) THEN
+				CASE WHEN CAST(json_extract(metadata, '$.rating_max') AS REAL) > 0
+					THEN CAST(json_extract(metadata, '$.rating_max') AS REAL) END
+			END, 5.0))
+		WHERE rating10 = 0 AND rating > 0
+	`); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("normalize legacy movie ratings: %w", err)
+	}
 	if err := createTaskIndexes(ctx, db); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("initialize database indexes: %w", err)

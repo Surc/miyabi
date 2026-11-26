@@ -112,8 +112,19 @@ func localFileID(path string) string {
 	return "local-" + hex.EncodeToString(hash[:16])
 }
 
-func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult) error {
-	if s.exports == nil {
+func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, fromExport bool, batch []localMedia, result *LocalScanResult) error {
+	if s.images != nil {
+		for _, media := range batch {
+			if media.posterPath != "" {
+				if err := s.images.LockArtwork(ctx); err != nil {
+					return err
+				}
+				defer s.images.UnlockArtwork()
+				break
+			}
+		}
+	}
+	if s.exports == nil || !fromExport {
 		return s.importBatch(ctx, rootDir, batch, result, export.Config{})
 	}
 	return s.exports.WithConfig(func(cfg export.Config) error {
@@ -132,17 +143,6 @@ func (s *LocalScanner) ingestBatch(ctx context.Context, rootDir string, batch []
 }
 
 func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []localMedia, result *LocalScanResult, cfg export.Config) error {
-	if s.images != nil {
-		for _, media := range batch {
-			if media.posterPath != "" {
-				if err := s.images.LockArtwork(ctx); err != nil {
-					return err
-				}
-				defer s.images.UnlockArtwork()
-				break
-			}
-		}
-	}
 	if err := tasks.Checkpoint(ctx, s.db); err != nil {
 		return err
 	}
@@ -191,8 +191,8 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 			}
 			existing := files[media.fileID]
 			if existing != nil && existing.AccountID == domain.LocalAccountID &&
-				(existing.Name != media.name || existing.Size != media.size || existing.Path != media.rel) {
-				updated, err := tx.File.UpdateOneID(existing.ID).SetName(media.name).SetSize(media.size).SetPath(media.rel).Save(ctx)
+				(existing.Name != media.name || existing.Size != media.size || existing.Path != media.path) {
+				updated, err := tx.File.UpdateOneID(existing.ID).SetName(media.name).SetSize(media.size).SetPath(media.path).Save(ctx)
 				if err != nil {
 					return err
 				}
@@ -234,6 +234,9 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 				matcher.add(current)
 				record = current
 			}
+			if media.document == nil && record.ScrapeStatus == movie.ScrapeStatusPending {
+				result.addPending(record.ID)
+			}
 			if media.artwork != (mediaimage.Artwork{}) {
 				if err := tx.Movie.UpdateOneID(record.ID).SetPoster(media.artwork.Poster).
 					SetCover(media.artwork.Thumbnail).SetFanarts([]string{media.artwork.Fanart}).Exec(ctx); err != nil {
@@ -243,7 +246,7 @@ func (s *LocalScanner) importBatch(ctx context.Context, rootDir string, batch []
 			if existing == nil {
 				created, err := tx.File.Create().SetFileID(media.fileID).SetName(media.name).SetSize(media.size).
 					SetAccountID(domain.LocalAccountID).SetRootID(domain.LocalAccountID).
-					SetPath(media.rel).SetMovieID(record.ID).Save(ctx)
+					SetPath(media.path).SetMovieID(record.ID).Save(ctx)
 				if err != nil {
 					return err
 				}

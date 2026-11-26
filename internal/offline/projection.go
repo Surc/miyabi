@@ -12,6 +12,7 @@ import (
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/offlinedownload"
 	"github.com/ppxb/miyabi/internal/ent/task"
+	"github.com/ppxb/miyabi/internal/pan"
 )
 
 // Activity summarizes current offline download tasks alongside the active library source.
@@ -22,19 +23,54 @@ type Activity struct {
 
 // Activity only reads local tasks and the mounted file index. Keeping each
 // magnet's latest workflow also retains long downloads until their final state.
+// Activity summarizes offline tasks. With a single mounted account it reports
+// that account (backwards compatible); with several it aggregates all of them.
 func (service *Service) Activity(ctx context.Context) (Activity, error) {
-	result := Activity{Tasks: []domain.OfflineSubmission{}}
-	source := service.drive.Source()
-	result.Source = source
-	if source == nil {
-		return result, nil
+	sources, err := service.drive.Mounts(ctx)
+	if err != nil {
+		return Activity{}, err
 	}
+	if len(sources) == 0 {
+		return Activity{Tasks: []domain.OfflineSubmission{}}, nil
+	}
+	if len(sources) == 1 {
+		return service.activityFor(ctx, sources[0])
+	}
+	result := Activity{Tasks: []domain.OfflineSubmission{}}
+	for _, source := range sources {
+		activity, err := service.activityFor(ctx, source)
+		if err != nil {
+			return Activity{}, err
+		}
+		result.Tasks = append(result.Tasks, activity.Tasks...)
+	}
+	return result, nil
+}
+
+// ActivityForAccount summarizes one account's offline tasks (or every account
+// when accountID is empty).
+func (service *Service) ActivityForAccount(ctx context.Context, accountID string) (Activity, error) {
+	if accountID == "" {
+		return service.Activity(ctx)
+	}
+	source, ok, err := service.drive.Mount(ctx, accountID)
+	if err != nil {
+		return Activity{}, err
+	}
+	if !ok {
+		return Activity{Tasks: []domain.OfflineSubmission{}}, nil
+	}
+	return service.activityFor(ctx, source)
+}
+
+func (service *Service) activityFor(ctx context.Context, source domain.LibrarySource) (Activity, error) {
+	result := Activity{Source: &source, Tasks: []domain.OfflineSubmission{}}
 	records, err := latestOfflineTasks(ctx, service.database.OfflineDownload.Query().Where(
 		offlinedownload.AccountIDEQ(source.AccountID), offlinedownload.DirectoryIDEQ(source.Directory.ID)))
 	if err != nil {
 		return result, fmt.Errorf("load offline activity: %w", err)
 	}
-	result.Tasks, err = service.submissions(ctx, records, source)
+	result.Tasks, err = service.submissions(ctx, records, &source)
 	return result, err
 }
 
@@ -83,7 +119,7 @@ func (service *Service) submissions(ctx context.Context, records []*ent.OfflineD
 			file.FileIDIn(fileIDs[start:min(start+500, len(fileIDs))]...)).
 			Select(file.FieldFileID, file.FieldMovieID).
 			WithMovie(func(query *ent.MovieQuery) {
-				query.Select(movie.FieldID, movie.FieldCode, movie.FieldJavdbID, movie.FieldScrapeStatus)
+				query.Select(movie.FieldID, movie.FieldCode, movie.FieldScrapeStatus)
 			}).All(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("read downloaded file index: %w", err)
@@ -130,7 +166,7 @@ func (service *Service) submissions(ctx context.Context, records []*ent.OfflineD
 				item.DownloadState = "exhausted"
 			case state.Stalled:
 				item.DownloadState = "stalled"
-			case state.RemoteStatus == 0:
+			case state.RemoteStatus == pan.OfflineStatusWaiting:
 				item.DownloadState = "queued"
 			}
 			if item.RetryAt != nil {
@@ -152,9 +188,6 @@ func (service *Service) submissions(ctx context.Context, records []*ent.OfflineD
 			if scan.Status == string(task.StatusQueued) || scan.Status == string(task.StatusRunning) {
 				item.Processing = true
 			}
-			if scan.Error != nil {
-				item.Error = scan.Error
-			}
 		} else if record.Status == offlinedownload.StatusDone && (record.FileID != "" || record.AwaitingLocation) {
 			// Remote completion may arrive before its file location. Keep the
 			// indexing workflow active without presenting it as a download.
@@ -168,8 +201,7 @@ func (service *Service) submissions(ctx context.Context, records []*ent.OfflineD
 			if !present {
 				continue
 			}
-			if matched != nil && (matched.JavdbID != nil && *matched.JavdbID == record.JavdbID ||
-				matched.JavdbID == nil && matched.Code == codeid.Normalize(record.Code)) {
+			if matched != nil && matched.Code == codeid.Normalize(record.Code) {
 				item.Phase = "in_library"
 				item.LibraryID = matched.ID
 				if matched.ScrapeStatus != movie.ScrapeStatusFailed {

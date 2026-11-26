@@ -36,7 +36,7 @@ func (s *Service) ResourceVersions(ctx context.Context, ids []int) ([]ResourceVe
 	if len(ids) == 0 {
 		return rows, nil
 	}
-	files, err := s.database.File.Query().Where(libraryScope(s.Source()), file.MovieIDIn(ids...)).
+	files, err := s.database.File.Query().Where(s.scope(ctx), file.MovieIDIn(ids...)).
 		Select(file.FieldID, file.FieldMovieID, file.FieldName).All(ctx)
 	if err != nil {
 		return nil, err

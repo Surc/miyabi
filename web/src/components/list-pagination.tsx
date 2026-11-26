@@ -1,4 +1,3 @@
-import { cn } from 'cn'
 import { getPageNumbers } from '@/lib/pagination'
 import {
   Pagination,
@@ -26,29 +25,18 @@ export function ListPagination({
   onPageChange: (page: number) => void
 }) {
   function changePage(nextPage: number) {
-    if (nextPage === page) return
     onPageChange(nextPage)
     if (scrollToTop) window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function renderPage(item: number) {
-    if (item === page) {
-      return (
-        <PaginationItem key={item}>
-          <PaginationLink isActive>{item}</PaginationLink>
-        </PaginationItem>
-      )
-    }
+    const active = item === page
     return (
       <PaginationItem key={item}>
         <PaginationLink
-          href="#"
-          tabIndex={disabled ? -1 : undefined}
-          className={cn(disabled && 'pointer-events-none opacity-50')}
-          onClick={e => {
-            e.preventDefault()
-            changePage(item)
-          }}
+          isActive={active}
+          disabled={disabled}
+          onClick={active ? undefined : () => changePage(item)}
         >
           {item}
         </PaginationLink>

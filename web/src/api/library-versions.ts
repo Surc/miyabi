@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { apiPost } from './client'
 import { libraryKeys } from './library'
-import { usePanAccount } from './pan'
+import { useSources } from './sources'
 
 export type ResourceVersion = {
   id: number
@@ -69,13 +69,15 @@ export function libraryVersionOptions(
 }
 
 export function useLibraryVersion(id?: number) {
-  const account = usePanAccount()
-  // A late response from another account/root must never populate this view.
+  const sources = useSources()
+  const scope =
+    sources.data
+      ?.filter(source => source.enabled)
+      .map(source => JSON.stringify([source.id, source.kind, source.config]))
+      .sort() ?? []
+  // Keep results from a previous set of mounted sources out of the current view.
   return useQuery({
-    ...libraryVersionOptions(loadVersions, id, [
-      account.data?.account?.id ?? '',
-      account.data?.directory?.id ?? ''
-    ]),
-    enabled: !!id && !account.isPending
+    ...libraryVersionOptions(loadVersions, id, scope),
+    enabled: !!id && !sources.isPending
   })
 }

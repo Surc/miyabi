@@ -21,6 +21,14 @@ type OfflineTask struct {
 	URL             string
 }
 
+// 115 offline task status codes.
+const (
+	OfflineStatusWaiting = 0
+	OfflineStatusRunning = 1
+	OfflineStatusDone    = 2
+	OfflineStatusFailed  = -1
+)
+
 type offlineTaskWire struct {
 	Hash        string      `json:"info_hash"`
 	Status      int         `json:"status"`

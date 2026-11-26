@@ -1,3 +1,4 @@
+import { useScrollFade } from '@animate-ui/react/primitives/effects/scroll-fade'
 import { useRouter } from '@tanstack/react-router'
 import {
   lazy,
@@ -17,16 +18,28 @@ const MovieDetailContent = lazy(() =>
   import('./content').then(module => ({ default: module.MovieDetailContent }))
 )
 
+/** Scrollable detail body with the shared animated scroll fade. */
+function DetailScrollBody({ children }: PropsWithChildren) {
+  const ref = useRef<HTMLDivElement>(null)
+  useScrollFade(ref, { shrink: 0, blur: 0 })
+  return (
+    <div
+      ref={ref}
+      className="no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6"
+    >
+      {children}
+    </div>
+  )
+}
+
 export function MovieDetailDialogProvider({ children }: PropsWithChildren) {
   const router = useRouter()
   const [movie, setMovie] = useState<MovieDetailTarget>()
   const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLDivElement | null>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLElement | null>(null)
   const openMovie = useCallback(
-    (target: MovieDetailTarget, trigger: HTMLDivElement) => {
-      // Recommendations replace the detail while retaining the original list's focus target.
-      if (!open) triggerRef.current = trigger
+    (target: MovieDetailTarget, trigger?: HTMLElement) => {
+      if (!open) triggerRef.current = trigger ?? null
       setMovie(target)
       setOpen(true)
     },
@@ -40,27 +53,16 @@ export function MovieDetailDialogProvider({ children }: PropsWithChildren) {
       {children}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          ref={contentRef}
+          finalFocus={triggerRef}
           showCloseButton={false}
           className="flex h-[min(56rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl"
-          onOpenAutoFocus={event => {
-            event.preventDefault()
-            contentRef.current?.focus()
-          }}
-          onCloseAutoFocus={event => {
-            event.preventDefault()
-            triggerRef.current?.focus({ preventScroll: true })
-          }}
         >
           <DialogTitle className="sr-only">影片详情</DialogTitle>
-          <div
-            key={movie && movieDetailKey(movie)}
-            className="min-h-0 flex-1 scroll-fade scrollbar-none overflow-y-auto overscroll-contain p-4 sm:p-6 [&::-webkit-scrollbar]:hidden"
-          >
+          <DetailScrollBody key={movie && movieDetailKey(movie)}>
             <Suspense fallback={<MovieDetailSkeleton />}>
               {movie ? <MovieDetailContent movie={movie} /> : null}
             </Suspense>
-          </div>
+          </DetailScrollBody>
         </DialogContent>
       </Dialog>
     </MovieDetailDialogContext>

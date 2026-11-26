@@ -59,7 +59,7 @@ func TestLibrarySubtitleEndpointsManageOnlyTheSelectedVideo(t *testing.T) {
 	first := addVideo("ABP-123.mp4", "first", domain.LocalAccountID)
 	second := addVideo("ABP-123.4k.mp4", "second", domain.LocalAccountID)
 	otherSource := addVideo("other.mp4", "other", "other-account")
-	subtitles := subtitle.NewService(store.Client, subtitle.NewFinder(nil, subtitle.WithProviders()))
+	subtitles := subtitle.NewService(store.Client, subtitle.NewFinder(nil, subtitle.WithProviders()), "", nil, nil)
 	lib := library.New(store.Client, nil, nil, nil, library.Options{
 		ExportManager: export.NewManager(export.Config{EmbyDir: root}),
 		Subtitles:     librarySubtitleProvider{Service: subtitles, body: srt},

@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2Icon, LoaderCircleIcon, QrCodeIcon, RefreshCwIcon } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { CheckCircle2Icon, QrCodeIcon, RefreshCwIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { toast } from 'sonner'
 
 import {
@@ -8,10 +8,10 @@ import {
   panKeys,
   useBeginPanLogin,
   usePanLoginStatus,
-  type PanAccountStatus,
   type PanLoginSession
 } from '@/api/pan'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,13 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog'
 
-export function PanLoginDialog({ children }: { children: ReactNode }) {
+export function PanLoginDialog({
+  children,
+  onAuthorized
+}: {
+  children: ReactElement
+  onAuthorized?: (accountID: string) => void
+}) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const login = useBeginPanLogin()
@@ -32,33 +38,35 @@ export function PanLoginDialog({ children }: { children: ReactNode }) {
       login.mutate()
     } else {
       login.reset()
-      void queryClient.invalidateQueries({ queryKey: panKeys.account })
+      void queryClient.invalidateQueries({ queryKey: panKeys.accounts })
     }
   }
 
-  function completeLogin() {
-    queryClient.setQueryData<PanAccountStatus>(panKeys.account, { connected: true })
+  function completeLogin(accountID: string) {
+    void queryClient.invalidateQueries({ queryKey: panKeys.accounts })
     invalidatePanSource(queryClient)
     changeOpen(false)
+    if (onAuthorized && accountID) {
+      onAuthorized(accountID)
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogTrigger render={children} />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>登录 115 网盘</DialogTitle>
           <DialogDescription>请使用 115 手机客户端扫码，并在手机上确认登录。</DialogDescription>
         </DialogHeader>
-        {open ? (
-          <LoginContent
-            session={login.data}
-            pending={login.isPending}
-            failed={login.isError}
-            onRetry={() => login.mutate()}
-            onAuthorized={completeLogin}
-          />
-        ) : null}
+        {/* Keep the login content mounted through DialogContent's exit animation. */}
+        <LoginContent
+          session={login.data}
+          pending={login.isPending}
+          failed={login.isError}
+          onRetry={() => login.mutate()}
+          onAuthorized={completeLogin}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -75,7 +83,7 @@ function LoginContent({
   pending: boolean
   failed: boolean
   onRetry: () => void
-  onAuthorized: () => void
+  onAuthorized: (accountID: string) => void
 }) {
   const status = usePanLoginStatus(session?.id ?? '')
   const state = status.data?.state
@@ -93,9 +101,9 @@ function LoginContent({
 
   useEffect(() => {
     if (state === 'authorized') {
-      onAuthorized()
+      onAuthorized(status.data?.account_id ?? '')
     }
-  }, [state, onAuthorized])
+  }, [state, status.data?.account_id, onAuthorized])
 
   // An expired code is 115 saying this QR is dead, so replacing it costs the user
   // nothing. A cancellation is the user's own doing: leave that one to them.
@@ -129,12 +137,13 @@ function LoginContent({
     <div className="flex flex-col items-center gap-5">
       <div className="flex aspect-square w-full max-w-64 items-center justify-center overflow-hidden rounded-2xl border bg-muted">
         {pending ? (
-          <LoaderCircleIcon className="size-8 animate-spin text-muted-foreground" />
+          <Spinner className="size-8 text-muted-foreground" />
         ) : showQR ? (
           <img
             src={session.qr_code}
             width={256}
             height={256}
+            alt="登录二维码"
             className="size-full bg-white object-contain p-3"
           />
         ) : (

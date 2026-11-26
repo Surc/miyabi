@@ -22,9 +22,31 @@ type ViewedMovieCreate struct {
 	conflict []sql.ConflictOption
 }
 
+// SetCode sets the "code" field.
+func (_c *ViewedMovieCreate) SetCode(v string) *ViewedMovieCreate {
+	_c.mutation.SetCode(v)
+	return _c
+}
+
+// SetNillableCode sets the "code" field if the given value is not nil.
+func (_c *ViewedMovieCreate) SetNillableCode(v *string) *ViewedMovieCreate {
+	if v != nil {
+		_c.SetCode(*v)
+	}
+	return _c
+}
+
 // SetJavdbID sets the "javdb_id" field.
 func (_c *ViewedMovieCreate) SetJavdbID(v string) *ViewedMovieCreate {
 	_c.mutation.SetJavdbID(v)
+	return _c
+}
+
+// SetNillableJavdbID sets the "javdb_id" field if the given value is not nil.
+func (_c *ViewedMovieCreate) SetNillableJavdbID(v *string) *ViewedMovieCreate {
+	if v != nil {
+		_c.SetJavdbID(*v)
+	}
 	return _c
 }
 
@@ -85,8 +107,10 @@ func (_c *ViewedMovieCreate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_c *ViewedMovieCreate) check() error {
-	if _, ok := _c.mutation.JavdbID(); !ok {
-		return &ValidationError{Name: "javdb_id", err: errors.New(`ent: missing required field "ViewedMovie.javdb_id"`)}
+	if v, ok := _c.mutation.Code(); ok {
+		if err := viewedmovie.CodeValidator(v); err != nil {
+			return &ValidationError{Name: "code", err: fmt.Errorf(`ent: validator failed for field "ViewedMovie.code": %w`, err)}
+		}
 	}
 	if v, ok := _c.mutation.JavdbID(); ok {
 		if err := viewedmovie.JavdbIDValidator(v); err != nil {
@@ -123,6 +147,10 @@ func (_c *ViewedMovieCreate) createSpec() (*ViewedMovie, *sqlgraph.CreateSpec) {
 		_spec = sqlgraph.NewCreateSpec(viewedmovie.Table, sqlgraph.NewFieldSpec(viewedmovie.FieldID, field.TypeInt))
 	)
 	_spec.OnConflict = _c.conflict
+	if value, ok := _c.mutation.Code(); ok {
+		_spec.SetField(viewedmovie.FieldCode, field.TypeString, value)
+		_node.Code = value
+	}
 	if value, ok := _c.mutation.JavdbID(); ok {
 		_spec.SetField(viewedmovie.FieldJavdbID, field.TypeString, value)
 		_node.JavdbID = value
@@ -138,7 +166,7 @@ func (_c *ViewedMovieCreate) createSpec() (*ViewedMovie, *sqlgraph.CreateSpec) {
 // of the `INSERT` statement. For example:
 //
 //	client.ViewedMovie.Create().
-//		SetJavdbID(v).
+//		SetCode(v).
 //		OnConflict(
 //			// Update the row with the new values
 //			// the was proposed for insertion.
@@ -147,7 +175,7 @@ func (_c *ViewedMovieCreate) createSpec() (*ViewedMovie, *sqlgraph.CreateSpec) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.ViewedMovieUpsert) {
-//			SetJavdbID(v+v).
+//			SetCode(v+v).
 //		}).
 //		Exec(ctx)
 func (_c *ViewedMovieCreate) OnConflict(opts ...sql.ConflictOption) *ViewedMovieUpsertOne {
@@ -183,6 +211,24 @@ type (
 	}
 )
 
+// SetCode sets the "code" field.
+func (u *ViewedMovieUpsert) SetCode(v string) *ViewedMovieUpsert {
+	u.Set(viewedmovie.FieldCode, v)
+	return u
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *ViewedMovieUpsert) UpdateCode() *ViewedMovieUpsert {
+	u.SetExcluded(viewedmovie.FieldCode)
+	return u
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *ViewedMovieUpsert) ClearCode() *ViewedMovieUpsert {
+	u.SetNull(viewedmovie.FieldCode)
+	return u
+}
+
 // SetJavdbID sets the "javdb_id" field.
 func (u *ViewedMovieUpsert) SetJavdbID(v string) *ViewedMovieUpsert {
 	u.Set(viewedmovie.FieldJavdbID, v)
@@ -192,6 +238,12 @@ func (u *ViewedMovieUpsert) SetJavdbID(v string) *ViewedMovieUpsert {
 // UpdateJavdbID sets the "javdb_id" field to the value that was provided on create.
 func (u *ViewedMovieUpsert) UpdateJavdbID() *ViewedMovieUpsert {
 	u.SetExcluded(viewedmovie.FieldJavdbID)
+	return u
+}
+
+// ClearJavdbID clears the value of the "javdb_id" field.
+func (u *ViewedMovieUpsert) ClearJavdbID() *ViewedMovieUpsert {
+	u.SetNull(viewedmovie.FieldJavdbID)
 	return u
 }
 
@@ -247,6 +299,27 @@ func (u *ViewedMovieUpsertOne) Update(set func(*ViewedMovieUpsert)) *ViewedMovie
 	return u
 }
 
+// SetCode sets the "code" field.
+func (u *ViewedMovieUpsertOne) SetCode(v string) *ViewedMovieUpsertOne {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.SetCode(v)
+	})
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *ViewedMovieUpsertOne) UpdateCode() *ViewedMovieUpsertOne {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.UpdateCode()
+	})
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *ViewedMovieUpsertOne) ClearCode() *ViewedMovieUpsertOne {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.ClearCode()
+	})
+}
+
 // SetJavdbID sets the "javdb_id" field.
 func (u *ViewedMovieUpsertOne) SetJavdbID(v string) *ViewedMovieUpsertOne {
 	return u.Update(func(s *ViewedMovieUpsert) {
@@ -258,6 +331,13 @@ func (u *ViewedMovieUpsertOne) SetJavdbID(v string) *ViewedMovieUpsertOne {
 func (u *ViewedMovieUpsertOne) UpdateJavdbID() *ViewedMovieUpsertOne {
 	return u.Update(func(s *ViewedMovieUpsert) {
 		s.UpdateJavdbID()
+	})
+}
+
+// ClearJavdbID clears the value of the "javdb_id" field.
+func (u *ViewedMovieUpsertOne) ClearJavdbID() *ViewedMovieUpsertOne {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.ClearJavdbID()
 	})
 }
 
@@ -410,7 +490,7 @@ func (_c *ViewedMovieCreateBulk) ExecX(ctx context.Context) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.ViewedMovieUpsert) {
-//			SetJavdbID(v+v).
+//			SetCode(v+v).
 //		}).
 //		Exec(ctx)
 func (_c *ViewedMovieCreateBulk) OnConflict(opts ...sql.ConflictOption) *ViewedMovieUpsertBulk {
@@ -479,6 +559,27 @@ func (u *ViewedMovieUpsertBulk) Update(set func(*ViewedMovieUpsert)) *ViewedMovi
 	return u
 }
 
+// SetCode sets the "code" field.
+func (u *ViewedMovieUpsertBulk) SetCode(v string) *ViewedMovieUpsertBulk {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.SetCode(v)
+	})
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *ViewedMovieUpsertBulk) UpdateCode() *ViewedMovieUpsertBulk {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.UpdateCode()
+	})
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *ViewedMovieUpsertBulk) ClearCode() *ViewedMovieUpsertBulk {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.ClearCode()
+	})
+}
+
 // SetJavdbID sets the "javdb_id" field.
 func (u *ViewedMovieUpsertBulk) SetJavdbID(v string) *ViewedMovieUpsertBulk {
 	return u.Update(func(s *ViewedMovieUpsert) {
@@ -490,6 +591,13 @@ func (u *ViewedMovieUpsertBulk) SetJavdbID(v string) *ViewedMovieUpsertBulk {
 func (u *ViewedMovieUpsertBulk) UpdateJavdbID() *ViewedMovieUpsertBulk {
 	return u.Update(func(s *ViewedMovieUpsert) {
 		s.UpdateJavdbID()
+	})
+}
+
+// ClearJavdbID clears the value of the "javdb_id" field.
+func (u *ViewedMovieUpsertBulk) ClearJavdbID() *ViewedMovieUpsertBulk {
+	return u.Update(func(s *ViewedMovieUpsert) {
+		s.ClearJavdbID()
 	})
 }
 

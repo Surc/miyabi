@@ -3,14 +3,15 @@ package scrape
 import (
 	"context"
 	"fmt"
-	"github.com/ppxb/miyabi/internal/ent/predicate"
 	"strconv"
 	"time"
 
+	actorprofiles "github.com/ppxb/miyabi/internal/actors"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/actor"
 	"github.com/ppxb/miyabi/internal/ent/movie"
+	"github.com/ppxb/miyabi/internal/ent/predicate"
 	"github.com/ppxb/miyabi/internal/ent/tag"
 	"github.com/ppxb/miyabi/internal/nfo"
 )
@@ -18,18 +19,26 @@ import (
 // DetailNFO converts a catalogue MovieDetail into an NFO Document.
 func DetailNFO(detail domain.MovieDetail) nfo.Movie {
 	doc := nfo.Movie{
-		Plot:         detail.Plot,
 		Zone:         detail.Zone,
 		Title:        detail.Title,
 		Code:         detail.Code,
+		Plot:         detail.Plot,
 		Premiered:    detail.ReleaseDate,
 		Runtime:      detail.Duration,
 		Rating:       detail.Rating,
 		RatingSource: detail.RatingSource, RatingMax: detail.RatingMax,
 		FieldSources: detail.FieldSources, Previews: detail.PreviewImages, PreviewVideo: detail.PreviewVideo,
 	}
-	for i, source := range detail.Sources {
-		doc.IDs = append(doc.IDs, nfo.UniqueID{Type: source.Provider, Value: source.ID, Default: i == 0})
+	if detail.Code != "" {
+		doc.IDs = []nfo.UniqueID{{Type: "code", Value: detail.Code, Default: true}}
+	}
+	// Preserve provider source identities (e.g. the JavDB id) so a rescan and the
+	// magnet lookup keep them without re-querying the source.
+	for _, source := range detail.Sources {
+		if source.Provider == "" || source.ID == "" {
+			continue
+		}
+		doc.IDs = append(doc.IDs, nfo.UniqueID{Type: source.Provider, Value: source.ID})
 	}
 	if detail.Director != nil {
 		doc.Director = nfo.Entity{Provider: detail.Director.Provider, ID: detail.Director.ID, Name: detail.Director.Name}
@@ -74,13 +83,10 @@ func MovieNFO(record *ent.Movie) (nfo.Movie, error) {
 // SaveMovieMetadata updates an ent.Movie record and associates actors and tags from an NFO document.
 func SaveMovieMetadata(ctx context.Context, tx *ent.Tx, id int, doc nfo.Movie) error {
 	update := tx.Movie.UpdateOneID(id).SetMetadata(&doc).SetTitle(doc.Title).SetScrapeStatus(movie.ScrapeStatusPending).
-		ClearActors().ClearTags().ClearJavdbID().ClearReleaseDate().ClearDuration().ClearRating().
+		ClearActors().ClearTags().ClearReleaseDate().ClearDuration().ClearRating().
 		ClearDirectorID().ClearDirectorName().ClearMakerID().ClearMakerName().ClearSeriesID().ClearSeriesName()
 	if doc.Code != "" {
 		update.SetCode(doc.Code)
-	}
-	if doc.JavDBID() != "" {
-		update.SetJavdbID(doc.JavDBID())
 	}
 	if doc.Premiered != "" {
 		date, err := time.Parse(time.DateOnly, doc.Premiered)
@@ -137,6 +143,11 @@ func SaveMovieMetadata(ctx context.Context, tx *ent.Tx, id int, doc nfo.Movie) e
 		}
 		ids, err := tx.Actor.Query().Where(actor.Or(actorPredicates...)).IDs(ctx)
 		if err != nil {
+			return err
+		}
+		// Link new actors to their canonical profile in the same transaction, so
+		// every actor written by scrapes or local NFO imports is in the catalog.
+		if err := actorprofiles.LinkProfiles(ctx, tx, ids); err != nil {
 			return err
 		}
 		update.AddActorIDs(ids...)

@@ -224,6 +224,14 @@ func (s *BrowseExtension) BrowsePage(ctx context.Context, options domain.BrowseO
 	return browseLoad(ctx, s, "indexes", key, time.Duration(s.Settings().ListMinutes)*time.Minute, refresh, func(ctx context.Context) ([]Movie, bool, error) {
 		items, err := s.source.Browse(ctx, options)
 		if err == nil && ctx.Err() == nil {
+			for i := range items {
+				for _, source := range items[i].Sources {
+					if source.Provider == "javdb" && source.ID != "" {
+						items[i].ID = source.ID
+						break
+					}
+				}
+			}
 			s.seedRatings(items, generation)
 		}
 		return items, true, err

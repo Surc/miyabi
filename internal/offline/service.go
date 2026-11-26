@@ -19,6 +19,13 @@ type Catalogue interface {
 	ED2KResources(ctx context.Context, movieID string, page int) (domain.ED2KPage, error)
 	MovieCode(ctx context.Context, movieID string) (string, error)
 	CatalogueMagnets(ctx context.Context, movieID string) ([]domain.Magnet, error)
+	CatalogueMagnetsByCode(ctx context.Context, code string) ([]domain.Magnet, error)
+}
+
+// MetadataWarmer pre-fetches metadata for a code so a later library scrape can
+// reuse the cached sources instead of hitting the networks again.
+type MetadataWarmer interface {
+	Resolve(context.Context, domain.MovieRef) (domain.MovieMetadata, error)
 }
 
 // Library schedules scans and projects their current workflow status.
@@ -34,6 +41,7 @@ type Service struct {
 	drive     *drive.Drive
 	tasks     *tasks.Service
 	library   Library
+	metadata  MetadataWarmer
 	// submitTimeout bounds one remote submission once it has started; the
 	// caller may have gone away but the mutation must be recorded.
 	submitTimeout time.Duration
@@ -42,14 +50,16 @@ type Service struct {
 	policy        recoveryPolicy
 }
 
-// New creates a new offline download management service.
-func New(database *ent.Client, catalogue Catalogue, drive *drive.Drive, tasks *tasks.Service, library Library, submitTimeout time.Duration) *Service {
+// New creates a new offline download management service. metadata prewarms the
+// scrape cache when a movie is added to the drive; nil disables prewarming.
+func New(database *ent.Client, catalogue Catalogue, drive *drive.Drive, tasks *tasks.Service, library Library, metadata MetadataWarmer, submitTimeout time.Duration) *Service {
 	return &Service{
 		database:  database,
 		catalogue: catalogue,
 		drive:     drive,
 		tasks:     tasks,
 		library:   library,
+		metadata:  metadata,
 
 		submitTimeout: submitTimeout,
 		now:           time.Now,

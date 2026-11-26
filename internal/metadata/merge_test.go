@@ -7,7 +7,7 @@ import (
 	"github.com/ppxb/miyabi/internal/domain"
 )
 
-func TestMergeKeepsJavDBEntitiesAndAllSourceArtwork(t *testing.T) {
+func TestMergeFillsFieldsBySourceOrder(t *testing.T) {
 	official := completeFixture("fanza", "ABP-123")
 	official.Detail.Zone = domain.ZoneUnknown
 	official.Detail.Rating, official.Detail.RatingMax = 4.8, 5
@@ -20,8 +20,6 @@ func TestMergeKeepsJavDBEntitiesAndAllSourceArtwork(t *testing.T) {
 	catalogue.Detail.Zone = domain.ZoneCensored
 	catalogue.Detail.OriginTitle = "Original title"
 	catalogue.Detail.Rating, catalogue.Detail.RatingMax = 4.2, 5
-	catalogue.Detail.Tags[0].CategoryID = "catalogue-category"
-	catalogue.Detail.Tags[0].NameZHT = "標籤"
 	catalogue.Detail.Series = &domain.Series{Provider: "javdb", ID: "series", Name: "Series"}
 	catalogue.Detail.Director = &domain.Director{Provider: "javdb", ID: "director", Name: "Director"}
 	catalogue.Images = []domain.ImageCandidate{
@@ -31,13 +29,15 @@ func TestMergeKeepsJavDBEntitiesAndAllSourceArtwork(t *testing.T) {
 	}
 	input := []domain.MovieMetadata{official, catalogue}
 	got := merge(input)
-	if got.Detail.Title != catalogue.Detail.Title || got.Detail.OriginTitle != catalogue.Detail.OriginTitle || got.Detail.Zone != domain.ZoneCensored ||
-		got.Detail.Rating != 4.2 || got.Detail.RatingSource != "javdb" {
+	// Source order wins: the first source (fanza) fills the fields it has; javdb
+	// only supplements what fanza leaves empty (origin title, series, director).
+	if got.Detail.Title != "fanza title" || got.Detail.OriginTitle != "Original title" ||
+		got.Detail.Zone != domain.ZoneCensored || got.Detail.Rating != 4.8 || got.Detail.RatingSource != "fanza" {
 		t.Fatalf("incorrect field priority: %+v", got.Detail)
 	}
-	if !reflect.DeepEqual(got.Detail.Actors, catalogue.Detail.Actors) || !reflect.DeepEqual(got.Detail.Tags, catalogue.Detail.Tags) ||
-		!reflect.DeepEqual(got.Detail.Maker, catalogue.Detail.Maker) || !reflect.DeepEqual(got.Detail.Series, catalogue.Detail.Series) || !reflect.DeepEqual(got.Detail.Director, catalogue.Detail.Director) {
-		t.Fatalf("catalogue entity identities were replaced: %+v", got.Detail)
+	if !reflect.DeepEqual(got.Detail.Actors, official.Detail.Actors) || !reflect.DeepEqual(got.Detail.Tags, official.Detail.Tags) ||
+		!reflect.DeepEqual(got.Detail.Maker, official.Detail.Maker) || !reflect.DeepEqual(got.Detail.Series, catalogue.Detail.Series) || !reflect.DeepEqual(got.Detail.Director, catalogue.Detail.Director) {
+		t.Fatalf("entity identities not merged by source order: %+v", got.Detail)
 	}
 	if len(got.Images) != 4 || !reflect.DeepEqual(got.Images[:2], official.Images) || len(got.Detail.PreviewImages) != 2 || !got.Detail.HasPreview {
 		t.Fatalf("artwork candidates lost or duplicated: %+v", got)
@@ -47,15 +47,43 @@ func TestMergeKeepsJavDBEntitiesAndAllSourceArtwork(t *testing.T) {
 	}
 }
 
-func TestMergeSupplementsMissingJavDBFieldsAndPreviews(t *testing.T) {
+func TestMergePrefersOfficialPlotOverJavDB(t *testing.T) {
+	official := domain.MovieMetadata{Detail: domain.MovieDetail{Movie: domain.Movie{
+		Sources: []domain.SourceID{{Provider: "heyzo", ID: "1234"}},
+		Code:    "HEYZO-1234", Title: "T", Plot: "official plot",
+	}}}
+	catalogue := domain.MovieMetadata{Detail: domain.MovieDetail{Movie: domain.Movie{
+		Sources: []domain.SourceID{{Provider: "javdb", ID: "x"}},
+		Code:    "HEYZO-1234", Title: "T", Plot: "javdb plot",
+	}}}
+	got := merge([]domain.MovieMetadata{official, catalogue})
+	if got.Detail.Plot != "official plot" || got.Detail.FieldSources["plot"] != "heyzo" {
+		t.Fatalf("plot priority = %q/%q", got.Detail.Plot, got.Detail.FieldSources["plot"])
+	}
+	official.Detail.Plot = ""
+	got = merge([]domain.MovieMetadata{official, catalogue})
+	if got.Detail.Plot != "javdb plot" || got.Detail.FieldSources["plot"] != "javdb" {
+		t.Fatalf("javdb plot fallback = %q/%q", got.Detail.Plot, got.Detail.FieldSources["plot"])
+	}
+}
+
+func TestMergeOfficialFillsBeforeJavDBSupplements(t *testing.T) {
 	catalogue := fixture("javdb", "ABP-123", "Catalogue title")
 	official := completeFixture("fanza", "ABP-123")
 	got := merge([]domain.MovieMetadata{official, catalogue})
-	if got.Detail.Title != "Catalogue title" || got.Detail.Maker.Provider != "fanza" || got.Detail.Actors[0].Provider != "fanza" ||
-		len(got.Detail.PreviewImages) != 1 || got.Detail.FieldSources["title"] != "javdb" || got.Detail.FieldSources["tags"] != "fanza" {
-		t.Fatalf("missing metadata not supplemented: %+v", got)
+	if got.Detail.Title != "fanza title" || got.Detail.Maker.Provider != "fanza" || got.Detail.Actors[0].Provider != "fanza" ||
+		len(got.Detail.PreviewImages) != 1 || got.Detail.FieldSources["title"] != "fanza" || got.Detail.FieldSources["tags"] != "fanza" {
+		t.Fatalf("official fields did not win: %+v", got)
 	}
-	if needsSupplement(got) {
-		t.Fatal("complete metadata triggered another query")
+}
+
+func TestMergeTitlePrefersOriginTitle(t *testing.T) {
+	source := domain.MovieMetadata{Detail: domain.MovieDetail{Movie: domain.Movie{
+		Sources: []domain.SourceID{{Provider: "x", ID: "1"}},
+		Code:    "ABP-1", Title: "本地化标题", OriginTitle: "日本語タイトル",
+	}}}
+	got := merge([]domain.MovieMetadata{source})
+	if got.Detail.Title != "日本語タイトル" || got.Detail.OriginTitle != "日本語タイトル" || got.Detail.FieldSources["title"] != "x" {
+		t.Fatalf("title should prefer the origin title: title=%q origin=%q src=%q", got.Detail.Title, got.Detail.OriginTitle, got.Detail.FieldSources["title"])
 	}
 }

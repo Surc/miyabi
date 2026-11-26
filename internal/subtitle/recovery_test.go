@@ -28,7 +28,7 @@ func TestSubtitleRecoversInstalledFileWithoutRedownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := NewService(db, nil) // Recovery has no finder/network dependency.
+	restarted := NewService(db, nil, "", nil, nil) // Recovery has no finder/network dependency.
 	cfg := DefaultConfig()
 	cfg.Enabled = false
 	if _, err := restarted.UpdateConfig(t.Context(), cfg); err != nil {
@@ -196,7 +196,7 @@ func TestSubtitleRecoveryResyncsInstalledFileBeforeRemovingIntent(t *testing.T) 
 		}
 	}
 	assertPending()
-	restarted := NewService(db, nil)
+	restarted := NewService(db, nil, "", nil, nil)
 	for _, failDirectory := range []bool{false, true} {
 		restarted.syncSubtitleFile = func(file *os.File) error {
 			info, err := file.Stat()

@@ -1,27 +1,32 @@
 import type { DiscoverMovie } from '@/api/discover'
-import { MovieCard } from '@/components/movie'
-import { MovieResourceBadges, MovieStateBadge } from '@/components/movie/movie-badges'
-import { MovieSubscribeButton } from './movie-subscribe-button'
+import { MovieCard, MovieCoverCaption, MovieRatingPill } from '@/components/movie'
+import { MovieStateBadge } from '@/components/movie/movie-badges'
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
 
-export function DiscoverMovieCard({ movie }: { movie: DiscoverMovie }) {
-  const subscribable = movie.release_status === 'upcoming' && movie.magnets_count === 0
+/** The fields the explore card actually renders (no subscription affordance). */
+export type DiscoverMovieCardData = Pick<
+  DiscoverMovie,
+  'id' | 'code' | 'title' | 'cover' | 'rating' | 'release_date'
+>
+
+export function DiscoverMovieCard({ movie }: { movie: DiscoverMovieCardData }) {
+  const title = movie.title || movie.code
   return (
-    <MovieDetailTrigger movie={{ id: movie.id }} className="block rounded-2xl outline-ring">
+    <MovieDetailTrigger
+      movie={{ id: movie.id, code: movie.code }}
+      className="block h-full min-w-0 rounded-2xl outline-ring"
+    >
       <MovieCard
         movie={movie}
-        description={movie.release_date}
+        hideContent
         state={<MovieStateBadge movie={movie} />}
         coverOverlay={
-          subscribable ? (
-            <div className="absolute top-2 right-2">
-              <MovieSubscribeButton movie={movie} />
-            </div>
-          ) : undefined
+          <>
+            <MovieRatingPill rating={movie.rating} />
+            <MovieCoverCaption title={title} subtitle={movie.release_date} />
+          </>
         }
-      >
-        <MovieResourceBadges movie={movie} />
-      </MovieCard>
+      />
     </MovieDetailTrigger>
   )
 }

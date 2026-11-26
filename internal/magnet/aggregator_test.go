@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/ppxb/miyabi/internal/domain"
@@ -34,9 +35,9 @@ func TestAggregatorDeduplicationAndMerging(t *testing.T) {
 	hashJavDBOnly := "1111111111111111111111111111111111111111"
 	hashJavBusOnly := "2222222222222222222222222222222222222222"
 
-	srcJavDB := &stubSource{name: domain.MagnetSourceJavDB, magnets: []domain.Magnet{
-		{Hash: hashCommon, Name: "SSIS-001 Cleaned", Size: 2000, HD: true, CreatedAt: "2025-10-30", Sources: []string{domain.MagnetSourceJavDB}, Tags: []string{domain.MagnetTagHD}},
-		{Hash: hashJavDBOnly, Name: "SSIS-001 JavDB Only", Size: 1000, HasSubtitle: true, Sources: []string{domain.MagnetSourceJavDB}, Tags: []string{domain.MagnetTagSubtitle}},
+	srcJavDB := &stubSource{name: "javdb", magnets: []domain.Magnet{
+		{Hash: hashCommon, Name: "SSIS-001 Cleaned", Size: 2000, HD: true, CreatedAt: "2025-10-30", Sources: []string{"javdb"}, Tags: []string{domain.MagnetTagHD}},
+		{Hash: hashJavDBOnly, Name: "SSIS-001 JavDB Only", Size: 1000, HasSubtitle: true, Sources: []string{"javdb"}, Tags: []string{domain.MagnetTagSubtitle}},
 	}}
 	srcJavBus := &stubSource{name: domain.MagnetSourceJavBus, magnets: []domain.Magnet{
 		{Hash: hashCommon, Name: "SSIS-001 Raw", Size: 2500, HasSubtitle: true, CreatedAt: "2025-10-28", Sources: []string{domain.MagnetSourceJavBus}, Tags: []string{domain.MagnetTagSubtitle}},
@@ -55,11 +56,11 @@ func TestAggregatorDeduplicationAndMerging(t *testing.T) {
 	if common.Hash != hashCommon {
 		t.Fatalf("expected the merged magnet first, got %+v", common)
 	}
-	if common.Name != "SSIS-001 Cleaned" || common.Size != 2500 || !common.HasSubtitle || !common.HD || common.CreatedAt != "2025-10-28" {
+	if common.Name != "SSIS-001 Raw" || common.Size != 2500 || !common.HasSubtitle || !common.HD || common.CreatedAt != "2025-10-28" {
 		t.Errorf("merge rules violated: %+v", common)
 	}
-	if len(common.Sources) != 2 || common.Sources[0] != domain.MagnetSourceJavDB || common.Sources[1] != domain.MagnetSourceJavBus {
-		t.Errorf("expected sources [javdb javbus] regardless of source order, got %v", common.Sources)
+	if len(common.Sources) != 2 || common.Sources[0] != domain.MagnetSourceJavBus || common.Sources[1] != "javdb" {
+		t.Errorf("expected sources [javbus javdb] regardless of source order, got %v", common.Sources)
 	}
 	if results[1].Hash != hashJavDBOnly || results[2].Hash != hashJavBusOnly {
 		t.Errorf("expected subtitle before HD-only: %s, %s", results[1].Hash, results[2].Hash)
@@ -90,13 +91,13 @@ func TestAggregatorPreparesMagnetsForPicker(t *testing.T) {
 		inferredHash   = "2222222222222222222222222222222222222222"
 		uncensoredHash = "3333333333333333333333333333333333333333"
 	)
-	source := &stubSource{name: domain.MagnetSourceJavDB, magnets: []domain.Magnet{
+	source := &stubSource{name: "javdb", magnets: []domain.Magnet{
 		{Hash: verifiedHash, Name: "SSIS-001", Size: 1000, HasSubtitle: true, HD: true,
-			Tags: []string{domain.MagnetTagSubtitle, domain.MagnetTagHD}, Sources: []string{domain.MagnetSourceJavDB}},
-		{Hash: inferredHash, Name: "SSIS-001-C 4K", Size: 2000, Sources: []string{domain.MagnetSourceJavDB}},
-		{Hash: uncensoredHash, Name: "SSIS-001-UC 4K", Size: 3000, Sources: []string{domain.MagnetSourceJavDB}},
+			Tags: []string{domain.MagnetTagSubtitle, domain.MagnetTagHD}, Sources: []string{"javdb"}},
+		{Hash: inferredHash, Name: "SSIS-001-C 4K", Size: 2000, Sources: []string{"javdb"}},
+		{Hash: uncensoredHash, Name: "SSIS-001-UC 4K", Size: 3000, Sources: []string{"javdb"}},
 	}}
-	magnets, err := NewAggregator([]Source{source}, time.Second).Find(t.Context(), domain.MovieRef{JavDBID: "movie-1"})
+	magnets, err := NewAggregator([]Source{source}, time.Second).Find(t.Context(), domain.MovieRef{Code: "movie-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestAggregatorPreparesMagnetsForPicker(t *testing.T) {
 }
 
 func TestAggregatorSingleSourceFailure(t *testing.T) {
-	ok := &stubSource{name: domain.MagnetSourceJavDB, magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Item 1", Sources: []string{domain.MagnetSourceJavDB}}}}
+	ok := &stubSource{name: "javdb", magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Item 1", Sources: []string{"javdb"}}}}
 	broken := &stubSource{name: domain.MagnetSourceJavBus, err: errors.New("network timeout")}
 	results, err := NewAggregator([]Source{ok, broken}, time.Second).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
 	if err != nil || len(results) != 1 {
@@ -141,7 +142,7 @@ func TestAggregatorSingleSourceFailure(t *testing.T) {
 }
 
 func TestAggregatorSingleSourceTimeout(t *testing.T) {
-	fast := &stubSource{name: domain.MagnetSourceJavDB, magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Fast", Sources: []string{domain.MagnetSourceJavDB}}}}
+	fast := &stubSource{name: "javdb", magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Fast", Sources: []string{"javdb"}}}}
 	slow := &stubSource{name: domain.MagnetSourceJavBus, delay: time.Second, magnets: []domain.Magnet{{Hash: "2222222222222222222222222222222222222222", Name: "Slow", Sources: []string{domain.MagnetSourceJavBus}}}}
 	started := time.Now()
 	results, err := NewAggregator([]Source{fast, slow}, 50*time.Millisecond).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
@@ -158,7 +159,7 @@ func TestAggregatorSingleSourceTimeout(t *testing.T) {
 
 func TestAggregatorAllSourcesFailed(t *testing.T) {
 	sources := []Source{
-		&stubSource{name: domain.MagnetSourceJavDB, err: errors.New("javdb down")},
+		&stubSource{name: "javdb", err: errors.New("javdb down")},
 		&stubSource{name: domain.MagnetSourceJavBus, err: errors.New("javbus blocked")},
 	}
 	_, err := NewAggregator(sources, time.Second).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
@@ -169,7 +170,7 @@ func TestAggregatorAllSourcesFailed(t *testing.T) {
 
 func TestAggregatorSkippedSourceDoesNotMaskFailure(t *testing.T) {
 	sources := []Source{
-		&stubSource{name: domain.MagnetSourceJavDB, err: errors.New("javdb down")},
+		&stubSource{name: "javdb", err: errors.New("javdb down")},
 		&stubSource{name: domain.MagnetSourceJavBus, err: ErrSkipped},
 	}
 	_, err := NewAggregator(sources, time.Second).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
@@ -180,7 +181,7 @@ func TestAggregatorSkippedSourceDoesNotMaskFailure(t *testing.T) {
 
 func TestAggregatorEmptyResultWithPartialFailureFails(t *testing.T) {
 	sources := []Source{
-		&stubSource{name: domain.MagnetSourceJavDB, err: errors.New("javdb down")},
+		&stubSource{name: "javdb", err: errors.New("javdb down")},
 		&stubSource{name: domain.MagnetSourceJavBus, magnets: nil},
 	}
 	_, err := NewAggregator(sources, time.Second).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
@@ -190,7 +191,7 @@ func TestAggregatorEmptyResultWithPartialFailureFails(t *testing.T) {
 }
 
 func TestAggregatorFindDetailedReportsPartialFailure(t *testing.T) {
-	ok := &stubSource{name: domain.MagnetSourceJavDB, magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Item 1", Sources: []string{domain.MagnetSourceJavDB}}}}
+	ok := &stubSource{name: "javdb", magnets: []domain.Magnet{{Hash: "1111111111111111111111111111111111111111", Name: "Item 1", Sources: []string{"javdb"}}}}
 	broken := &stubSource{name: domain.MagnetSourceJavBus, err: errors.New("network timeout")}
 	results, partial, err := NewAggregator([]Source{ok, broken}, time.Second).FindDetailed(t.Context(), domain.MovieRef{Code: "SSIS-001"})
 	if err != nil || len(results) != 1 || !partial {
@@ -200,11 +201,101 @@ func TestAggregatorFindDetailedReportsPartialFailure(t *testing.T) {
 
 func TestAggregatorAllSourcesSkipped(t *testing.T) {
 	sources := []Source{
-		&stubSource{name: domain.MagnetSourceJavDB, err: ErrSkipped},
+		&stubSource{name: "javdb", err: ErrSkipped},
 		&stubSource{name: domain.MagnetSourceJavBus, err: ErrSkipped},
 	}
 	results, err := NewAggregator(sources, time.Second).Find(t.Context(), domain.MovieRef{Code: "SSIS-001"})
 	if err != nil || len(results) != 0 {
 		t.Fatalf("expected 0 results and nil err when all skipped, got results=%d err=%v", len(results), err)
+	}
+}
+
+func TestAggregatorAllSourcesBlockedReturnsEmpty(t *testing.T) {
+	sources := []Source{
+		&stubSource{name: domain.MagnetSourceJavBus, err: domain.Blocked("challenge")},
+		&stubSource{name: domain.MagnetSourceSukebei, err: domain.Blocked("challenge")},
+	}
+	results, partial, err := NewAggregator(sources, time.Second).FindDetailed(t.Context(), domain.MovieRef{Code: "SSIS-001"})
+	if err != nil || len(results) != 0 || !partial {
+		t.Fatalf("expected 0 results, partial=true, nil err; got results=%d partial=%v err=%v", len(results), partial, err)
+	}
+}
+
+type countingSource struct {
+	name  string
+	calls int
+	err   error
+}
+
+func (s *countingSource) Name() string { return s.name }
+
+func (s *countingSource) Find(context.Context, domain.MovieRef) ([]domain.Magnet, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []domain.Magnet{{Hash: "3333333333333333333333333333333333333333", Name: "ok", Sources: []string{s.name}}}, nil
+}
+
+// A source failing breakerThreshold times in a row is left out for
+// breakerCooldown, then probed again; a success closes the breaker.
+func TestAggregatorBreakerCoolsDownFailingSource(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		healthy := &countingSource{name: "javdb"}
+		broken := &countingSource{name: domain.MagnetSourceJavBus, err: errors.New("connection refused")}
+		agg := NewAggregator([]Source{healthy, broken}, time.Second)
+		ref := domain.MovieRef{Code: "SSIS-001"}
+		find := func() bool {
+			t.Helper()
+			magnets, partial, err := agg.FindDetailed(t.Context(), ref)
+			if err != nil || len(magnets) != 1 {
+				t.Fatalf("healthy source result: %d magnets, %v", len(magnets), err)
+			}
+			return partial
+		}
+
+		for range breakerThreshold {
+			find()
+		}
+		if !find() || broken.calls != breakerThreshold {
+			t.Fatalf("open breaker still queried the source: %d calls", broken.calls)
+		}
+
+		time.Sleep(breakerCooldown)
+		broken.err = nil
+		if find() || broken.calls != breakerThreshold+1 {
+			t.Fatalf("cooldown did not probe the source again: %d calls", broken.calls)
+		}
+		broken.err = errors.New("connection refused")
+		find()
+		find()
+		if find(); broken.calls != breakerThreshold+4 {
+			t.Fatalf("a success did not reset the failure count: %d calls", broken.calls)
+		}
+	})
+}
+
+// When every source is cooling down the query fails as all-unavailable, and a
+// caller cancelling its own request does not count against a source.
+func TestAggregatorBreakerAllCoolingAndCallerCancel(t *testing.T) {
+	broken := &countingSource{name: "javdb", err: errors.New("down")}
+	agg := NewAggregator([]Source{broken}, time.Second)
+	ref := domain.MovieRef{Code: "SSIS-001"}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	for range breakerThreshold {
+		_, _ = agg.Find(cancelled, ref)
+	}
+	if !agg.admit(0) {
+		t.Fatal("caller cancellations opened the breaker")
+	}
+
+	for range breakerThreshold {
+		_, _ = agg.Find(t.Context(), ref)
+	}
+	calls := broken.calls
+	if _, err := agg.Find(t.Context(), ref); !domain.IsKind(err, domain.KindUpstream) || broken.calls != calls {
+		t.Fatalf("all-cooling query: err = %v, calls %d -> %d", err, calls, broken.calls)
 	}
 }

@@ -48,6 +48,8 @@ const (
 	FieldSeriesName = "series_name"
 	// FieldRating holds the string denoting the rating field in the database.
 	FieldRating = "rating"
+	// FieldRating10 holds the string denoting the rating10 field in the database.
+	FieldRating10 = "rating10"
 	// FieldCover holds the string denoting the cover field in the database.
 	FieldCover = "cover"
 	// FieldPoster holds the string denoting the poster field in the database.
@@ -115,6 +117,7 @@ var Columns = []string{
 	FieldSeriesID,
 	FieldSeriesName,
 	FieldRating,
+	FieldRating10,
 	FieldCover,
 	FieldPoster,
 	FieldFanarts,
@@ -163,6 +166,8 @@ var (
 	DefaultCanonicalCode string
 	// DefaultTitle holds the default value on creation for the "title" field.
 	DefaultTitle string
+	// DefaultRating10 holds the default value on creation for the "rating10" field.
+	DefaultRating10 float64
 	// DefaultFanarts holds the default value on creation for the "fanarts" field.
 	DefaultFanarts func() []string
 )
@@ -280,6 +285,11 @@ func BySeriesName(opts ...sql.OrderTermOption) OrderOption {
 // ByRating orders the results by the rating field.
 func ByRating(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRating, opts...).ToFunc()
+}
+
+// ByRating10 orders the results by the rating10 field.
+func ByRating10(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRating10, opts...).ToFunc()
 }
 
 // ByCover orders the results by the cover field.

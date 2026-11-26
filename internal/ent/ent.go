@@ -13,18 +13,24 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/ppxb/miyabi/internal/ent/actor"
+	"github.com/ppxb/miyabi/internal/ent/actoralias"
+	"github.com/ppxb/miyabi/internal/ent/actorimage"
+	"github.com/ppxb/miyabi/internal/ent/actorprofile"
 	"github.com/ppxb/miyabi/internal/ent/embynotification"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/localscanentry"
 	"github.com/ppxb/miyabi/internal/ent/metadatacache"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/offlinedownload"
+	"github.com/ppxb/miyabi/internal/ent/panaccount"
 	"github.com/ppxb/miyabi/internal/ent/setting"
+	"github.com/ppxb/miyabi/internal/ent/storagesource"
 	"github.com/ppxb/miyabi/internal/ent/subscription"
 	"github.com/ppxb/miyabi/internal/ent/subtitle"
 	"github.com/ppxb/miyabi/internal/ent/tag"
 	"github.com/ppxb/miyabi/internal/ent/task"
 	"github.com/ppxb/miyabi/internal/ent/viewedmovie"
+	"github.com/ppxb/miyabi/internal/ent/watchhistory"
 )
 
 // ent aliases to avoid import conflicts in user's code.
@@ -86,18 +92,24 @@ func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
 			actor.Table:            actor.ValidColumn,
+			actoralias.Table:       actoralias.ValidColumn,
+			actorimage.Table:       actorimage.ValidColumn,
+			actorprofile.Table:     actorprofile.ValidColumn,
 			embynotification.Table: embynotification.ValidColumn,
 			file.Table:             file.ValidColumn,
 			localscanentry.Table:   localscanentry.ValidColumn,
 			metadatacache.Table:    metadatacache.ValidColumn,
 			movie.Table:            movie.ValidColumn,
 			offlinedownload.Table:  offlinedownload.ValidColumn,
+			panaccount.Table:       panaccount.ValidColumn,
 			setting.Table:          setting.ValidColumn,
+			storagesource.Table:    storagesource.ValidColumn,
 			subscription.Table:     subscription.ValidColumn,
 			subtitle.Table:         subtitle.ValidColumn,
 			tag.Table:              tag.ValidColumn,
 			task.Table:             task.ValidColumn,
 			viewedmovie.Table:      viewedmovie.ValidColumn,
+			watchhistory.Table:     watchhistory.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

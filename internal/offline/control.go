@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/domain/download"
 	"github.com/ppxb/miyabi/internal/drive"
@@ -36,10 +37,14 @@ func (s *Service) advance(ctx context.Context, id int, requested string) (domain
 	if err != nil {
 		return domain.OfflineSubmission{}, err
 	}
-	source := s.drive.Source()
-	if source == nil || source.AccountID != record.AccountID || source.Directory.ID != record.DirectoryID {
+	sourceValue, ok, err := s.drive.Mount(ctx, record.AccountID)
+	if err != nil {
+		return domain.OfflineSubmission{}, err
+	}
+	if !ok || sourceValue.Directory.ID != record.DirectoryID {
 		return domain.OfflineSubmission{}, drive.ErrSourceChanged
 	}
+	source := &sourceValue
 	if record.Status == offlinedownload.StatusDone || record.Status == offlinedownload.StatusCancelled {
 		return s.submission(ctx, record, source)
 	}
@@ -151,14 +156,20 @@ func (s *Service) removeCurrent(ctx context.Context, sess drive.Session, record 
 	if found && hash == "" && remote.DirectoryID != record.DirectoryID {
 		found = false
 	}
-	if found && remote.Status == 2 {
+	if found && remote.Status == pan.OfflineStatusDone {
 		remote, err = resolveED2KCompletion(ctx, sess, remote, state.ED2KURI)
 		if err != nil {
 			return err
 		}
-		return sess.Commit(ctx, func(tx *ent.Tx) error { return s.completeTask(ctx, tx, record, remote.FileID) })
+		mount, err := s.currentMountFor(ctx, record)
+		if err != nil {
+			return err
+		}
+		return sess.Commit(ctx, func(tx *ent.Tx) error {
+			return s.completeTask(ctx, tx, record, remote.FileID, mount)
+		})
 	}
-	if found && remote.Status != 0 && remote.Status != 1 && remote.Status != -1 {
+	if found && remote.Status != pan.OfflineStatusWaiting && remote.Status != pan.OfflineStatusRunning && remote.Status != pan.OfflineStatusFailed {
 		return fmt.Errorf("115 returned unknown offline status %d", remote.Status)
 	}
 	if state.Action == actionSwitch && !state.RemovalStarted {
@@ -166,7 +177,7 @@ func (s *Service) removeCurrent(ctx context.Context, sess drive.Session, record 
 			return domain.E(domain.KindConflict, "115 中未找到原任务，请确认下载结果后重试", nil)
 		}
 		// A fresh observation always wins over an earlier stall decision.
-		if !state.Manual && remote.Status != -1 && (remote.ProgressUnknown || rawProgress(remote) > state.Progress || remote.Status == 0) {
+		if !state.Manual && remote.Status != pan.OfflineStatusFailed && (remote.ProgressUnknown || rawProgress(remote) > state.Progress || remote.Status == pan.OfflineStatusWaiting) {
 			state.Action, state.NextHash, state.Reason = "", "", ""
 			state.Stalled = false
 			state.ProgressAt, state.ObservedAt, state.Progress = s.now(), s.now(), rawProgress(remote)
@@ -174,7 +185,7 @@ func (s *Service) removeCurrent(ctx context.Context, sess drive.Session, record 
 				return tx.OfflineDownload.UpdateOneID(record.ID).SetRecovery(state).SetProgress(remote.Progress).ClearError().Exec(ctx)
 			})
 		}
-		present, err := s.database.Movie.Query().Where(movie.JavdbIDEQ(record.JavdbID), movie.HasFilesWith(
+		present, err := s.database.Movie.Query().Where(movie.CodeEQ(codeid.Normalize(record.Code)), movie.HasFilesWith(
 			file.AccountIDEQ(record.AccountID), file.RootIDEQ(record.DirectoryID))).Exist(ctx)
 		if err != nil {
 			return err
@@ -240,17 +251,17 @@ func (s *Service) resumeSubmission(ctx context.Context, sess drive.Session, reco
 		if err != nil {
 			return err
 		}
-		if found && (remote.Status == 0 || remote.Status == 1 || remote.Status == 2) {
+		if found && (remote.Status == pan.OfflineStatusWaiting || remote.Status == pan.OfflineStatusRunning || remote.Status == pan.OfflineStatusDone) {
 			if remote.DirectoryID != record.DirectoryID {
 				return domain.E(domain.KindConflict, "115 任务位于其他目录", nil)
 			}
-			if remote.Status == 2 {
+			if remote.Status == pan.OfflineStatusDone {
 				remote, err = resolveED2KCompletion(ctx, sess, remote, state.ED2KURI)
 				if err != nil {
 					return err
 				}
 			}
-			return s.recordSubmission(ctx, record, state, remote)
+			return s.recordSubmission(ctx, sess, record, state, remote)
 		}
 	}
 	state.SubmissionStarted = true
@@ -261,22 +272,30 @@ func (s *Service) resumeSubmission(ctx context.Context, sess drive.Session, reco
 	if err != nil {
 		return err
 	}
-	return s.recordSubmission(ctx, record, state, remote)
+	return s.recordSubmission(ctx, sess, record, state, remote)
 }
 
-func (s *Service) recordSubmission(ctx context.Context, record *ent.OfflineDownload, state *download.Recovery, remote pan.OfflineTask) error {
+func (s *Service) recordSubmission(ctx context.Context, sess drive.Session, record *ent.OfflineDownload, state *download.Recovery, remote pan.OfflineTask) error {
 	state.Action, state.NextHash = "", ""
 	state.SubmissionStarted, state.RemovalStarted = false, false
 	state.RetryAt, state.Failures = time.Time{}, 0
 	state.Attempts[len(state.Attempts)-1].InfoHash = strings.ToLower(remote.Hash)
 	state.ObservedAt, state.ProgressAt, state.Progress, state.RemoteStatus = s.now(), s.now(), rawProgress(remote), remote.Status
+	var mount *domain.LibrarySource
+	if remote.Status == pan.OfflineStatusDone {
+		m, err := s.currentMountFor(ctx, record)
+		if err != nil {
+			return err
+		}
+		mount = m
+	}
 	return s.drive.Commit(ctx, func(tx *ent.Tx) error {
 		if err := tx.OfflineDownload.UpdateOneID(record.ID).SetInfoHash(remote.Hash).SetRecovery(state).SetProgress(remote.Progress).ClearError().Exec(ctx); err != nil {
 			return err
 		}
-		if remote.Status == 2 {
+		if remote.Status == pan.OfflineStatusDone {
 			record.Recovery = state
-			return s.completeTask(ctx, tx, record, remote.FileID)
+			return s.completeTask(ctx, tx, record, remote.FileID, mount)
 		}
 		return nil
 	})

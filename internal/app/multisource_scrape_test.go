@@ -75,7 +75,6 @@ func TestTransientImageFailureAutomaticallyResumesSavedMetadata(t *testing.T) {
 	}
 	t.Cleanup(meta.Close)
 	f.scrape = scrape.New(f.store.Client, f.driveService, meta, f.images, f.tasks, scrape.Dependencies{ExportManager: export.NewManager(export.Config{EmbyDir: f.embyDir, PublicURL: "http://127.0.0.1:8080"})})
-	t.Cleanup(f.scrape.Close)
 	f.tasks.Registry().Register(tasks.NewHandler(tasks.KindScrape, f.scrape.Scrape, f.scrape.Finished).WithRetry(domain.RetryDelay))
 	f.drive.addFile("101", "10", "ABP-123.mp4", 2<<30, []byte("video"))
 	if _, err := f.library.StartScan(t.Context()); err != nil {
@@ -229,7 +228,6 @@ func TestJavDBMetadataAndArtworkCheckpointSurvivePublishFailure(t *testing.T) {
 	}
 	t.Cleanup(meta.Close)
 	f.scrape = scrape.New(f.store.Client, f.driveService, meta, f.images, f.tasks, scrape.Dependencies{ExportManager: export.NewManager(export.Config{EmbyDir: f.embyDir, PublicURL: "http://127.0.0.1:8080"})})
-	t.Cleanup(f.scrape.Close)
 	failPublish := true
 	f.store.Client.Task.Use(func(next ent.Mutator) ent.Mutator {
 		return ent.MutateFunc(func(ctx context.Context, m ent.Mutation) (ent.Value, error) {
@@ -249,11 +247,11 @@ func TestJavDBMetadataAndArtworkCheckpointSurvivePublishFailure(t *testing.T) {
 	jobs := f.runQueue(t)
 	job := f.store.Client.Task.GetX(t.Context(), jobs[1].ID)
 	p, err := tasks.DecodePayload[scrape.Payload](job.Payload)
-	if err != nil || job.Status != task.StatusFailed || p.Artwork == nil || p.Completed || p.Document.SelectedImage.Provider != "javdb" || p.Document.JavDBID() != "ABP-123" {
+	if err != nil || job.Status != task.StatusFailed || p.Artwork == nil || p.Completed || p.Document.SelectedImage.Provider != "javdb" || p.Document.Code != "ABP-123" {
 		t.Fatalf("fallback checkpoint=%+v err=%v", p, err)
 	}
 	failed := f.store.Client.Movie.Query().OnlyX(t.Context())
-	if failed.JavdbID != nil || failed.Metadata != nil || p.Document.Actors[0].Provider != "javdb" {
+	if failed.JavdbID != nil || failed.Metadata != nil || p.Document.Actors[0].Provider != "fanza" {
 		t.Fatal("candidate metadata escaped its task checkpoint before publication")
 	}
 	if failed.Poster != nil || failed.MetadataSnapshot != nil || failed.ScrapeStatus != movie.ScrapeStatusFailed {
@@ -263,11 +261,11 @@ func TestJavDBMetadataAndArtworkCheckpointSurvivePublishFailure(t *testing.T) {
 	job.Update().SetStatus(task.StatusQueued).ExecX(t.Context())
 	f.runQueue(t)
 	record := f.store.Client.Movie.Query().WithActors().WithTags().OnlyX(t.Context())
-	if record.ScrapeStatus != movie.ScrapeStatusDone || record.JavdbID == nil || *record.JavdbID != "ABP-123" || record.Metadata.IDs[0].Type != "javdb" || record.Edges.Actors[0].Provider != "javdb" || record.Edges.Tags[0].Provider != "javdb" || record.Metadata.SelectedImage.Provider != "javdb" {
+	if record.ScrapeStatus != movie.ScrapeStatusDone || record.Code != "ABP-123" || record.Metadata.IDs[0].Type != "code" || record.Edges.Actors[0].Provider != "fanza" || record.Edges.Tags[0].Provider != "fanza" || record.Metadata.SelectedImage.Provider != "javdb" {
 		t.Fatalf("catalogue metadata lost during publish: %+v", record)
 	}
 	detail, err := f.library.Movie(t.Context(), record.ID)
-	if err != nil || len(detail.PreviewImages) != 2 || detail.Tags[0].Provider != "javdb" {
+	if err != nil || len(detail.PreviewImages) != 2 || detail.Tags[0].Provider != "fanza" {
 		t.Fatalf("saved detail lost previews or searchable tags: %+v %v", detail, err)
 	}
 	if primary.queries != 1 || fallback.queries != 1 || primary.images != 1 || fallback.images != 1 || len(f.catalogue.calls) != 0 {
@@ -284,7 +282,6 @@ func TestMultiSourceScrapeWithoutJavDBResumesAfterImageFailure(t *testing.T) {
 	}
 	t.Cleanup(meta.Close)
 	service := scrape.New(f.store.Client, f.driveService, meta, f.images, f.tasks, scrape.Dependencies{ExportManager: export.NewManager(export.Config{EmbyDir: f.embyDir, PublicURL: "http://127.0.0.1:8080"})})
-	t.Cleanup(service.Close)
 	f.scrape = service
 	f.drive.addFile("101", "10", "ABP-123.mp4", 2<<30, []byte("video"))
 	if _, err := f.library.StartScan(t.Context()); err != nil {
@@ -297,14 +294,14 @@ func TestMultiSourceScrapeWithoutJavDBResumesAfterImageFailure(t *testing.T) {
 	record := f.store.Client.Movie.Query().OnlyX(t.Context())
 	job := f.store.Client.Task.GetX(t.Context(), jobs[1].ID)
 	payload, err := tasks.DecodePayload[scrape.Payload](job.Payload)
-	if err != nil || !payload.MetadataReady || payload.Completed || job.Status != task.StatusFailed || record.JavdbID != nil {
+	if err != nil || !payload.MetadataReady || payload.Completed || job.Status != task.StatusFailed {
 		t.Fatalf("metadata was not checkpointed: %+v %+v %v", job, payload, err)
 	}
 	source.failImage = false
 	job.Update().SetStatus(task.StatusQueued).ExecX(t.Context())
 	f.runQueue(t)
 	record = f.store.Client.Movie.Query().WithActors().WithTags().OnlyX(t.Context())
-	if record.ScrapeStatus != movie.ScrapeStatusDone || record.JavdbID != nil || record.Title != "Independent metadata" || record.Edges.Actors[0].Provider != "fixture" || record.Edges.Tags[0].Provider != "fixture" {
+	if record.ScrapeStatus != movie.ScrapeStatusDone || record.Title != "Independent metadata" || record.Edges.Actors[0].Provider != "fixture" || record.Edges.Tags[0].Provider != "fixture" {
 		t.Fatalf("source identity lost: %+v", record)
 	}
 	if source.queries != 1 || len(f.catalogue.calls) != 0 {
@@ -315,7 +312,7 @@ func TestMultiSourceScrapeWithoutJavDBResumesAfterImageFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc, err := nfo.Decode(body)
-	if err != nil || doc.JavDBID() != "" || doc.IDs[0].Type != "fixture" || doc.Actors[0].Provider != "fixture" {
+	if err != nil || doc.IDs[0].Type != "code" || doc.IDs[0].Value != "ABP-123" || doc.Actors[0].Provider != "fixture" {
 		t.Fatalf("invalid NFO identities: %+v %v", doc, err)
 	}
 }

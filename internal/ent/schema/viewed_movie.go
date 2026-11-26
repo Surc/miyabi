@@ -14,7 +14,8 @@ type ViewedMovie struct {
 
 func (ViewedMovie) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("javdb_id").NotEmpty().Unique(),
+		field.String("code").Optional().NotEmpty().Unique(),
+		field.String("javdb_id").Optional().NotEmpty().Unique(),
 		field.Time("viewed_at").Default(time.Now),
 	}
 }

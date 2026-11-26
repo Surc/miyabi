@@ -1,4 +1,5 @@
-import { LoaderCircleIcon, RotateCcwIcon, ScanLineIcon } from 'lucide-react'
+import { RotateCcwIcon, ScanLineIcon } from 'lucide-react'
+import { Spinner } from '@/components/ui/spinner'
 
 import { describeApiError } from '@/api/client'
 import { useStartLibraryScan } from '@/api/library'
@@ -8,24 +9,19 @@ import { notifyTaskError, useNotifyScanTask } from '@/features/tasks/task-toast'
 
 export function LibraryScanButton({
   loading,
-  available,
   scanning,
   rebuilding,
-  connected,
-  onStarted
+  connected
 }: {
   loading: boolean
-  available: boolean
   scanning: boolean
   rebuilding: boolean
   connected: boolean
-  onStarted: () => void
 }) {
   const startScan = useStartLibraryScan()
   const notifyScan = useNotifyScanTask()
   // Keep the mutation observer mounted while pagination replaces the visible control.
-  if (loading) return <Skeleton className="h-9 w-20 rounded-4xl sm:w-60" />
-  if (!available) return null
+  if (loading) return <Skeleton className="h-8 w-60 rounded-lg" />
 
   return (
     <div className="flex items-center gap-2">
@@ -39,14 +35,10 @@ export function LibraryScanButton({
           <Button
             key={String(rebuild)}
             variant={rebuild ? 'outline' : 'default'}
-            className="w-9 px-0 sm:w-auto sm:px-3"
             disabled={scanning || startScan.isPending}
             onClick={() =>
               startScan.mutate(rebuild, {
-                onSuccess: task => {
-                  notifyScan(task)
-                  onStarted()
-                },
+                onSuccess: notifyScan,
                 onError: error => {
                   notifyTaskError(
                     'scan:submit-error',
@@ -58,13 +50,13 @@ export function LibraryScanButton({
             }
           >
             {busy ? (
-              <LoaderCircleIcon className="size-4 animate-spin" />
+              <Spinner data-icon="inline-start" />
             ) : rebuild ? (
-              <RotateCcwIcon className="size-4" />
+              <RotateCcwIcon data-icon="inline-start" />
             ) : (
-              <ScanLineIcon className="size-4" />
+              <ScanLineIcon data-icon="inline-start" />
             )}
-            <span className="hidden sm:inline">{label}</span>
+            {label}
           </Button>
         )
       })}

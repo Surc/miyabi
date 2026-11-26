@@ -1,4 +1,5 @@
-import { LoaderCircleIcon, Trash2Icon } from 'lucide-react'
+import { Trash2Icon } from 'lucide-react'
+import { Spinner } from '@/components/ui/spinner'
 
 import { type SubscriptionItem, useRemoveSubscription } from '@/api/subscriptions'
 import { MovieCard } from '@/components/movie'
@@ -17,12 +18,16 @@ const dateTimeFormat = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit'
 })
 
-const statusLabels: Record<SubscriptionItem['status'], string> = {
-  waiting: '等待磁力',
-  added: '已加入 115',
-  stale: '长期无源',
-  active: '生效中',
-  paused: '已暂停'
+// One entry per status, so a new status needs both its label and badge style.
+const statusBadges: Record<
+  SubscriptionItem['status'],
+  { label: string; variant: 'default' | 'success' | 'secondary' }
+> = {
+  waiting: { label: '等待磁力', variant: 'default' },
+  added: { label: '已加入 115', variant: 'success' },
+  stale: { label: '长期无源', variant: 'secondary' },
+  active: { label: '生效中', variant: 'default' },
+  paused: { label: '已暂停', variant: 'secondary' }
 }
 
 // Keep the card mounted when switching between browsing and selection.
@@ -61,31 +66,31 @@ export function SubscriptionCard({
       state={
         <>
           <MovieStateBadge movie={{ id: item.target_id, code: item.code }} hideViewed />
-          <Badge variant={statusVariant(item.status)}>{statusLabels[item.status]}</Badge>
+          <Badge variant={statusBadges[item.status].variant}>
+            {statusBadges[item.status].label}
+          </Badge>
         </>
       }
       coverOverlay={
         !selecting ? (
           <div className="absolute top-2 right-2">
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon-sm"
-                  disabled={busy}
-                  onClick={event => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    remove.mutate(item)
-                  }}
-                >
-                  {remove.isPending ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : (
-                    <Trash2Icon />
-                  )}
-                </Button>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon-sm"
+                    disabled={busy}
+                    onClick={event => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      remove.mutate(item)
+                    }}
+                  />
+                }
+              >
+                {remove.isPending ? <Spinner /> : <Trash2Icon />}
               </TooltipTrigger>
               <TooltipContent side="left">取消订阅</TooltipContent>
             </Tooltip>
@@ -98,7 +103,7 @@ export function SubscriptionCard({
   return (
     <div className="relative h-full min-w-0">
       <MovieDetailTrigger
-        movie={{ id: item.target_id }}
+        movie={{ id: item.target_id, code: item.code }}
         className={cn(
           'block h-full rounded-2xl outline-ring',
           selected && 'ring-2 ring-success',
@@ -119,17 +124,11 @@ export function SubscriptionCard({
           checked={selected}
           disabled={disabled}
           onCheckedChange={onSelect}
-          className="absolute top-3 right-3 size-5 data-checked:border-success data-checked:bg-success data-checked:text-white"
+          className="absolute top-3 right-3 size-5 data-checked:border-success data-checked:bg-success data-checked:text-success-foreground"
         />
       ) : null}
     </div>
   )
-}
-
-function statusVariant(status: SubscriptionItem['status']) {
-  if (status === 'added') return 'success' as const
-  if (status === 'stale' || status === 'paused') return 'secondary' as const
-  return 'default' as const
 }
 
 function describeSchedule(item: SubscriptionItem) {

@@ -126,20 +126,18 @@ test('library cards always use an explicit local detail target', () => {
         code: 'ABP-123',
         title: 'Library movie',
         javdb_id,
-        duration: 0,
         rating: 0,
         actors: [],
-        tags: [{ id: 1, provider: 'javdb', source_id: 'subtitle', name: '字幕漢化' }],
-        scrape_status: 'done'
+        has_subtitle: true
       }
     })
-    const trigger = card.props.children[0]
+    const trigger = card.props.children[0].props.children
     assert.equal(trigger.type, MovieDetailTrigger)
     const { openMovie, props, html } = renderTrigger(trigger.props)
     assert.match(html, /role="button"/)
     assert.match(html, /tabindex="0"/)
     assert.doesNotMatch(html, /href=|<a\b/)
-    assert.match(html, />字幕<\/span>/)
+    assert.match(html, />中文<\/span>/)
     const event = click()
     props.onClick?.(event)
     assert.deepEqual(openMovie.mock.calls, [[{ libraryId: 42 }, event.currentTarget]])

@@ -10,7 +10,6 @@ import (
 // Kodi reads the standard fields. Source IDs and category/gender attributes
 // keep a Miyabi rescan lossless without requesting metadata sources again.
 type Movie struct {
-	Plot             string            `xml:"plot,omitempty" json:"plot,omitempty"`
 	ArtworkExtension *ArtworkExtension `xml:"miyabi_artwork_extension,omitempty" json:"artwork_extension,omitempty"`
 
 	Zone          domain.Zone             `xml:"miyabi_zone,omitempty" json:"zone,omitempty"`
@@ -24,6 +23,7 @@ type Movie struct {
 	XMLName       xml.Name                `xml:"movie" json:"-"`
 	Title         string                  `xml:"title" json:"title"`
 	Code          string                  `xml:"num" json:"code"`
+	Plot          string                  `xml:"plot,omitempty" json:"plot,omitempty"`
 	IDs           []UniqueID              `xml:"uniqueid" json:"ids"`
 	Premiered     string                  `xml:"premiered,omitempty" json:"premiered"`
 	Runtime       int                     `xml:"runtime,omitempty" json:"runtime"`
@@ -108,19 +108,23 @@ func FileStem(code string) string {
 	return url.QueryEscape(code)
 }
 
-func (movie Movie) JavDBID() string {
-	for _, id := range movie.IDs {
-		if id.Type == "javdb" {
-			return id.Value
+func (movie Movie) Poster() string {
+	for _, thumb := range movie.Thumbs {
+		if thumb.Aspect == "poster" {
+			return thumb.Path
 		}
 	}
 	return ""
 }
 
-func (movie Movie) Poster() string {
-	for _, thumb := range movie.Thumbs {
-		if thumb.Aspect == "poster" {
-			return thumb.Path
+// SourceID returns the stored source identity (e.g. "javdb") captured from a
+// previous scrape, or "" when absent.
+func (movie Movie) JavDBID() string { return movie.SourceID("javdb") }
+
+func (movie Movie) SourceID(provider string) string {
+	for _, id := range movie.IDs {
+		if id.Type == provider {
+			return id.Value
 		}
 	}
 	return ""

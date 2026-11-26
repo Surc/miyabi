@@ -93,11 +93,13 @@ export function MDCzSection() {
               description="来源、代理和翻译在 MDCz 中保存，下一次刮削生效。"
               inline
             >
-              <Button asChild variant="outline">
-                <a href={webUI} target="_blank" rel="noreferrer">
-                  打开 MDCz 配置
-                  <ExternalLinkIcon aria-hidden />
-                </a>
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<a href={webUI} target="_blank" rel="noreferrer" />}
+              >
+                打开 MDCz 配置
+                <ExternalLinkIcon aria-hidden />
               </Button>
             </SettingRow>
           ) : null}

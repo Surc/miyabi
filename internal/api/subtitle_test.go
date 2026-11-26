@@ -15,6 +15,7 @@ import (
 )
 
 type subtitleSettingsStub struct {
+	SubtitleManager
 	config subtitle.Config
 	tested subtitle.TestRequest
 	probes int

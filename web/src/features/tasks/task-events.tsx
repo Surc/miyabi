@@ -10,6 +10,7 @@ import {
   type PropsWithChildren
 } from 'react'
 
+import { actorKeys } from '@/api/actors'
 import { notifyUnauthorized } from '@/api/client'
 import { movieStateKeys } from '@/api/movie-states'
 import { cancelQueryRefresh, refreshQueries } from '@/api/query-refresh'
@@ -33,6 +34,9 @@ export function TaskEventsProvider({ children }: PropsWithChildren) {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [attempt, setAttempt] = useState(0)
   const snapshotRequested = useRef(false)
+  // Kept across reconnects so a reconnect only refetches the groups that
+  // actually changed. The server instance detects a restart (revisions reset).
+  const revisionsRef = useRef<TaskRevisions | undefined>(undefined)
   const reconnect = useCallback(() => {
     setConnection('connecting')
     setAttempt(value => value + 1)
@@ -42,7 +46,6 @@ export function TaskEventsProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     const events = new EventSource('/api/tasks/events')
-    let revisions: TaskRevisions | undefined
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let connectionTimer: ReturnType<typeof setTimeout> | undefined
     let probeTimer: ReturnType<typeof setTimeout> | undefined
@@ -71,8 +74,7 @@ export function TaskEventsProvider({ children }: PropsWithChildren) {
       probeTimer = setTimeout(() => controller.abort(), 5000)
       try {
         const response = await fetch('/api/tasks/events', {
-          signal: controller.signal,
-          credentials: 'same-origin'
+          signal: controller.signal
         })
         if (disposed) return
         controller.signal.throwIfAborted()
@@ -120,14 +122,19 @@ export function TaskEventsProvider({ children }: PropsWithChildren) {
       if (disposed) return
       const next = JSON.parse(event.data) as TaskRevisions
       waitForActivity()
+      // Revisions reset to zero when the server restarts. A changed instance
+      // means the stored counters are stale, so re-baseline (refetch all).
+      const stored = revisionsRef.current
+      const prev = stored?.instance === next.instance ? stored : undefined
       const keys: QueryKey[] = []
-      const libraryChanged = revisions?.library !== next.library
-      if (libraryChanged) keys.push(libraryKeys.all)
-      if (libraryChanged || revisions?.offline !== next.offline) {
+      const libraryChanged = prev?.library !== next.library
+      // Actor catalog and detail derive from library movies (counts, films, merges).
+      if (libraryChanged) keys.push(libraryKeys.all, actorKeys.all)
+      if (libraryChanged || prev?.offline !== next.offline) {
         keys.push(movieStateKeys.all, offlineKeys.all)
       }
-      if (revisions?.monitor !== next.monitor) keys.push(subscriptionKeys.all)
-      revisions = next
+      if (prev?.monitor !== next.monitor) keys.push(subscriptionKeys.all)
+      revisionsRef.current = next
       void refreshQueries(queryClient, ...keys)
     })
 
@@ -135,7 +142,8 @@ export function TaskEventsProvider({ children }: PropsWithChildren) {
     events.addEventListener('ping', () => waitForActivity())
     events.onerror = () => {
       if (disposed) return
-      revisions = undefined
+      // Keep revisionsRef across reconnects: the next changes event is compared
+      // against it, and re-baselined only when the server instance changed.
       // Native EventSource retries transport interruptions, but not a terminal CLOSED state.
       if (events.readyState === EventSource.CLOSED) void restartConnection()
       else {

@@ -12,7 +12,9 @@ import (
 type OfflineManager interface {
 	Add(context.Context, string, string) (domain.OfflineSubmission, error)
 	AddED2K(context.Context, string, string, int) (domain.OfflineSubmission, error)
-	Activity(context.Context) (offline.Activity, error)
+	AddED2KForAccount(context.Context, string, string, string, int) (domain.OfflineSubmission, error)
+	AddForAccount(context.Context, string, string, string) (domain.OfflineSubmission, error)
+	ActivityForAccount(context.Context, string) (offline.Activity, error)
 	Cancel(context.Context, int) (domain.OfflineSubmission, error)
 	TryNext(context.Context, int) (domain.OfflineSubmission, error)
 }
@@ -38,15 +40,16 @@ func offlineControlHandler(manager OfflineManager, next bool) gin.HandlerFunc {
 
 func offlineActivityHandler(offline OfflineManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		activity, err := offline.Activity(c.Request.Context())
+		activity, err := offline.ActivityForAccount(c.Request.Context(), c.Query("account_id"))
 		respond(c, activity, err)
 	}
 }
 
 type offlineInput struct {
-	Hash string `json:"hash" binding:"omitempty,len=40,hexadecimal"`
-	ED2K string `json:"ed2k" binding:"max=57"`
-	Page int    `json:"page" binding:"omitempty,min=1,max=1000"`
+	Hash      string `json:"hash" binding:"omitempty,len=40,hexadecimal"`
+	ED2K      string `json:"ed2k" binding:"max=57"`
+	Page      int    `json:"page" binding:"omitempty,min=1,max=1000"`
+	AccountID string `json:"account_id"`
 }
 
 var ed2kResourceID = regexp.MustCompile(`^ed2k:[a-f0-9]{32}:[1-9][0-9]{0,18}$`)
@@ -70,7 +73,18 @@ func offlineAddHandler(offline OfflineManager) gin.HandlerFunc {
 				accepted(c, nil, domain.E(domain.KindInvalid, "无效的 ED2K 资源标识", nil))
 				return
 			}
-			submission, err := offline.AddED2K(c.Request.Context(), uri.ID, input.ED2K, max(input.Page, 1))
+			page := max(input.Page, 1)
+			if input.AccountID == "" {
+				submission, err := offline.AddED2K(c.Request.Context(), uri.ID, input.ED2K, page)
+				accepted(c, submission, err)
+				return
+			}
+			submission, err := offline.AddED2KForAccount(c.Request.Context(), input.AccountID, uri.ID, input.ED2K, page)
+			accepted(c, submission, err)
+			return
+		}
+		if input.AccountID != "" {
+			submission, err := offline.AddForAccount(c.Request.Context(), input.AccountID, uri.ID, input.Hash)
 			accepted(c, submission, err)
 			return
 		}

@@ -1,6 +1,8 @@
+import type { ComponentProps, ReactNode } from 'react'
+
 import { useRecordMovieView } from '@/api/browse-history'
 import { describeApiError, isJavDBLoginRequired } from '@/api/client'
-import { useDiscoverMagnets, useDiscoverMovie, useResolveDiscoverMovie } from '@/api/discover'
+import { useDiscoverMagnets, useDiscoverMovie } from '@/api/discover'
 import { useLibraryMovie } from '@/api/library'
 import { useMovieState } from '@/api/movie-states'
 import { ErrorState, InlineError } from '@/components/error-state'
@@ -19,9 +21,9 @@ import { LibrarySubtitles } from './extensions/library-subtitles'
 export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
   if ('libraryId' in movie) return <LibraryMovieDetail movieId={movie.libraryId} />
   return 'id' in movie ? (
-    <IdentifiedMovieDetail movieId={movie.id} />
+    <IdentifiedMovieDetail movieId={movie.id} code={movie.code} />
   ) : (
-    <MovieDetailByCode code={movie.code} />
+    <IdentifiedMovieDetail movieId={movie.code} code={movie.code} />
   )
 }
 
@@ -38,43 +40,86 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
     )
   }
   return (
+    <CatalogueSections
+      movie={detail.data}
+      libraryStatus={detail.data.scrape_status}
+      isRefetchError={detail.isRefetchError}
+      fetching={detail.isFetching}
+      onRetry={() => void detail.refetch()}
+    >
+      <LibrarySubtitles movieId={movieId} />
+      <MovieComments javdbId={detail.data.javdb_id ?? ''} code={detail.data.code} />
+      {detail.data.javdb_id ? (
+        <LibraryCatalogueExtras movieId={detail.data.javdb_id} code={detail.data.code} />
+      ) : null}
+    </CatalogueSections>
+  )
+}
+
+type HeroMovie = ComponentProps<typeof MovieHero>['movie']
+type HeroStatus = ComponentProps<typeof MovieHero>['libraryStatus']
+
+// Shared detail layout for both catalogue and library-backed movies; callers add
+// their own extra sections (catalogue extras vs magnets + recommendations).
+function CatalogueSections({
+  movie,
+  libraryStatus,
+  isRefetchError,
+  fetching,
+  onRetry,
+  children
+}: {
+  movie: HeroMovie
+  libraryStatus?: HeroStatus
+  isRefetchError: boolean
+  fetching: boolean
+  onRetry: () => void
+  children: ReactNode
+}) {
+  return (
     <div className="space-y-10">
-      {detail.isRefetchError ? (
-        <InlineError onRetry={() => void detail.refetch()} retrying={detail.isFetching}>
+      {isRefetchError ? (
+        <InlineError onRetry={onRetry} retrying={fetching}>
           刷新失败，请重试。
         </InlineError>
       ) : null}
       <MovieHero
-        movie={detail.data}
-        libraryStatus={detail.data.scrape_status}
-        extraBadges={<MovieTopRankings code={detail.data.code} />}
-        javdbRating={detail.data.id ? <JavDBRating movie={detail.data} /> : undefined}
-        extraStats={<JavLibraryRating code={detail.data.code} />}
-        actions={<MovieEmbyPlayback code={detail.data.code} />}
+        movie={movie}
+        libraryStatus={libraryStatus}
+        extraBadges={<MovieTopRankings code={movie.code} />}
+        javdbRating={
+          'library_id' in movie ? (
+            movie.javdb_id ? (
+              <JavDBRating movie={{ ...movie, id: movie.javdb_id }} />
+            ) : undefined
+          ) : (
+            <JavDBRating movie={movie} />
+          )
+        }
+        extraStats={<JavLibraryRating code={movie.code} />}
+        actions={<MovieEmbyPlayback code={movie.code} />}
       />
-      <LibrarySubtitles movieId={movieId} />
-      <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
+      <MovieSynopsis code={movie.code} plot={movie.plot} />
       <MovieMediaPreviews
-        key={`library:${movieId}`}
-        images={detail.data.preview_images}
-        video={detail.data.preview_video}
-        cover={detail.data.cover}
+        key={movie.id || movie.code}
+        images={movie.preview_images}
+        video={movie.preview_video}
+        cover={movie.cover}
       />
-      <MovieComments javdbId={detail.data.id} code={detail.data.code} />
-      {detail.data.id ? <LibraryCatalogueExtras movieId={detail.data.id} /> : null}
+      {children}
     </div>
   )
 }
 
 // Catalogue extras remain available for linked films, but cannot block or
-// replace the saved library metadata when JavDB is unavailable.
-function LibraryCatalogueExtras({ movieId }: { movieId: string }) {
-  const detail = useDiscoverMovie(movieId)
-  const magnets = useDiscoverMagnets(movieId)
+// replace the saved library metadata when the catalogue is unavailable.
+function LibraryCatalogueExtras({ movieId, code }: { movieId: string; code: string }) {
+  const detail = useDiscoverMovie(movieId, code)
+  const magnets = useDiscoverMagnets(movieId, detail.data?.code ?? code)
   useRecordMovieView(movieId)
   return (
     <>
-      <MovieMagnets movieID={movieId} query={magnets} />
+      <MovieMagnets movieID={movieId} javdbID={movieId} code={code} query={magnets} />
       {detail.data ? (
         <>
           <MovieRecommendations title="TA（们）还出演过" movies={detail.data.actor_movies} />
@@ -85,31 +130,12 @@ function LibraryCatalogueExtras({ movieId }: { movieId: string }) {
   )
 }
 
-function MovieDetailByCode({ code }: { code: string }) {
-  const identity = useResolveDiscoverMovie(code)
-  if (identity.isPending) return <MovieDetailSkeleton />
-  if (!identity.data) {
-    return (
-      <ErrorState
-        message={
-          isJavDBLoginRequired(identity.error)
-            ? describeApiError(identity.error)
-            : `未能从 JavDB 确认 ${code} 的影片详情`
-        }
-        onRetry={() => void identity.refetch()}
-        retrying={identity.isFetching}
-      />
-    )
-  }
-  return <IdentifiedMovieDetail key={identity.data.id} movieId={identity.data.id} />
-}
-
-function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
-  const detail = useDiscoverMovie(movieId)
-  const magnets = useDiscoverMagnets(movieId)
+function IdentifiedMovieDetail({ movieId, code }: { movieId: string; code?: string }) {
+  const detail = useDiscoverMovie(movieId, code)
+  const magnets = useDiscoverMagnets(movieId, detail.data?.code ?? code)
   useRecordMovieView(movieId)
 
-  if (detail.isPending) return <MovieDetailSkeleton />
+  if (!detail.data && detail.isPending) return <MovieDetailSkeleton />
   if (!detail.data) {
     return (
       <ErrorState
@@ -121,34 +147,23 @@ function IdentifiedMovieDetail({ movieId }: { movieId: string }) {
       />
     )
   }
+  const javdbID =
+    detail.data.sources?.find(source => source.provider === 'javdb')?.id ??
+    (movieId !== detail.data.code ? movieId : '')
 
   return (
-    <div className="space-y-10">
-      {detail.isRefetchError ? (
-        <InlineError onRetry={() => void detail.refetch()} retrying={detail.isFetching}>
-          刷新失败，请重试。
-        </InlineError>
-      ) : null}
-      <MovieHero
-        movie={detail.data}
-        extraBadges={<MovieTopRankings code={detail.data.code} />}
-        javdbRating={<JavDBRating movie={detail.data} />}
-        extraStats={<JavLibraryRating code={detail.data.code} />}
-        actions={<MovieEmbyPlayback code={detail.data.code} />}
-      />
+    <CatalogueSections
+      movie={detail.data}
+      isRefetchError={detail.isRefetchError}
+      fetching={detail.isFetching}
+      onRetry={() => void detail.refetch()}
+    >
       <CatalogueLibrarySubtitles movie={detail.data} />
-      <MovieSynopsis code={detail.data.code} plot={detail.data.plot} />
-      <MovieMediaPreviews
-        key={movieId}
-        images={detail.data.preview_images}
-        video={detail.data.preview_video}
-        cover={detail.data.cover}
-      />
-      <MovieMagnets movieID={movieId} query={magnets} />
-      <MovieComments javdbId={movieId} code={detail.data.code} />
+      <MovieMagnets movieID={movieId} javdbID={javdbID} code={detail.data.code} query={magnets} />
+      <MovieComments javdbId={javdbID} code={detail.data.code} />
       <MovieRecommendations title="TA（们）还出演过" movies={detail.data.actor_movies} />
       <MovieRecommendations title="你可能也喜欢" movies={detail.data.related_movies} />
-    </div>
+    </CatalogueSections>
   )
 }
 

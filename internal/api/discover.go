@@ -19,8 +19,12 @@ type CatalogueManager interface {
 	MovieStates(context.Context, []catalogue.MovieIdentity) ([]catalogue.MovieStateItem, error)
 	Magnets(context.Context, string) ([]catalogue.Magnet, error)
 	ED2KResources(context.Context, string, int) (domain.ED2KPage, error)
+	MagnetsByCode(context.Context, string) ([]catalogue.Magnet, error)
 	Tags(context.Context, domain.Zone) ([]domain.TagCategory, error)
 	Media(context.Context, string) (domain.Media, error)
+	LocalRecommendations(context.Context, domain.MovieMetadata) ([]domain.MovieReference, []domain.MovieReference, error)
+	MagnetSourceSettings() []domain.SourceToggle
+	UpdateMagnetSourceSettings(context.Context, []domain.SourceToggle) error
 }
 
 type ViewedManager interface {
@@ -118,13 +122,49 @@ func discoverBrowseHandler(discover CatalogueManager) gin.HandlerFunc {
 	}
 }
 
-func discoverMovieHandler(discover CatalogueManager) gin.HandlerFunc {
+type discoverMovieQuery struct {
+	Code string `form:"code" binding:"omitempty,max=200"`
+}
+
+func discoverMovieHandler(discover CatalogueManager, metadata MetadataManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uri, ok := bindURI[movieURI](c)
 		if !ok {
 			return
 		}
+		query, ok := bindQuery[discoverMovieQuery](c)
+		if !ok {
+			return
+		}
+		// The discover identity is the normalized code. Detail resolves from the
+		// multi-source metadata layer with JavDB excluded, using the explicit
+		// code when supplied and falling back to the path id otherwise.
+		code := codeid.Normalize(query.Code)
+		if code == "" {
+			code = codeid.Normalize(uri.ID)
+		}
+		if codeid.Valid(uri.ID) && codeid.Valid(code) {
+			meta, err := metadata.ResolveExcept(c.Request.Context(), domain.MovieRef{Code: code}, "javdb")
+			if err != nil {
+				respond(c, nil, err)
+				return
+			}
+			detail := catalogue.ProjectMetadataDetail(meta)
+			// Recommendations come solely from already-indexed data, matched by
+			// this movie's metadata; never from the source's suggestion lists.
+			if actors, related, recErr := discover.LocalRecommendations(c.Request.Context(), meta); recErr != nil {
+				c.Error(recErr)
+			} else {
+				detail.ActorMovies = actors
+				detail.RelatedMovies = related
+			}
+			respond(c, detail, nil)
+			return
+		}
 		movie, err := discover.MovieDetail(c.Request.Context(), uri.ID)
+		if err == nil {
+			movie.ID = uri.ID
+		}
 		respond(c, movie, err)
 	}
 }
@@ -160,13 +200,29 @@ func discoverTagsHandler(discover CatalogueManager) gin.HandlerFunc {
 	}
 }
 
+type discoverMagnetsQuery struct {
+	Code string `form:"code" binding:"omitempty,max=200"`
+}
+
 func discoverMagnetsHandler(discover CatalogueManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uri, ok := bindURI[movieURI](c)
 		if !ok {
 			return
 		}
-		magnets, err := discover.Magnets(c.Request.Context(), uri.ID)
+		query, ok := bindQuery[discoverMagnetsQuery](c)
+		if !ok {
+			return
+		}
+		// A known code lets magnets bypass the JavDB detail lookup; without it we
+		// still fall back to the movie-ID path for older clients.
+		var magnets []catalogue.Magnet
+		var err error
+		if code := codeid.Normalize(query.Code); codeid.Valid(uri.ID) && codeid.Valid(code) {
+			magnets, err = discover.MagnetsByCode(c.Request.Context(), code)
+		} else {
+			magnets, err = discover.Magnets(c.Request.Context(), uri.ID)
+		}
 		respond(c, magnets, err)
 	}
 }

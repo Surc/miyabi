@@ -10,6 +10,7 @@ import (
 	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
+	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/task"
 	"github.com/ppxb/miyabi/internal/library/scrape"
@@ -25,7 +26,11 @@ func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code, javdbID strin
 		return nil, domain.E(domain.KindInvalid, "请输入有效的影片番号", nil)
 	}
 	code = codeid.Normalize(code)
-	sess, err := s.driveSvc.Open(ctx)
+	source, err := s.movieSource(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := s.driveSvc.OpenSource(ctx, source)
 	if err != nil {
 		return nil, err
 	}
@@ -135,4 +140,25 @@ func (s *Scanner) RescrapeMovie(ctx context.Context, id int, code, javdbID strin
 	s.tasksSvc.NotifyLibraryChanged()
 	s.tasksSvc.WakePool()
 	return parent, nil
+}
+
+// movieSource resolves the 115 source whose current mount holds the movie's files.
+func (s *Scanner) movieSource(ctx context.Context, id int) (domain.LibrarySource, error) {
+	record, err := s.db.File.Query().
+		Where(file.MovieIDEQ(id), file.AccountIDNEQ(domain.LocalAccountID)).
+		Select(file.FieldAccountID).First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return domain.LibrarySource{}, domain.E(domain.KindNotFound, "当前挂载目录中未找到该影片的媒体文件", nil)
+		}
+		return domain.LibrarySource{}, err
+	}
+	source, ok, err := s.driveSvc.Mount(ctx, record.AccountID)
+	if err != nil {
+		return domain.LibrarySource{}, err
+	}
+	if !ok {
+		return domain.LibrarySource{}, domain.E(domain.KindNotFound, "当前挂载目录中未找到该影片的媒体文件", nil)
+	}
+	return source, nil
 }

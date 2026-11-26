@@ -48,15 +48,21 @@ var (
 	codecNoise  = regexp.MustCompile(`\b[HX][ ._-]?26[45]\b`)
 	partNoise   = regexp.MustCompile(`([0-9][A-Z0-9]*)[-_. ]+(?:CD|DISC|PART)[0-9]+([^A-Z0-9]|$)`)
 	nameSuffix  = regexp.MustCompile(`^[-_]+([A-Z][A-Z0-9]*)(?:[^A-Z0-9]|$)`)
-	fileMarker  = regexp.MustCompile(`^(?:C|U|UC|CHS|CHT|SUB|HD|FHD|UHD|(?:CD|DISC|PART)[0-9]+)$`)
+	fileMarker  = regexp.MustCompile(`^(?:C|U|UC|CHS|CHT|SUB|HD|FHD|UHD|LTX|(?:CD|DISC|PART)[0-9]+)$`)
 	// SSNI releases append C directly to the numeric serial for subtitles.
 	// Limit this filename alias to the known family; other catalogues have real letter variants.
 	ssniSubtitle  = regexp.MustCompile(`^(SSNI-[0-9]+)C$`)
 	versionSuffix = regexp.MustCompile(`^[-_]([A-Z])(?:[^A-Z0-9]|$)`)
-	layerToken    = regexp.MustCompile(`[A-Z0-9]+(?:[-_.][A-Z0-9]+)*`)
-	layerSerial   = regexp.MustCompile(`[A-Z][A-Z0-9]*[-_.]?[0-9]`)
-	layerNumeric  = regexp.MustCompile(`^[0-9]+[-_][0-9]+(?:[-_][A-Z0-9]+)*$`)
-	layerPart     = regexp.MustCompile(`^[0-9]{1,2}$`)
+	// attachedLTX / attachedC match a marker glued to the numeric serial without a
+	// separator (SSIS-001LTX, FJIN-106C). LTX is a leak/uncensored release marker;
+	// a bare C is only offered as a relaxed lookup fallback, never at parse time,
+	// because it can be a genuine serial letter (FJIN-106C is distinct from FJIN-106).
+	attachedLTX  = regexp.MustCompile(`^(.*[0-9])LTX$`)
+	attachedC    = regexp.MustCompile(`^(.*[0-9])C$`)
+	layerToken   = regexp.MustCompile(`[A-Z0-9]+(?:[-_.][A-Z0-9]+)*`)
+	layerSerial  = regexp.MustCompile(`[A-Z][A-Z0-9]*[-_.]?[0-9]`)
+	layerNumeric = regexp.MustCompile(`^[0-9]+[-_][0-9]+(?:[-_][A-Z0-9]+)*$`)
+	layerPart    = regexp.MustCompile(`^[0-9]{1,2}$`)
 )
 
 // Parse extracts a catalogue number from a filename, discarding website,
@@ -72,6 +78,14 @@ func Parse(name string) (string, bool) {
 	}
 	code := Normalize(name[match[2]:match[3]])
 	code = ssniSubtitle.ReplaceAllString(code, "$1")
+	// A trailing CH marks a Chinese-subtitle variant, not part of the number.
+	if base := withoutSubtitleSuffix(code); base != "" {
+		code = base
+	}
+	// A trailing LTX glued to the serial is a leak/uncensored release marker.
+	if base := stripAttachedReleaseLTX(code); base != "" {
+		code = base
+	}
 	// SCUTE includes the model name in its catalogue number. Other studios'
 	// filename titles must not become catalogue suffixes just because they contain dashes.
 	if strings.HasPrefix(code, "SCUTE-") {
@@ -98,6 +112,31 @@ func Parse(name string) (string, bool) {
 
 func removeNameNoise(name string) string {
 	return codecNoise.ReplaceAllString(domainNoise.ReplaceAllString(name, " "), " ")
+}
+
+// subtitleSuffix marks a Chinese-subtitle variant (CH) appended to a code.
+// A bare single letter stays a serial identity (FJIN-106 vs FJIN-106C).
+var subtitleSuffix = regexp.MustCompile(`(?i)^(.+[0-9])(?:CH)$`)
+
+func withoutSubtitleSuffix(code string) string {
+	if match := subtitleSuffix.FindStringSubmatch(code); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
+// stripAttachedReleaseLTX removes an LTX leak/uncensored marker glued to the
+// numeric serial (SSIS-001LTX -> SSIS-001). The remainder must still look like a
+// catalogue number so a real serial is never truncated.
+func stripAttachedReleaseLTX(code string) string {
+	if match := attachedLTX.FindStringSubmatch(code); match != nil && isCatalogueShape(match[1]) {
+		return match[1]
+	}
+	return ""
+}
+
+func isCatalogueShape(code string) bool {
+	return layerSerial.MatchString(code) || layerNumeric.MatchString(code)
 }
 
 // Layers generates catalogue candidates in priority order:
@@ -160,6 +199,11 @@ func Layers(name string) [][]string {
 		}
 	}
 
+	// Subtitle/release suffixes (CH/C) usually only exist locally; query the base code.
+	if base := withoutSubtitleSuffix(complete); base != "" {
+		addLayer([]string{base})
+	}
+
 	// Level 1: 前缀回退 (先剥离发行商/渠道前缀，保留尾部)
 	prefixFallbacks := stripPrefix(complete)
 	addLayer(prefixFallbacks)
@@ -178,6 +222,16 @@ func Layers(name string) [][]string {
 	}
 	addLayer(dualFallbacks)
 
+	// Release markers and possible subtitle letters glued to the serial are offered
+	// as the lowest-priority candidates so the base code can still resolve without
+	// altering the stored identity.
+	if base := stripAttachedReleaseLTX(complete); base != "" {
+		addLayer([]string{base})
+	}
+	if match := attachedC.FindStringSubmatch(complete); match != nil {
+		addLayer([]string{match[1]})
+	}
+
 	return layers
 }
 
@@ -190,6 +244,12 @@ func Queries(candidate string) []string {
 		queries = append(queries, "FC2-"+strings.TrimPrefix(candidate, "FC2-PPV-"))
 	}
 	queries = append(queries, candidate)
+	if base := withoutSubtitleSuffix(candidate); base != "" {
+		queries = append(queries, base)
+		if unpadded, ok := unpaddedNumericCandidate(base); ok {
+			queries = append(queries, unpadded)
+		}
+	}
 	if variant := dateVariant(candidate); variant != "" {
 		queries = append(queries, variant)
 	}
@@ -355,6 +415,12 @@ func IsFormatEquivalent(a, b string) bool {
 	normB := Normalize(b)
 	if normA == "" || normB == "" {
 		return false
+	}
+	if base := withoutSubtitleSuffix(normA); base != "" {
+		normA = base
+	}
+	if base := withoutSubtitleSuffix(normB); base != "" {
+		normB = base
 	}
 	if normA == normB {
 		return true

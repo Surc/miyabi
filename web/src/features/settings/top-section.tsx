@@ -61,7 +61,7 @@ export function TopSection() {
           <SelectTrigger className="w-64 max-w-full" aria-label="默认 TOP 榜单">
             <SelectValue placeholder="加载榜单…" />
           </SelectTrigger>
-          <SelectContent position="popper" align="start">
+          <SelectContent alignItemWithTrigger={false} align="start">
             <SelectGroup>
               {info.data?.boards.map(board => (
                 <SelectItem key={board.id} value={board.id}>

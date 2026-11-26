@@ -13,24 +13,28 @@ import (
 
 const maxViewedMovies = 5000
 
-// ViewedMovieIDs returns viewed JavDB IDs, ordered by most recently viewed first.
+// ViewedMovieIDs returns viewed codes and legacy JavDB IDs, newest first.
 func (s *Service) ViewedMovieIDs(ctx context.Context) ([]string, error) {
 	records, err := s.database.ViewedMovie.Query().
 		Order(ent.Desc(viewedmovie.FieldViewedAt), ent.Desc(viewedmovie.FieldID)).
 		Limit(maxViewedMovies).
-		Select(viewedmovie.FieldJavdbID).
+		Select(viewedmovie.FieldCode, viewedmovie.FieldJavdbID).
 		All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load viewed movie IDs: %w", err)
 	}
 	ids := make([]string, 0, len(records))
 	for _, r := range records {
-		ids = append(ids, r.JavdbID)
+		if r.Code != "" {
+			ids = append(ids, r.Code)
+		} else if r.JavdbID != "" {
+			ids = append(ids, r.JavdbID)
+		}
 	}
 	return ids, nil
 }
 
-// AddViewedMovieIDs records viewed JavDB IDs, updating viewed_at timestamps and evicting
+// AddViewedMovieIDs records viewed codes or refreshes existing legacy IDs, evicting
 // the oldest entries when the table exceeds maxViewedMovies.
 func (s *Service) AddViewedMovieIDs(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
@@ -65,15 +69,34 @@ func (s *Service) AddViewedMovieIDs(ctx context.Context, ids []string) error {
 			now = latest.ViewedAt.Add(time.Microsecond)
 		}
 
+		legacyIDs, err := tx.ViewedMovie.Query().Where(viewedmovie.JavdbIDIn(clean...)).
+			Select(viewedmovie.FieldJavdbID).Strings(ctx)
+		if err != nil {
+			return fmt.Errorf("load legacy viewed movie IDs: %w", err)
+		}
+		legacy := make(map[string]bool, len(legacyIDs))
+		if len(legacyIDs) > 0 {
+			if _, err := tx.ViewedMovie.Update().Where(viewedmovie.JavdbIDIn(legacyIDs...)).SetViewedAt(now).Save(ctx); err != nil {
+				return fmt.Errorf("refresh legacy viewed movies: %w", err)
+			}
+			for _, id := range legacyIDs {
+				legacy[id] = true
+			}
+		}
 		var builders []*ent.ViewedMovieCreate
 		for _, id := range clean {
-			builders = append(builders, tx.ViewedMovie.Create().SetJavdbID(id).SetViewedAt(now))
+			if !legacy[id] {
+				builders = append(builders, tx.ViewedMovie.Create().SetCode(id).SetViewedAt(now))
+			}
 		}
-		if err := tx.ViewedMovie.CreateBulk(builders...).
-			OnConflictColumns(viewedmovie.FieldJavdbID).
-			UpdateViewedAt().
-			Exec(ctx); err != nil {
-			return fmt.Errorf("upsert viewed movies: %w", err)
+		if len(builders) > 0 {
+			err = tx.ViewedMovie.CreateBulk(builders...).
+				OnConflictColumns(viewedmovie.FieldCode).
+				UpdateViewedAt().
+				Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("upsert viewed movies: %w", err)
+			}
 		}
 
 		_, err = tx.ViewedMovie.Delete().Where(func(s *sql.Selector) {

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ppxb/miyabi/internal/codeid"
 	"github.com/ppxb/miyabi/internal/domain"
+	"github.com/ppxb/miyabi/internal/ent/movie"
 )
 
 // Magnets returns the aggregated magnet list with URIs for the API.
@@ -28,6 +30,50 @@ func (service *Service) CatalogueMagnets(ctx context.Context, movieID string) ([
 	return result, nil
 }
 
+// CatalogueMagnetsByCode returns domain magnets for a normalized catalogue code
+// without resolving a JavDB movie ID through movie detail. Subscription and
+// offline recovery use it so magnet lookup no longer depends on JavDB detail.
+func (service *Service) CatalogueMagnetsByCode(ctx context.Context, code string) ([]domain.Magnet, error) {
+	code = codeid.Normalize(code)
+	if code == "" {
+		return nil, nil
+	}
+	key := "code:" + code
+	// Use the persisted JavDB source id (captured during scrape) when the code is
+	// already in the library, so the JavDB magnet source can participate here too.
+	ref := domain.MovieRef{Code: code}
+	if record, err := service.database.Movie.Query().Where(movie.CodeEQ(code)).Only(ctx); err == nil {
+		ref.JavDBID = domain.ValueOrZero(record.JavdbID)
+		if ref.JavDBID == "" && record.Metadata != nil {
+			ref.JavDBID = record.Metadata.SourceID(domain.MagnetSourceJavDB)
+		}
+	}
+	magnets, err := cachedJavDB(ctx, service, service.magnets, key, func(ctx context.Context) ([]domain.Magnet, error) {
+		magnets, partial, err := service.aggregator.FindDetailed(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		if partial {
+			return magnets, ErrDoNotCache
+		}
+		return magnets, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get magnets by code: %w", err)
+	}
+	return magnets, nil
+}
+
+// MagnetsByCode returns the API magnet list for a catalogue code, bypassing the
+// JavDB detail lookup used by the movie-ID path.
+func (service *Service) MagnetsByCode(ctx context.Context, code string) ([]Magnet, error) {
+	magnets, err := service.CatalogueMagnetsByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	return projectMagnets(magnets), nil
+}
+
 func (service *Service) HasMagnet(ctx context.Context, movieID, hash string) (bool, error) {
 	magnets, err := service.cachedMagnets(ctx, movieID)
 	if err != nil {
@@ -42,18 +88,22 @@ func (service *Service) HasMagnet(ctx context.Context, movieID, hash string) (bo
 }
 
 // cachedMagnets shares immutable domain data across all magnet lookups. The detail
-// lookup supplies the code and zone JavBus needs; when it fails the
-// aggregator still runs with the JavDB ID alone.
+// lookup supplies the code that the code-based sources need; when it fails they
+// cannot contribute and the result is returned without caching so it retries.
 func (service *Service) cachedMagnets(ctx context.Context, movieID string) ([]domain.Magnet, error) {
 	magnets, err := cachedJavDB(ctx, service, service.magnets, movieID, func(ctx context.Context) ([]domain.Magnet, error) {
 		ref := domain.MovieRef{JavDBID: movieID}
 		detailFailed := false
-		if service.javbus != nil && service.javbus.Available() {
-			if detail, err := service.CatalogueDetail(ctx, movieID); err == nil {
-				ref.Code, ref.Zone = detail.Code, detail.Zone
-			} else {
-				detailFailed = true
+		if detail, err := service.CatalogueDetail(ctx, movieID); err == nil {
+			ref.Code, ref.Zone = detail.Code, detail.Zone
+			// The detail's JavDB source id lets the JavDB magnet source participate.
+			for _, source := range detail.Sources {
+				if source.Provider == domain.MagnetSourceJavDB && source.ID != "" {
+					ref.JavDBID = source.ID
+				}
 			}
+		} else {
+			detailFailed = true
 		}
 		magnets, partial, err := service.aggregator.FindDetailed(ctx, ref)
 		if err != nil {

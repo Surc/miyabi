@@ -74,22 +74,14 @@ function submission(action: 'rescrape' | 'scan' | 'rebuild') {
         ? LibraryMovieActions({
             movie: {
               id: 48,
-              code: queued.code!,
-              title: '',
-              duration: 0,
-              rating: 0,
-              actors: [],
-              tags: [],
-              scrape_status: 'failed'
+              code: queued.code!
             }
           })
         : LibraryScanButton({
             loading: false,
-            available: true,
             scanning: false,
             rebuilding: false,
-            connected: true,
-            onStarted: vi.fn()
+            connected: true
           })
     return null
   }
@@ -98,7 +90,7 @@ function submission(action: 'rescrape' | 'scan' | 'rebuild') {
       <Capture />
     </QueryClientProvider>
   )
-  const event = action === 'rescrape' ? 'onSelect' : 'onClick'
+  const event = 'onClick'
   const controls = elements(tree).filter(element => typeof element.props[event] === 'function')
   ;(controls[action === 'rebuild' ? 1 : 0]!.props[event] as () => void)()
   const callbacks = mutate.mock.calls[0]![1] as { onSuccess: (task: ScanTask) => void }
@@ -132,18 +124,16 @@ for (const action of ['rescrape', 'scan', 'rebuild'] as const) {
       expect(vi.mocked(notify).mock.calls[0]![1]).toMatchObject({
         id: 'scan:254',
         description: latest.error,
-        duration: status === 'failed' ? Infinity : 8000
+        duration: 8000
       })
     })
   }
 
-  test(`${action}: a new task still has immediate feedback before its snapshot arrives`, () => {
+  test(`${action}: a new task no longer shows an in-progress toast`, () => {
     const f = submission(action)
     f.complete()
-    expect(toast.info).toHaveBeenCalledOnce()
-    expect(vi.mocked(toast.info).mock.calls[0]![1]).toMatchObject({
-      id: 'scan:254',
-      duration: Infinity
-    })
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 }

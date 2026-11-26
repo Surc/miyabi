@@ -311,6 +311,27 @@ func (_u *MovieUpdate) ClearRating() *MovieUpdate {
 	return _u
 }
 
+// SetRating10 sets the "rating10" field.
+func (_u *MovieUpdate) SetRating10(v float64) *MovieUpdate {
+	_u.mutation.ResetRating10()
+	_u.mutation.SetRating10(v)
+	return _u
+}
+
+// SetNillableRating10 sets the "rating10" field if the given value is not nil.
+func (_u *MovieUpdate) SetNillableRating10(v *float64) *MovieUpdate {
+	if v != nil {
+		_u.SetRating10(*v)
+	}
+	return _u
+}
+
+// AddRating10 adds value to the "rating10" field.
+func (_u *MovieUpdate) AddRating10(v float64) *MovieUpdate {
+	_u.mutation.AddRating10(v)
+	return _u
+}
+
 // SetCover sets the "cover" field.
 func (_u *MovieUpdate) SetCover(v string) *MovieUpdate {
 	_u.mutation.SetCover(v)
@@ -699,6 +720,12 @@ func (_u *MovieUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.RatingCleared() {
 		_spec.ClearField(movie.FieldRating, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.Rating10(); ok {
+		_spec.SetField(movie.FieldRating10, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRating10(); ok {
+		_spec.AddField(movie.FieldRating10, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.Cover(); ok {
 		_spec.SetField(movie.FieldCover, field.TypeString, value)
@@ -1211,6 +1238,27 @@ func (_u *MovieUpdateOne) ClearRating() *MovieUpdateOne {
 	return _u
 }
 
+// SetRating10 sets the "rating10" field.
+func (_u *MovieUpdateOne) SetRating10(v float64) *MovieUpdateOne {
+	_u.mutation.ResetRating10()
+	_u.mutation.SetRating10(v)
+	return _u
+}
+
+// SetNillableRating10 sets the "rating10" field if the given value is not nil.
+func (_u *MovieUpdateOne) SetNillableRating10(v *float64) *MovieUpdateOne {
+	if v != nil {
+		_u.SetRating10(*v)
+	}
+	return _u
+}
+
+// AddRating10 adds value to the "rating10" field.
+func (_u *MovieUpdateOne) AddRating10(v float64) *MovieUpdateOne {
+	_u.mutation.AddRating10(v)
+	return _u
+}
+
 // SetCover sets the "cover" field.
 func (_u *MovieUpdateOne) SetCover(v string) *MovieUpdateOne {
 	_u.mutation.SetCover(v)
@@ -1629,6 +1677,12 @@ func (_u *MovieUpdateOne) sqlSave(ctx context.Context) (_node *Movie, err error)
 	}
 	if _u.mutation.RatingCleared() {
 		_spec.ClearField(movie.FieldRating, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.Rating10(); ok {
+		_spec.SetField(movie.FieldRating10, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRating10(); ok {
+		_spec.AddField(movie.FieldRating10, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.Cover(); ok {
 		_spec.SetField(movie.FieldCover, field.TypeString, value)

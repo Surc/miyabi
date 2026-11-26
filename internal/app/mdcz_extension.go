@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/mdcz"
@@ -25,9 +26,12 @@ type metadataAPI struct {
 	images imageReader
 }
 
-func (m metadataAPI) Settings() []metadata.SourceSetting { return m.native.Settings() }
-func (m metadataAPI) UpdateSettings(ctx context.Context, settings []metadata.SourceSetting) error {
+func (m metadataAPI) Settings() []domain.SourceToggle { return m.native.Settings() }
+func (m metadataAPI) UpdateSettings(ctx context.Context, settings []domain.SourceToggle) error {
 	return m.native.UpdateSettings(ctx, settings)
+}
+func (m metadataAPI) ResolveExcept(ctx context.Context, ref domain.MovieRef, excluded ...string) (domain.MovieMetadata, error) {
+	return m.native.ResolveExcept(ctx, ref, excluded...)
 }
 func (m metadataAPI) Image(ctx context.Context, candidate domain.ImageCandidate) (domain.Media, error) {
 	return m.images.Image(ctx, candidate)

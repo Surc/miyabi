@@ -36,10 +36,16 @@ func enableFixturePublication(t *testing.T, f *pipelineFixture) (*export.Manager
 	manager.EnablePublicationRecovery(directory, func(p *export.Publication) (bool, error) {
 		return scrape.PublicationCommitted(t.Context(), f.store.Client, p)
 	})
-	f.scrape = scrape.New(f.store.Client, f.driveService, fixtureMetadata{f.discover}, f.images, f.tasks, scrape.Dependencies{ExportManager: manager})
+	f.scrape = scrape.New(f.store.Client, f.driveService, publicationCatalogue(f), f.images, f.tasks, scrape.Dependencies{ExportManager: manager})
 	t.Cleanup(f.scrape.Close)
 	f.tasks.Registry().Register(tasks.NewHandler(tasks.KindScrape, f.scrape.Scrape, f.scrape.Finished))
 	return manager, directory
+}
+
+func publicationCatalogue(f *pipelineFixture) fixtureMetadata {
+	return fixtureMetadata{catalogue: f.discover, resolve: func(code string) string {
+		return f.catalogue.ids[code]
+	}}
 }
 
 func TestPublicationDatabaseFailureRestoresSidecarsAndCanRetry(t *testing.T) {
@@ -60,7 +66,7 @@ func TestPublicationDatabaseFailureRestoresSidecarsAndCanRetry(t *testing.T) {
 	}
 	detail := fixtureDetail()
 	detail.Title = "New candidate title"
-	f.scrape = scrape.New(f.store.Client, f.driveService, publicationMetadata{fixtureMetadata{f.discover}, detail.Title}, f.images, f.tasks, scrape.Dependencies{ExportManager: manager})
+	f.scrape = scrape.New(f.store.Client, f.driveService, publicationMetadata{publicationCatalogue(f), detail.Title}, f.images, f.tasks, scrape.Dependencies{ExportManager: manager})
 	t.Cleanup(f.scrape.Close)
 	f.tasks.Registry().Register(tasks.NewHandler(tasks.KindScrape, f.scrape.Scrape, f.scrape.Finished))
 	fail := true

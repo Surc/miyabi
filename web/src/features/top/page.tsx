@@ -77,7 +77,7 @@ export function TopPage() {
             <SelectTrigger className="w-full sm:w-44" aria-label="榜单年份">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent position="popper" align="start">
+            <SelectContent alignItemWithTrigger={false} align="start">
               <SelectGroup>
                 {(info.data?.boards ?? [])
                   .filter(item => /^\d{4}$/.test(item.id))

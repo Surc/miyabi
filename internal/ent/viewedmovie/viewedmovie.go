@@ -13,6 +13,8 @@ const (
 	Label = "viewed_movie"
 	// FieldID holds the string denoting the id field in the database.
 	FieldID = "id"
+	// FieldCode holds the string denoting the code field in the database.
+	FieldCode = "code"
 	// FieldJavdbID holds the string denoting the javdb_id field in the database.
 	FieldJavdbID = "javdb_id"
 	// FieldViewedAt holds the string denoting the viewed_at field in the database.
@@ -24,6 +26,7 @@ const (
 // Columns holds all SQL columns for viewedmovie fields.
 var Columns = []string{
 	FieldID,
+	FieldCode,
 	FieldJavdbID,
 	FieldViewedAt,
 }
@@ -39,6 +42,8 @@ func ValidColumn(column string) bool {
 }
 
 var (
+	// CodeValidator is a validator for the "code" field. It is called by the builders before save.
+	CodeValidator func(string) error
 	// JavdbIDValidator is a validator for the "javdb_id" field. It is called by the builders before save.
 	JavdbIDValidator func(string) error
 	// DefaultViewedAt holds the default value on creation for the "viewed_at" field.
@@ -51,6 +56,11 @@ type OrderOption func(*sql.Selector)
 // ByID orders the results by the id field.
 func ByID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldID, opts...).ToFunc()
+}
+
+// ByCode orders the results by the code field.
+func ByCode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCode, opts...).ToFunc()
 }
 
 // ByJavdbID orders the results by the javdb_id field.

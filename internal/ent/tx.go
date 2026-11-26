@@ -14,6 +14,12 @@ type Tx struct {
 	config
 	// Actor is the client for interacting with the Actor builders.
 	Actor *ActorClient
+	// ActorAlias is the client for interacting with the ActorAlias builders.
+	ActorAlias *ActorAliasClient
+	// ActorImage is the client for interacting with the ActorImage builders.
+	ActorImage *ActorImageClient
+	// ActorProfile is the client for interacting with the ActorProfile builders.
+	ActorProfile *ActorProfileClient
 	// EmbyNotification is the client for interacting with the EmbyNotification builders.
 	EmbyNotification *EmbyNotificationClient
 	// File is the client for interacting with the File builders.
@@ -26,8 +32,12 @@ type Tx struct {
 	Movie *MovieClient
 	// OfflineDownload is the client for interacting with the OfflineDownload builders.
 	OfflineDownload *OfflineDownloadClient
+	// PanAccount is the client for interacting with the PanAccount builders.
+	PanAccount *PanAccountClient
 	// Setting is the client for interacting with the Setting builders.
 	Setting *SettingClient
+	// StorageSource is the client for interacting with the StorageSource builders.
+	StorageSource *StorageSourceClient
 	// Subscription is the client for interacting with the Subscription builders.
 	Subscription *SubscriptionClient
 	// Subtitle is the client for interacting with the Subtitle builders.
@@ -38,6 +48,8 @@ type Tx struct {
 	Task *TaskClient
 	// ViewedMovie is the client for interacting with the ViewedMovie builders.
 	ViewedMovie *ViewedMovieClient
+	// WatchHistory is the client for interacting with the WatchHistory builders.
+	WatchHistory *WatchHistoryClient
 
 	// lazily loaded.
 	client     *Client
@@ -170,18 +182,24 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.Actor = NewActorClient(tx.config)
+	tx.ActorAlias = NewActorAliasClient(tx.config)
+	tx.ActorImage = NewActorImageClient(tx.config)
+	tx.ActorProfile = NewActorProfileClient(tx.config)
 	tx.EmbyNotification = NewEmbyNotificationClient(tx.config)
 	tx.File = NewFileClient(tx.config)
 	tx.LocalScanEntry = NewLocalScanEntryClient(tx.config)
 	tx.MetadataCache = NewMetadataCacheClient(tx.config)
 	tx.Movie = NewMovieClient(tx.config)
 	tx.OfflineDownload = NewOfflineDownloadClient(tx.config)
+	tx.PanAccount = NewPanAccountClient(tx.config)
 	tx.Setting = NewSettingClient(tx.config)
+	tx.StorageSource = NewStorageSourceClient(tx.config)
 	tx.Subscription = NewSubscriptionClient(tx.config)
 	tx.Subtitle = NewSubtitleClient(tx.config)
 	tx.Tag = NewTagClient(tx.config)
 	tx.Task = NewTaskClient(tx.config)
 	tx.ViewedMovie = NewViewedMovieClient(tx.config)
+	tx.WatchHistory = NewWatchHistoryClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.

@@ -28,21 +28,20 @@ function PaginationItem({ ...props }: React.ComponentProps<'li'>) {
   return <li data-slot="pagination-item" {...props} />
 }
 
-type PaginationLinkProps = {
-  isActive?: boolean
-} & Pick<React.ComponentProps<typeof Button>, 'size'> &
-  React.ComponentProps<'a'>
-
-function PaginationLink({ className, isActive, size = 'icon', ...props }: PaginationLinkProps) {
+function PaginationLink({
+  isActive,
+  size = 'icon',
+  ...props
+}: React.ComponentProps<typeof Button> & { isActive?: boolean }) {
   return (
-    <Button asChild variant={isActive ? 'outline' : 'ghost'} size={size} className={cn(className)}>
-      <a
-        aria-current={isActive ? 'page' : undefined}
-        data-slot="pagination-link"
-        data-active={isActive}
-        {...props}
-      />
-    </Button>
+    <Button
+      type="button"
+      data-slot="pagination-link"
+      aria-current={isActive ? 'page' : undefined}
+      variant={isActive ? 'outline' : 'ghost'}
+      size={size}
+      {...props}
+    />
   )
 }
 
@@ -89,7 +88,7 @@ function PaginationEllipsis({ className, ...props }: React.ComponentProps<'span'
     <span
       data-slot="pagination-ellipsis"
       className={cn(
-        "flex size-9 items-center justify-center [&_svg:not([class*='size-'])]:size-4",
+        "flex size-8 items-center justify-center [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}

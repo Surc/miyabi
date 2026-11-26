@@ -2,21 +2,15 @@ package drive
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
-	"github.com/ppxb/miyabi/internal/database"
 	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/pan"
 	"github.com/ppxb/miyabi/internal/syncx"
 	"golang.org/x/sync/singleflight"
-)
-
-const (
-	credentialsSetting = "pan.credentials"
-	directorySetting   = "pan.library_directory"
 )
 
 // Client abstracts the upstream 115 API calls.
@@ -47,47 +41,26 @@ func (r mountRecord) source() domain.LibrarySource {
 	return domain.LibrarySource{AccountID: r.AccountID, Directory: r.LibraryDirectory}
 }
 
-type snapshot struct {
-	tokens               pan.Tokens
-	directory            mountRecord
-	authorizationVersion uint64
-	credentialVersion    uint64
-	tokenVersion         uint64
-	closed               bool
-}
-
-func (s snapshot) source() domain.LibrarySource {
-	return s.directory.source()
-}
-
-func (s snapshot) matchesSource(source domain.LibrarySource, version uint64) bool {
-	return s.authorizationVersion == version && s.directory.AccountID == source.AccountID && s.directory.ID == source.Directory.ID
-}
-
-// Drive coordinates 115 credentials, mount point, and authorization lifecycle.
+// Drive coordinates the registry of 115 accounts and their mounts. Every account
+// is independent; there is no primary account.
 type Drive struct {
 	database *ent.Client
 	client   Client
 
-	mu                   sync.Mutex
-	commit               syncx.ContextLock
-	tokens               pan.Tokens
-	directory            mountRecord
-	authorizationVersion uint64
-	credentialVersion    uint64
-	tokenVersion         uint64
-	refresh              singleflight.Group
-	work                 sync.WaitGroup
-	closed               bool
-
-	accountCacheMu          sync.Mutex
-	accountChecks           singleflight.Group
-	cachedAccount           pan.Account
-	cachedAccountTime       time.Time
-	cachedCredentialVersion uint64
+	mu     sync.Mutex
+	commit syncx.ContextLock
+	work   sync.WaitGroup
+	closed bool
 
 	login         qrLogin
 	mountListener MountListener
+
+	// Credential/authorization versions are runtime invalidation counters for
+	// in-flight sessions; account data itself lives in PanAccount rows.
+	accountCredVersions map[string]uint64
+	accountAuthVersions map[string]uint64
+	accountRefresh      singleflight.Group
+	refreshStop         chan struct{}
 }
 
 func New(ctx context.Context, db *ent.Client) (*Drive, error) {
@@ -95,19 +68,16 @@ func New(ctx context.Context, db *ent.Client) (*Drive, error) {
 }
 
 func NewWithClient(ctx context.Context, db *ent.Client, client Client) (*Drive, error) {
-	tokens, _, err := database.LoadSetting[pan.Tokens](ctx, db, credentialsSetting)
-	if err != nil {
-		return nil, err
-	}
-	directory, _, err := database.LoadSetting[mountRecord](ctx, db, directorySetting)
-	if err != nil {
-		return nil, err
+	if err := migrateLegacyAccount(ctx, db, client); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("migrate legacy 115 account: %w", err)
 	}
 	d := &Drive{
-		database:  db,
-		client:    client,
-		tokens:    tokens,
-		directory: directory,
+		database:            db,
+		client:              client,
+		refreshStop:         make(chan struct{}),
+		accountCredVersions: make(map[string]uint64),
+		accountAuthVersions: make(map[string]uint64),
 	}
 	d.login.drive = d
 	return d, nil
@@ -115,54 +85,22 @@ func NewWithClient(ctx context.Context, db *ent.Client, client Client) (*Drive, 
 
 func (d *Drive) Close() {
 	d.mu.Lock()
-	d.closed = true
+	if !d.closed {
+		d.closed = true
+		if d.refreshStop != nil {
+			close(d.refreshStop)
+			d.refreshStop = nil
+		}
+	}
 	d.mu.Unlock()
 	d.work.Wait()
 	d.client.Close()
 }
 
-func (d *Drive) snapshot() snapshot {
+func (d *Drive) closedState() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return snapshot{
-		tokens:               d.tokens,
-		directory:            d.directory,
-		authorizationVersion: d.authorizationVersion,
-		credentialVersion:    d.credentialVersion,
-		tokenVersion:         d.tokenVersion,
-		closed:               d.closed,
-	}
-}
-
-func (d *Drive) credentials(expected snapshot) (snapshot, error) {
-	current := d.snapshot()
-	if current.credentialVersion != expected.credentialVersion || current.tokens.AccessToken == "" {
-		return snapshot{}, pan.ErrUnauthorized
-	}
-	return current, nil
-}
-
-func (d *Drive) sourceState(source domain.LibrarySource, version uint64) (snapshot, error) {
-	state := d.snapshot()
-	if !state.matchesSource(source, version) {
-		return snapshot{}, ErrSourceChanged
-	}
-	return state, nil
-}
-
-func (d *Drive) verifiedSource(ctx context.Context) (snapshot, error) {
-	state := d.snapshot()
-	account, err := d.verifyAccount(ctx, state)
-	if err != nil {
-		return snapshot{}, err
-	}
-	if _, err := d.sourceState(state.source(), state.authorizationVersion); err != nil {
-		return snapshot{}, err
-	}
-	if state.directory.ID == "" || state.directory.AccountID != account.ID {
-		return snapshot{}, ErrMediaDirectoryRequired
-	}
-	return state, nil
+	return d.closed
 }
 
 // StartWork registers work that Close must wait for, such as a remote
@@ -187,13 +125,17 @@ func (d *Drive) Commit(ctx context.Context, fn func(tx *ent.Tx) error) error {
 	return ent.WithTx(ctx, d.database, fn)
 }
 
-// WithCurrentSource keeps the mounted source stable during a local operation.
-func (d *Drive) WithCurrentSource(ctx context.Context, fn func(*domain.LibrarySource) error) error {
+// WithMounts keeps the mounted sources stable during a local operation.
+func (d *Drive) WithMounts(ctx context.Context, fn func([]domain.LibrarySource) error) error {
 	if err := d.commit.Lock(ctx); err != nil {
 		return err
 	}
 	defer d.commit.Unlock()
-	return fn(d.Source())
+	mounts, err := d.Mounts(ctx)
+	if err != nil {
+		return err
+	}
+	return fn(mounts)
 }
 
 // OpenMedia streams media from 115 CDN directly.
@@ -201,12 +143,12 @@ func (d *Drive) OpenMedia(ctx context.Context, method, address string, headers h
 	return d.client.OpenMedia(ctx, method, address, headers)
 }
 
-// Source returns the current mounted library source from the in-memory snapshot, or nil if unmounted.
+// Source returns one mounted account's library source (the first by account id).
+// It is a display/test convenience; no account is privileged.
 func (d *Drive) Source() *domain.LibrarySource {
-	s := d.snapshot()
-	if s.directory.ID == "" || s.directory.AccountID == "" {
+	mounts, err := d.Mounts(context.Background())
+	if err != nil || len(mounts) == 0 {
 		return nil
 	}
-	src := s.source()
-	return &src
+	return &mounts[0]
 }

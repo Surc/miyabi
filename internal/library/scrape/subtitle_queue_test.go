@@ -12,6 +12,8 @@ import (
 
 type subtitleExporterFunc func(context.Context, int, subtitlemeta.Target) (int, error)
 
+func (subtitleExporterFunc) SyncExport(context.Context, int) error { return nil }
+
 func (f subtitleExporterFunc) Export(ctx context.Context, movieID int, target subtitlemeta.Target) (int, error) {
 	return f(ctx, movieID, target)
 }

@@ -22,11 +22,15 @@ func TestLibraryIndexesAndRecordsSurviveReopen(t *testing.T) {
 		}
 	})
 	doc := &nfo.Movie{Code: "ABP-001", Title: "Preserved title", Zone: domain.ZoneUnknown,
+		Rating: 6.9, RatingMax: 10,
 		IDs:          []nfo.UniqueID{{Type: "javdb", Value: "movie-id"}},
 		FieldSources: map[string]string{"title": "javdb"},
 		Images:       []domain.ImageCandidate{{Provider: "javdb", Role: "preview", URL: "https://example.com/preview.jpg"}},
 	}
-	movie := store.Client.Movie.Create().SetCode(doc.Code).SetTitle(doc.Title).SetMetadata(doc).SaveX(t.Context())
+	movie := store.Client.Movie.Create().SetCode(doc.Code).SetTitle(doc.Title).SetRating(doc.Rating).SetMetadata(doc).SaveX(t.Context())
+	if _, err := store.db.ExecContext(t.Context(), "UPDATE movies SET rating10 = 0 WHERE id = ?", movie.ID); err != nil {
+		t.Fatal(err)
+	}
 	file := store.Client.File.Create().SetFileID("video").SetName("ABP-001.mp4").SetSize(1024).
 		SetAccountID("100").SetRootID("10").SetMovie(movie).SaveX(t.Context())
 	job := store.Client.Task.Create().SetType("scan").SetPayload(json.RawMessage(`{"fixture":"preserved"}`)).SaveX(t.Context())
@@ -37,7 +41,7 @@ func TestLibraryIndexesAndRecordsSurviveReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := store.Client.Movie.GetX(t.Context(), movie.ID); got.Title != movie.Title || !reflect.DeepEqual(got.Metadata, doc) {
+	if got := store.Client.Movie.GetX(t.Context(), movie.ID); got.Title != movie.Title || got.Rating10 != doc.Rating || !reflect.DeepEqual(got.Metadata, doc) {
 		t.Fatal("reopen changed movie metadata")
 	}
 	if got := store.Client.File.GetX(t.Context(), file.ID); got.MovieID == nil || *got.MovieID != movie.ID || got.FileID != file.FileID {

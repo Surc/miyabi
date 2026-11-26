@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -89,6 +90,9 @@ func (f *Finder) search(ctx context.Context, query string, sources Sources) ([]C
 		}
 		wg.Go(func() {
 			results, err := provider.Search(ctx, query)
+			if err != nil {
+				slog.WarnContext(ctx, "subtitle provider search failed", "provider", fmt.Sprintf("%T", provider), "query", query, "error", err)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
