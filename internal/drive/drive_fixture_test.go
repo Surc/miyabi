@@ -38,6 +38,10 @@ type stubClient struct {
 
 func (c *stubClient) Close() {}
 
+func (c *stubClient) RecycleFile(context.Context, string, string, string) error {
+	return fmt.Errorf("unexpected recycle operation")
+}
+
 func (c *stubClient) Account(ctx context.Context, token string) (pan.Account, error) {
 	if c.account != nil {
 		return c.account(ctx, token)

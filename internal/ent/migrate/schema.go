@@ -172,6 +172,7 @@ var (
 		{Name: "upload_time", Type: field.TypeInt64, Default: 0},
 		{Name: "path", Type: field.TypeString, Default: ""},
 		{Name: "scan_id", Type: field.TypeString, Default: ""},
+		{Name: "download_links", Type: field.TypeJSON, Nullable: true},
 		{Name: "movie_files", Type: field.TypeInt, Nullable: true},
 	}
 	// FilesTable holds the schema information for the "files" table.
@@ -182,7 +183,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "files_movies_files",
-				Columns:    []*schema.Column{FilesColumns[14]},
+				Columns:    []*schema.Column{FilesColumns[15]},
 				RefColumns: []*schema.Column{MoviesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -196,7 +197,7 @@ var (
 			{
 				Name:    "file_movie_files_account_id_root_id",
 				Unique:  false,
-				Columns: []*schema.Column{FilesColumns[14], FilesColumns[9], FilesColumns[10]},
+				Columns: []*schema.Column{FilesColumns[15], FilesColumns[9], FilesColumns[10]},
 			},
 		},
 	}

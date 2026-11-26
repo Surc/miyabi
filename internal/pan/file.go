@@ -11,6 +11,20 @@ import (
 	"strings"
 )
 
+// RecycleFile moves one file to 115's recycle bin.
+func (client *Client) RecycleFile(ctx context.Context, token, fileID, parentID string) error {
+	if fileID == "" || fileID == "0" || strings.ContainsAny(fileID, ",\r\n") || parentID == "" {
+		return fmt.Errorf("invalid 115 recycle target")
+	}
+	_, err := apiRequest[apiResponse](client,
+		client.http.R().SetContext(ctx).SetAuthToken(token).SetFormData(map[string]string{
+			"file_ids": fileID, "parent_id": parentID,
+		}),
+		http.MethodPost, apiURL+"/open/ufile/delete", "recycle file",
+	)
+	return err
+}
+
 type Directory struct {
 	ID   string
 	Name string

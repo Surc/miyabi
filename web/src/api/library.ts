@@ -7,9 +7,10 @@ import {
   type QueryClient
 } from '@tanstack/react-query'
 
-import { apiGet, apiPost } from '@/api/client'
+import { apiDelete, apiGet, apiPost } from '@/api/client'
 import type { DiscoverMovieDetail } from '@/api/discover'
 import { movieStateKeys } from '@/api/movie-states'
+import { offlineKeys } from '@/api/offline'
 import { refreshQueries, updateIfCurrent } from '@/api/query-refresh'
 import { panKeys, type PanAccountStatus } from '@/api/pan'
 import { taskKeys, type LibrarySource, type ScanTask, type Task } from '@/api/tasks'
@@ -84,6 +85,46 @@ export type LibraryMovieDetail = Omit<DiscoverMovieDetail, 'release_status'> & {
   javdb_id?: string
   scrape_status: LibraryMovie['scrape_status']
   source?: string
+  videos?: LibraryMovieVideo[]
+}
+
+export type LibraryDownloadLink = {
+  key: string
+  uri: string
+  from_history?: boolean
+}
+
+export type LibraryMovieVideo = {
+  id: number
+  name: string
+  size: number
+  can_delete: boolean
+  hard_subtitled: boolean
+  download_links?: LibraryDownloadLink[]
+}
+
+export function useDeleteLibraryVideo(movieId: number) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (videoId: number) =>
+      apiDelete<{ movie_removed: boolean }>(`/api/library/movies/${movieId}/videos/${videoId}`),
+    onSuccess: () => {
+      void refreshQueries(client, libraryKeys.all, movieStateKeys.all, offlineKeys.all)
+    }
+  })
+}
+
+export function useBackfillVideoSources() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ videos_updated: number; links_added: number; history_read: boolean }>(
+        '/api/library/video-sources/backfill'
+      ),
+    onSuccess: () => {
+      void refreshQueries(client, libraryKeys.all)
+    }
+  })
 }
 
 export function useLibraryMovie(id: number) {

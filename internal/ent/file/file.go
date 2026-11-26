@@ -40,6 +40,8 @@ const (
 	FieldPath = "path"
 	// FieldScanID holds the string denoting the scan_id field in the database.
 	FieldScanID = "scan_id"
+	// FieldDownloadLinks holds the string denoting the download_links field in the database.
+	FieldDownloadLinks = "download_links"
 	// FieldMovieID holds the string denoting the movie_id field in the database.
 	FieldMovieID = "movie_files"
 	// EdgeMovie holds the string denoting the movie edge name in mutations.
@@ -71,6 +73,7 @@ var Columns = []string{
 	FieldUploadTime,
 	FieldPath,
 	FieldScanID,
+	FieldDownloadLinks,
 	FieldMovieID,
 }
 

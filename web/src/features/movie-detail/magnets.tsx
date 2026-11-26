@@ -12,6 +12,7 @@ import { useState } from 'react'
 import type { DiscoverMagnet, useDiscoverMagnets } from '@/api/discover'
 import { describeApiError, isPanUnauthorized } from '@/api/client'
 import { useDiscoverED2K } from '@/api/discover-ed2k'
+import type { LibraryMovieVideo } from '@/api/library'
 import {
   isOfflineTaskActive,
   useAddOffline,
@@ -38,6 +39,7 @@ import { MovieMagnetsSkeleton } from './skeleton'
 import { MovieSubscriptionAction } from './subscription-action'
 import { sortMagnets, type MagnetOrder } from './extensions/magnet-dates'
 import { MagnetPublication, MagnetSort } from './extensions/magnet-publication'
+import { downloadLinkID, DownloadProtocol } from './download-protocol'
 
 function SubmitLabel({
   pending,
@@ -68,7 +70,9 @@ const sourceLabels: Record<string, string> = {
   javbus: 'JavBus',
   sukebei: 'Sukebei',
   projectjav: 'ProjectJav',
-  freejavbt: 'FreeJavBT'
+  freejavbt: 'FreeJavBT',
+  pan_history: '115 离线补录',
+  miyabi: 'Miyabi 入库记录'
 }
 
 const phaseLabels: Record<OfflineSubmission['phase'], string> = {
@@ -82,28 +86,34 @@ const phaseLabels: Record<OfflineSubmission['phase'], string> = {
 type DownloadResource = Pick<
   DiscoverMagnet,
   'hash' | 'name' | 'uri' | 'size' | 'created_at' | 'sources' | 'tags'
-> & { page?: number }
+> & { kind: 'magnet' | 'ed2k'; page?: number; videos?: LibraryMovieVideo[] }
 export type OfflineAccount = { id: string; name: string; directory: string }
 
 export function MovieMagnets({
   movieID,
   javdbID,
   code,
-  query
+  query,
+  videos
 }: {
   movieID: string
   javdbID: string
   code: string
   query: ReturnType<typeof useDiscoverMagnets>
+  videos?: LibraryMovieVideo[]
 }) {
   const ed2k = useDiscoverED2K(javdbID)
-  const ed2kLinks = new Map<string, DownloadResource>()
+  const links = new Map<string, DownloadResource>()
+  for (const magnet of query.data ?? []) {
+    links.set(magnet.hash, { ...magnet, kind: 'magnet' })
+  }
   for (const page of ed2k.data?.pages ?? []) {
     for (const item of page.items) {
-      if (!ed2kLinks.has(item.id)) {
-        ed2kLinks.set(item.id, {
+      if (!links.has(item.id)) {
+        links.set(item.id, {
           ...item,
           hash: item.id,
+          kind: 'ed2k',
           page: page.page,
           sources: [item.source ?? 'javdb_comments']
         })
@@ -124,6 +134,26 @@ export function MovieMagnets({
   const hasAccounts = (panAccounts.data?.length ?? 0) > 0
   const offline = useMovieOfflineTasks(movieID, code)
   const tasks = new Map((offline.data ?? []).map(task => [task.hash, task] as const))
+  for (const video of videos ?? []) {
+    for (const link of video.download_links ?? []) {
+      const resource = links.get(link.key)
+      if (resource) {
+        resource.videos = [...(resource.videos ?? []), video]
+      } else {
+        links.set(link.key, {
+          hash: link.key,
+          kind: link.key.startsWith('ed2k:') ? 'ed2k' : 'magnet',
+          name: video.name,
+          uri: link.uri,
+          size: video.size,
+          created_at: '',
+          sources: [link.from_history ? 'pan_history' : 'miyabi'],
+          tags: [],
+          videos: [video]
+        })
+      }
+    }
+  }
   const checkingStatus = offline.isPending
   const [copiedHash, setCopiedHash] = useState('')
   const [copyError, setCopyError] = useState(false)
@@ -171,48 +201,39 @@ export function MovieMagnets({
           离线任务状态读取失败，请重试。
         </InlineError>
       ) : null}
-      {ed2kLinks.size || ed2k.hasNextPage || ed2k.isError ? (
-        <section className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-normal">ED2K</h2>
-          {Array.from(ed2kLinks.values(), renderResource)}
-          {ed2k.isError ? (
-            <InlineError
-              onRetry={() =>
-                void (ed2k.isFetchNextPageError ? ed2k.fetchNextPage() : ed2k.refetch())
-              }
-              retrying={ed2k.isFetching}
-            >
-              {describeApiError(ed2k.error)}
-            </InlineError>
-          ) : ed2k.hasNextPage ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={ed2k.isFetching}
-              onClick={() => void ed2k.fetchNextPage()}
-            >
-              {ed2k.isFetchingNextPage ? '加载中…' : '查找更多 ED2K'}
-            </Button>
-          ) : null}
-        </section>
-      ) : null}
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold tracking-normal">磁力链</h2>
-          {query.data?.length ? <MagnetSort value={order} onChange={setOrder} /> : null}
+          <h2 className="text-xl font-semibold tracking-normal">下载链接</h2>
+          {links.size > 1 ? <MagnetSort value={order} onChange={setOrder} /> : null}
         </div>
-        {query.isPending ? (
+        {sortMagnets(Array.from(links.values()), order).map(renderResource)}
+        {movieID && query.isPending && links.size === 0 ? (
           <MovieMagnetsSkeleton />
         ) : query.isError ? (
           <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
             磁力加载失败
           </InlineError>
-        ) : query.data.length === 0 ? (
+        ) : movieID && query.data?.length === 0 ? (
           <MovieSubscriptionAction movieID={movieID} />
-        ) : (
-          sortMagnets(query.data, order).map(renderResource)
-        )}
+        ) : null}
+        {ed2k.isError ? (
+          <InlineError
+            onRetry={() => void (ed2k.isFetchNextPageError ? ed2k.fetchNextPage() : ed2k.refetch())}
+            retrying={ed2k.isFetching}
+          >
+            {describeApiError(ed2k.error)}
+          </InlineError>
+        ) : ed2k.hasNextPage ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={ed2k.isFetching}
+            onClick={() => void ed2k.fetchNextPage()}
+          >
+            {ed2k.isFetchingNextPage ? '加载中…' : '查找更多 ED2K'}
+          </Button>
+        ) : null}
       </section>
       {copyError ? <InlineError>复制失败，请重试。</InlineError> : null}
     </div>
@@ -240,6 +261,7 @@ function ResourceCard({
 }) {
   const add = useAddOffline(movieID)
   const next = useOfflineControl('next')
+  const linked = Boolean(resource.videos?.length)
   const submitted = task !== undefined && task.phase !== 'available'
   const busy = add.isPending || (checkingStatus && !submitted)
   let label = '加入 115'
@@ -273,11 +295,22 @@ function ResourceCard({
     )
 
   return (
-    <Card size="sm">
+    <Card
+      size="sm"
+      id={downloadLinkID(resource.hash)}
+      tabIndex={-1}
+      className="scroll-mt-4 focus:ring-2"
+    >
       <CardContent className="space-y-3">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1 space-y-2">
-            <h3 className="text-base leading-6 font-semibold wrap-break-word">{resource.name}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <DownloadProtocol kind={resource.kind} />
+              <h3 className="min-w-0 text-base leading-6 font-semibold wrap-break-word">
+                {resource.name}
+              </h3>
+              {linked ? <Badge variant="library">已入库</Badge> : null}
+            </div>
             <p className="w-fit max-w-full font-mono text-xs break-all text-muted-foreground select-all">
               {resource.uri}
             </p>
@@ -319,7 +352,7 @@ function ResourceCard({
               {copied ? <CheckIcon /> : <CopyIcon />}
               {copied ? '已复制' : '复制'}
             </Button>
-            {accounts.length > 1 ? (
+            {!linked && accounts.length > 1 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={<Button type="button" size="sm" disabled={disabled} />}
@@ -343,7 +376,7 @@ function ResourceCard({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : accounts.length === 1 ? (
+            ) : !linked && accounts.length === 1 ? (
               <Button
                 type="button"
                 size="sm"
@@ -355,6 +388,16 @@ function ResourceCard({
             ) : null}
           </div>
         </div>
+        {linked ? (
+          <div className="flex flex-wrap items-baseline gap-2 border-t pt-3 text-sm">
+            <span className="text-xs text-muted-foreground">对应视频</span>
+            {resource.videos?.map(video => (
+              <span key={video.id} className="wrap-break-word">
+                {video.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {task?.phase === 'in_library' && task.processing ? (
           <p className="text-sm text-muted-foreground">文件已入库，后台整理中。</p>
         ) : null}

@@ -23,6 +23,7 @@ type Client interface {
 	RefreshToken(context.Context, string) (pan.Tokens, error)
 	List(context.Context, string, string, int, int) (pan.FilePage, error)
 	Info(context.Context, string, string) (pan.FileInfo, error)
+	RecycleFile(context.Context, string, string, string) error
 	ReadMetadata(context.Context, string, string, int64) ([]byte, error)
 	AddOffline(context.Context, string, string, string) (string, error)
 	RemoveOffline(context.Context, string, string) error

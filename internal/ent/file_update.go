@@ -10,7 +10,9 @@ import (
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
+	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 	"github.com/ppxb/miyabi/internal/ent/predicate"
@@ -203,6 +205,24 @@ func (_u *FileUpdate) SetNillableScanID(v *string) *FileUpdate {
 	return _u
 }
 
+// SetDownloadLinks sets the "download_links" field.
+func (_u *FileUpdate) SetDownloadLinks(v []domain.DownloadLink) *FileUpdate {
+	_u.mutation.SetDownloadLinks(v)
+	return _u
+}
+
+// AppendDownloadLinks appends value to the "download_links" field.
+func (_u *FileUpdate) AppendDownloadLinks(v []domain.DownloadLink) *FileUpdate {
+	_u.mutation.AppendDownloadLinks(v)
+	return _u
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (_u *FileUpdate) ClearDownloadLinks() *FileUpdate {
+	_u.mutation.ClearDownloadLinks()
+	return _u
+}
+
 // SetMovieID sets the "movie_id" field.
 func (_u *FileUpdate) SetMovieID(v int) *FileUpdate {
 	_u.mutation.SetMovieID(v)
@@ -348,6 +368,17 @@ func (_u *FileUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.ScanID(); ok {
 		_spec.SetField(file.FieldScanID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.DownloadLinks(); ok {
+		_spec.SetField(file.FieldDownloadLinks, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDownloadLinks(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, file.FieldDownloadLinks, value)
+		})
+	}
+	if _u.mutation.DownloadLinksCleared() {
+		_spec.ClearField(file.FieldDownloadLinks, field.TypeJSON)
 	}
 	if _u.mutation.MovieCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -572,6 +603,24 @@ func (_u *FileUpdateOne) SetNillableScanID(v *string) *FileUpdateOne {
 	return _u
 }
 
+// SetDownloadLinks sets the "download_links" field.
+func (_u *FileUpdateOne) SetDownloadLinks(v []domain.DownloadLink) *FileUpdateOne {
+	_u.mutation.SetDownloadLinks(v)
+	return _u
+}
+
+// AppendDownloadLinks appends value to the "download_links" field.
+func (_u *FileUpdateOne) AppendDownloadLinks(v []domain.DownloadLink) *FileUpdateOne {
+	_u.mutation.AppendDownloadLinks(v)
+	return _u
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (_u *FileUpdateOne) ClearDownloadLinks() *FileUpdateOne {
+	_u.mutation.ClearDownloadLinks()
+	return _u
+}
+
 // SetMovieID sets the "movie_id" field.
 func (_u *FileUpdateOne) SetMovieID(v int) *FileUpdateOne {
 	_u.mutation.SetMovieID(v)
@@ -747,6 +796,17 @@ func (_u *FileUpdateOne) sqlSave(ctx context.Context) (_node *File, err error) {
 	}
 	if value, ok := _u.mutation.ScanID(); ok {
 		_spec.SetField(file.FieldScanID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.DownloadLinks(); ok {
+		_spec.SetField(file.FieldDownloadLinks, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDownloadLinks(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, file.FieldDownloadLinks, value)
+		})
+	}
+	if _u.mutation.DownloadLinksCleared() {
+		_spec.ClearField(file.FieldDownloadLinks, field.TypeJSON)
 	}
 	if _u.mutation.MovieCleared() {
 		edge := &sqlgraph.EdgeSpec{

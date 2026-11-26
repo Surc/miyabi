@@ -30,12 +30,17 @@ type panStub struct {
 	refreshToken  func(context.Context, string) (pan.Tokens, error)
 	list          func(context.Context, string, string, int, int) (pan.FilePage, error)
 	info          func(context.Context, string, string) (pan.FileInfo, error)
+	recycleFile   func(context.Context, string, string, string) error
 	readMetadata  func(context.Context, string, string, int64) ([]byte, error)
 	addOffline    func(context.Context, string, string, string) (string, error)
 	removeOffline func(context.Context, string, string) error
 	offlineTasks  func(context.Context, string, int) (pan.OfflinePage, error)
 	playURL       func(context.Context, string, string, string) ([]pan.PlaySource, error)
 	openMedia     func(context.Context, string, string, http.Header) (*http.Response, error)
+}
+
+func (client *panStub) RecycleFile(ctx context.Context, token, id, parentID string) error {
+	return client.recycleFile(ctx, token, id, parentID)
 }
 
 func (client *panStub) Close() {

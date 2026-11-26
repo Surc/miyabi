@@ -150,6 +150,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected.POST("/library/movies/:id/scrape", libraryMovieScrapeHandler(deps.Library))
 	protected.GET("/library/movies/:id/previews/:index", libraryPreviewHandler(deps.Library, deps.Metadata, deps.BrowseExtension))
 	registerLibrarySubtitles(protected, deps.Library)
+	registerLibraryVideos(protected, deps.Library)
 	subtitlesAPI := protected.Group("/library/movies/:id/player-subtitles", noStore())
 	subtitlesAPI.GET("", subtitleListHandler(deps.Subtitles))
 	subtitlesAPI.GET("/search", subtitleSearchHandler(deps.Subtitles))

@@ -16,6 +16,7 @@ type Session interface {
 	AuthorizationVersion() uint64
 	List(ctx context.Context, dirID string, offset int) (pan.FilePage, error)
 	Info(ctx context.Context, fileID string) (pan.FileInfo, error)
+	RecycleFile(ctx context.Context, fileID string, onRecycled func() error) error
 	Read(ctx context.Context, pickCode string, limit int64) ([]byte, error)
 	WithSource(ctx context.Context, fn func() error) error
 	Commit(ctx context.Context, fn func(tx *ent.Tx) error) error

@@ -1,11 +1,19 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 
-import { useLibraryMovies, useRecentMovies, useTopRatedMovies } from '@/api/library'
+import { describeApiError } from '@/api/client'
+import {
+  useBackfillVideoSources,
+  useLibraryMovies,
+  useRecentMovies,
+  useTopRatedMovies
+} from '@/api/library'
 import { isTaskActive } from '@/api/tasks'
 import { AppPage } from '@/components/app-page'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState, InlineError } from '@/components/error-state'
 import { PageHeader } from '@/components/page-header'
+import { Button } from '@/components/ui/button'
 import { ContinueWatching } from '@/features/library/continue-watching'
 import { LibraryProgress } from '@/features/library/library-progress'
 import { MovieShelfSection } from '@/features/library/movie-shelf-section'
@@ -15,6 +23,7 @@ import { useActiveScan } from '@/features/tasks/use-active-scan'
 
 export function LibraryPage() {
   const library = useLibraryMovies(1)
+  const backfill = useBackfillVideoSources()
   const recent = useRecentMovies()
   const topRated = useTopRatedMovies(12)
   // `active` covers any active library task, including a single-movie rescrape.
@@ -28,6 +37,24 @@ export function LibraryPage() {
   return (
     <AppPage>
       <PageHeader title="媒体库" description="最近加入、正在观看与高分影片" inlineActions>
+        {source ? (
+          <Button
+            variant="outline"
+            disabled={backfill.isPending}
+            onClick={() =>
+              backfill.mutate(undefined, {
+                onSuccess: result => {
+                  const message = `已为 ${result.videos_updated} 个视频补录 ${result.links_added} 条来源`
+                  if (result.history_read) toast.success(message)
+                  else toast.warning(`${message}。部分 115 离线记录暂不可用，可重试。`)
+                },
+                onError: error => toast.error(describeApiError(error))
+              })
+            }
+          >
+            {backfill.isPending ? '正在补录…' : '补录 115 来源'}
+          </Button>
+        ) : null}
         <LibraryProgress task={progressTask} />
       </PageHeader>
 

@@ -60,7 +60,7 @@ export function MovieDetailDialogProvider({ children }: PropsWithChildren) {
           <DialogTitle className="sr-only">影片详情</DialogTitle>
           <DetailScrollBody key={movie && movieDetailKey(movie)}>
             <Suspense fallback={<MovieDetailSkeleton />}>
-              {movie ? <MovieDetailContent movie={movie} /> : null}
+              {movie ? <MovieDetailContent movie={movie} onClose={() => setOpen(false)} /> : null}
             </Suspense>
           </DetailScrollBody>
         </DialogContent>

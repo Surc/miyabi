@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { useRecordMovieView } from '@/api/browse-history'
 import { describeApiError, isJavDBLoginRequired } from '@/api/client'
 import { useDiscoverMagnets, useDiscoverMovie } from '@/api/discover'
-import { useLibraryMovie } from '@/api/library'
+import { type LibraryMovieVideo, useLibraryMovie } from '@/api/library'
 import { useMovieState } from '@/api/movie-states'
 import { ErrorState, InlineError } from '@/components/error-state'
 import type { MovieDetailTarget } from './dialog-context'
@@ -18,8 +18,15 @@ import { MovieSynopsis } from './extensions/synopsis'
 import { MovieTopRankings } from './extensions/top-rankings'
 import { LibrarySubtitles } from './extensions/library-subtitles'
 
-export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
-  if ('libraryId' in movie) return <LibraryMovieDetail movieId={movie.libraryId} />
+export function MovieDetailContent({
+  movie,
+  onClose
+}: {
+  movie: MovieDetailTarget
+  onClose?: () => void
+}) {
+  if ('libraryId' in movie)
+    return <LibraryMovieDetail movieId={movie.libraryId} onClose={onClose} />
   return 'id' in movie ? (
     <IdentifiedMovieDetail movieId={movie.id} code={movie.code} />
   ) : (
@@ -27,7 +34,7 @@ export function MovieDetailContent({ movie }: { movie: MovieDetailTarget }) {
   )
 }
 
-function LibraryMovieDetail({ movieId }: { movieId: number }) {
+function LibraryMovieDetail({ movieId, onClose }: { movieId: number; onClose?: () => void }) {
   const detail = useLibraryMovie(movieId)
   if (detail.isPending) return <MovieDetailSkeleton />
   if (!detail.data) {
@@ -47,10 +54,14 @@ function LibraryMovieDetail({ movieId }: { movieId: number }) {
       fetching={detail.isFetching}
       onRetry={() => void detail.refetch()}
     >
-      <LibrarySubtitles movieId={movieId} />
+      <LibrarySubtitles movieId={movieId} videos={detail.data.videos} onMovieRemoved={onClose} />
       <MovieComments javdbId={detail.data.javdb_id ?? ''} code={detail.data.code} />
-      {detail.data.javdb_id ? (
-        <LibraryCatalogueExtras movieId={detail.data.javdb_id} code={detail.data.code} />
+      {detail.data.javdb_id || detail.data.videos?.some(video => video.download_links?.length) ? (
+        <LibraryCatalogueExtras
+          movieId={detail.data.javdb_id ?? ''}
+          code={detail.data.code}
+          videos={detail.data.videos}
+        />
       ) : null}
     </CatalogueSections>
   )
@@ -113,21 +124,39 @@ function CatalogueSections({
 
 // Catalogue extras remain available for linked films, but cannot block or
 // replace the saved library metadata when the catalogue is unavailable.
-function LibraryCatalogueExtras({ movieId, code }: { movieId: string; code: string }) {
-  const detail = useDiscoverMovie(movieId, code)
-  const magnets = useDiscoverMagnets(movieId, detail.data?.code ?? code)
-  useRecordMovieView(movieId)
+function LibraryCatalogueExtras({
+  movieId,
+  code,
+  videos
+}: {
+  movieId: string
+  code: string
+  videos?: LibraryMovieVideo[]
+}) {
+  const magnets = useDiscoverMagnets(movieId, code)
   return (
     <>
-      <MovieMagnets movieID={movieId} javdbID={movieId} code={code} query={magnets} />
-      {detail.data ? (
-        <>
-          <MovieRecommendations title="TA（们）还出演过" movies={detail.data.actor_movies} />
-          <MovieRecommendations title="你可能也喜欢" movies={detail.data.related_movies} />
-        </>
-      ) : null}
+      <MovieMagnets
+        movieID={movieId}
+        javdbID={movieId}
+        code={code}
+        query={magnets}
+        videos={videos}
+      />
+      {movieId ? <LibraryRecommendations movieId={movieId} code={code} /> : null}
     </>
   )
+}
+
+function LibraryRecommendations({ movieId, code }: { movieId: string; code: string }) {
+  const detail = useDiscoverMovie(movieId, code)
+  useRecordMovieView(movieId)
+  return detail.data ? (
+    <>
+      <MovieRecommendations title="TA（们）还出演过" movies={detail.data.actor_movies} />
+      <MovieRecommendations title="你可能也喜欢" movies={detail.data.related_movies} />
+    </>
+  ) : null
 }
 
 function IdentifiedMovieDetail({ movieId, code }: { movieId: string; code?: string }) {

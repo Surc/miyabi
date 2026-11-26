@@ -5,6 +5,7 @@ import (
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
+	"github.com/ppxb/miyabi/internal/domain"
 )
 
 type File struct {
@@ -41,6 +42,7 @@ func (File) Fields() []ent.Field {
 			Default(""),
 		field.String("scan_id").
 			Default(""),
+		field.JSON("download_links", []domain.DownloadLink{}).Optional(),
 		field.Int("movie_id").
 			StorageKey("movie_files").
 			Optional().

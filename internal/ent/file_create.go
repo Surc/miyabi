@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 )
@@ -178,6 +179,12 @@ func (_c *FileCreate) SetNillableScanID(v *string) *FileCreate {
 	if v != nil {
 		_c.SetScanID(*v)
 	}
+	return _c
+}
+
+// SetDownloadLinks sets the "download_links" field.
+func (_c *FileCreate) SetDownloadLinks(v []domain.DownloadLink) *FileCreate {
+	_c.mutation.SetDownloadLinks(v)
 	return _c
 }
 
@@ -412,6 +419,10 @@ func (_c *FileCreate) createSpec() (*File, *sqlgraph.CreateSpec) {
 		_spec.SetField(file.FieldScanID, field.TypeString, value)
 		_node.ScanID = value
 	}
+	if value, ok := _c.mutation.DownloadLinks(); ok {
+		_spec.SetField(file.FieldDownloadLinks, field.TypeJSON, value)
+		_node.DownloadLinks = value
+	}
 	if nodes := _c.mutation.MovieIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2O,
@@ -634,6 +645,24 @@ func (u *FileUpsert) SetScanID(v string) *FileUpsert {
 // UpdateScanID sets the "scan_id" field to the value that was provided on create.
 func (u *FileUpsert) UpdateScanID() *FileUpsert {
 	u.SetExcluded(file.FieldScanID)
+	return u
+}
+
+// SetDownloadLinks sets the "download_links" field.
+func (u *FileUpsert) SetDownloadLinks(v []domain.DownloadLink) *FileUpsert {
+	u.Set(file.FieldDownloadLinks, v)
+	return u
+}
+
+// UpdateDownloadLinks sets the "download_links" field to the value that was provided on create.
+func (u *FileUpsert) UpdateDownloadLinks() *FileUpsert {
+	u.SetExcluded(file.FieldDownloadLinks)
+	return u
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (u *FileUpsert) ClearDownloadLinks() *FileUpsert {
+	u.SetNull(file.FieldDownloadLinks)
 	return u
 }
 
@@ -879,6 +908,27 @@ func (u *FileUpsertOne) SetScanID(v string) *FileUpsertOne {
 func (u *FileUpsertOne) UpdateScanID() *FileUpsertOne {
 	return u.Update(func(s *FileUpsert) {
 		s.UpdateScanID()
+	})
+}
+
+// SetDownloadLinks sets the "download_links" field.
+func (u *FileUpsertOne) SetDownloadLinks(v []domain.DownloadLink) *FileUpsertOne {
+	return u.Update(func(s *FileUpsert) {
+		s.SetDownloadLinks(v)
+	})
+}
+
+// UpdateDownloadLinks sets the "download_links" field to the value that was provided on create.
+func (u *FileUpsertOne) UpdateDownloadLinks() *FileUpsertOne {
+	return u.Update(func(s *FileUpsert) {
+		s.UpdateDownloadLinks()
+	})
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (u *FileUpsertOne) ClearDownloadLinks() *FileUpsertOne {
+	return u.Update(func(s *FileUpsert) {
+		s.ClearDownloadLinks()
 	})
 }
 
@@ -1293,6 +1343,27 @@ func (u *FileUpsertBulk) SetScanID(v string) *FileUpsertBulk {
 func (u *FileUpsertBulk) UpdateScanID() *FileUpsertBulk {
 	return u.Update(func(s *FileUpsert) {
 		s.UpdateScanID()
+	})
+}
+
+// SetDownloadLinks sets the "download_links" field.
+func (u *FileUpsertBulk) SetDownloadLinks(v []domain.DownloadLink) *FileUpsertBulk {
+	return u.Update(func(s *FileUpsert) {
+		s.SetDownloadLinks(v)
+	})
+}
+
+// UpdateDownloadLinks sets the "download_links" field to the value that was provided on create.
+func (u *FileUpsertBulk) UpdateDownloadLinks() *FileUpsertBulk {
+	return u.Update(func(s *FileUpsert) {
+		s.UpdateDownloadLinks()
+	})
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (u *FileUpsertBulk) ClearDownloadLinks() *FileUpsertBulk {
+	return u.Update(func(s *FileUpsert) {
+		s.ClearDownloadLinks()
 	})
 }
 

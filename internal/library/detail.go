@@ -8,6 +8,7 @@ import (
 	subtitlemeta "github.com/ppxb/miyabi/internal/domain/subtitle"
 	"github.com/ppxb/miyabi/internal/ent"
 	"github.com/ppxb/miyabi/internal/ent/movie"
+	"github.com/ppxb/miyabi/internal/ent/predicate"
 	"github.com/ppxb/miyabi/internal/magnet"
 	"github.com/ppxb/miyabi/internal/nfo"
 )
@@ -18,17 +19,24 @@ type MovieDetail struct {
 	JavDBID      string             `json:"javdb_id,omitempty"`
 	ScrapeStatus movie.ScrapeStatus `json:"scrape_status"`
 	Source       string             `json:"source,omitempty"`
+	Videos       []MovieVideo       `json:"videos,omitempty"`
 }
 
 // Movie reads saved metadata within the same scope as the library list. Opening
 // a detail never resolves a catalogue identity or starts a scraping task.
 func (s *Service) Movie(ctx context.Context, id int) (MovieDetail, error) {
-	record, err := s.detailRecord(ctx, id)
+	mounts := s.mountList(ctx)
+	scope := fileScope(s.mergeSources(ctx, mounts))
+	record, err := s.detailRecord(ctx, id, scope)
+	if err != nil {
+		return MovieDetail{}, err
+	}
+	videos, err := movieVideos(ctx, record, scope, mounts)
 	if err != nil {
 		return MovieDetail{}, err
 	}
 	doc := domain.ValueOrZero(record.Metadata)
-	detail := MovieDetail{LibraryID: record.ID, JavDBID: doc.JavDBID(), ScrapeStatus: record.ScrapeStatus}
+	detail := MovieDetail{LibraryID: record.ID, JavDBID: doc.JavDBID(), ScrapeStatus: record.ScrapeStatus, Videos: videos}
 	if detail.JavDBID == "" {
 		detail.JavDBID = domain.ValueOrZero(record.JavdbID)
 	}
@@ -112,7 +120,7 @@ func (s *Service) Movie(ctx context.Context, id int) (MovieDetail, error) {
 }
 
 func (s *Service) Preview(ctx context.Context, id, index int) (domain.ImageCandidate, error) {
-	record, err := s.detailRecord(ctx, id)
+	record, err := s.detailRecord(ctx, id, s.scope(ctx))
 	if err != nil {
 		return domain.ImageCandidate{}, err
 	}
@@ -123,8 +131,8 @@ func (s *Service) Preview(ctx context.Context, id, index int) (domain.ImageCandi
 	return candidates[index], nil
 }
 
-func (s *Service) detailRecord(ctx context.Context, id int) (*ent.Movie, error) {
-	record, err := s.database.Movie.Query().Where(movie.IDEQ(id), movie.HasFilesWith(s.scope(ctx))).
+func (s *Service) detailRecord(ctx context.Context, id int, scope predicate.File) (*ent.Movie, error) {
+	record, err := s.database.Movie.Query().Where(movie.IDEQ(id), movie.HasFilesWith(scope)).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return nil, domain.E(domain.KindNotFound, "影片不在当前媒体库中", err)

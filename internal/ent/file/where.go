@@ -870,6 +870,16 @@ func ScanIDContainsFold(v string) predicate.File {
 	return predicate.File(sql.FieldContainsFold(FieldScanID, v))
 }
 
+// DownloadLinksIsNil applies the IsNil predicate on the "download_links" field.
+func DownloadLinksIsNil() predicate.File {
+	return predicate.File(sql.FieldIsNull(FieldDownloadLinks))
+}
+
+// DownloadLinksNotNil applies the NotNil predicate on the "download_links" field.
+func DownloadLinksNotNil() predicate.File {
+	return predicate.File(sql.FieldNotNull(FieldDownloadLinks))
+}
+
 // MovieIDEQ applies the EQ predicate on the "movie_id" field.
 func MovieIDEQ(v int) predicate.File {
 	return predicate.File(sql.FieldEQ(FieldMovieID, v))

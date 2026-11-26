@@ -169,13 +169,23 @@ func (r *scanRun) reconcileTx(ctx context.Context, tx *ent.Tx, cfg export.Config
 	}
 	indexed := file.And(database.LibraryFiles(r.payload.Source), file.ScanIDEQ(r.payload.ScanID))
 	if r.payload.OfflineTaskID != 0 {
-		files, err := tx.File.Query().Where(indexed).Select(file.FieldFileID).All(ctx)
+		files, err := tx.File.Query().Where(indexed).Select(file.FieldID, file.FieldFileID, file.FieldDownloadLinks).All(ctx)
 		if err != nil {
 			return err
 		}
+		download, err := tx.OfflineDownload.Get(ctx, r.payload.OfflineTaskID)
+		if err != nil {
+			return err
+		}
+		link, hasLink := database.OfflineDownloadLink(download)
 		ids := make([]string, 0, len(files))
 		for _, entry := range files {
 			ids = append(ids, entry.FileID)
+			if hasLink {
+				if _, err := database.AddDownloadLinks(ctx, tx, entry, []domain.DownloadLink{link}); err != nil {
+					return err
+				}
+			}
 		}
 		if err := tx.OfflineDownload.UpdateOneID(r.payload.OfflineTaskID).SetFileIds(ids).Exec(ctx); err != nil {
 			return err

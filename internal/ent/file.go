@@ -3,12 +3,14 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/ppxb/miyabi/internal/domain"
 	"github.com/ppxb/miyabi/internal/ent/file"
 	"github.com/ppxb/miyabi/internal/ent/movie"
 )
@@ -44,6 +46,8 @@ type File struct {
 	Path string `json:"path,omitempty"`
 	// ScanID holds the value of the "scan_id" field.
 	ScanID string `json:"scan_id,omitempty"`
+	// DownloadLinks holds the value of the "download_links" field.
+	DownloadLinks []domain.DownloadLink `json:"download_links,omitempty"`
 	// MovieID holds the value of the "movie_id" field.
 	MovieID *int `json:"movie_id,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -77,6 +81,8 @@ func (*File) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case file.FieldDownloadLinks:
+			values[i] = new([]byte)
 		case file.FieldID, file.FieldSize, file.FieldUploadTime, file.FieldMovieID:
 			values[i] = new(sql.NullInt64)
 		case file.FieldFileID, file.FieldPickCode, file.FieldSha1, file.FieldName, file.FieldParentID, file.FieldAccountID, file.FieldRootID, file.FieldPath, file.FieldScanID:
@@ -182,6 +188,14 @@ func (_m *File) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ScanID = value.String
 			}
+		case file.FieldDownloadLinks:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field download_links", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.DownloadLinks); err != nil {
+					return fmt.Errorf("unmarshal field download_links: %w", err)
+				}
+			}
 		case file.FieldMovieID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field movie_id", values[i])
@@ -268,6 +282,9 @@ func (_m *File) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("scan_id=")
 	builder.WriteString(_m.ScanID)
+	builder.WriteString(", ")
+	builder.WriteString("download_links=")
+	builder.WriteString(fmt.Sprintf("%v", _m.DownloadLinks))
 	builder.WriteString(", ")
 	if v := _m.MovieID; v != nil {
 		builder.WriteString("movie_id=")

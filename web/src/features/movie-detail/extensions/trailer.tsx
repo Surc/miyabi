@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useSettingsStore } from '@/stores/settings'
 import { MoviePreviews } from '../previews'
-import { resolveTrailer, startNativeTrailer, type TrailerSource } from './trailer-source'
+import { resolveTrailer, startTrailer, type TrailerSource } from './trailer-source'
 
 // The existing image viewer receives the same array and indices as upstream.
 export function MovieMediaPreviews({
@@ -67,9 +67,7 @@ function MovieTrailer({
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="sm:max-w-4xl">
             <DialogTitle>影片预告</DialogTitle>
-            <DialogDescription>
-              视频使用浏览器网络播放；部分浏览器不支持 HLS 格式。
-            </DialogDescription>
+            <DialogDescription>视频通过浏览器连接预告来源。</DialogDescription>
             {open ? <TrailerPlayback source={source} /> : null}
           </DialogContent>
         </Dialog>
@@ -82,20 +80,24 @@ function TrailerPlayback({ source }: { source: TrailerSource }) {
   const [attempt, setAttempt] = useState(0)
   return (
     <div className="space-y-3">
-      <NativeTrailer key={attempt} source={source} onRetry={() => setAttempt(attempt + 1)} />
+      <TrailerPlayer key={attempt} source={source} onRetry={() => setAttempt(value => value + 1)} />
     </div>
   )
 }
 
-function NativeTrailer({ source, onRetry }: { source: TrailerSource; onRetry: () => void }) {
+function TrailerPlayer({ source, onRetry }: { source: TrailerSource; onRetry: () => void }) {
   const media = useRef<HTMLVideoElement>(null)
   const [error, setError] = useState('')
   const { url, hls } = source
   useEffect(() => {
     if (!media.current) return
-    const cleanup = startNativeTrailer(media.current, { url, hls })
-    if (!cleanup) setError('当前浏览器不支持此 HLS 预告格式。')
-    return cleanup ?? undefined
+    return startTrailer(media.current, { url, hls }, reason => {
+      setError(
+        reason === 'unsupported'
+          ? '当前浏览器不支持此 HLS 预告格式。'
+          : '预告加载失败，请检查浏览器网络或重试。'
+      )
+    })
   }, [url, hls])
   return (
     <>
@@ -105,7 +107,6 @@ function NativeTrailer({ source, onRetry }: { source: TrailerSource; onRetry: ()
         playsInline
         preload="none"
         className="aspect-video w-full rounded-xl bg-black"
-        onError={() => setError('预告加载失败，请检查浏览器网络或重试。')}
       />
       {error ? (
         <div role="alert" className="space-y-3 text-sm text-muted-foreground">

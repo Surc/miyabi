@@ -4857,30 +4857,32 @@ func (m *EmbyNotificationMutation) ResetEdge(name string) error {
 // FileMutation represents an operation that mutates the File nodes in the graph.
 type FileMutation struct {
 	config
-	op             Op
-	typ            string
-	id             *int
-	created_at     *time.Time
-	updated_at     *time.Time
-	file_id        *string
-	pick_code      *string
-	sha1           *string
-	name           *string
-	size           *int64
-	addsize        *int64
-	parent_id      *string
-	account_id     *string
-	root_id        *string
-	upload_time    *int64
-	addupload_time *int64
-	_path          *string
-	scan_id        *string
-	clearedFields  map[string]struct{}
-	movie          *int
-	clearedmovie   bool
-	done           bool
-	oldValue       func(context.Context) (*File, error)
-	predicates     []predicate.File
+	op                   Op
+	typ                  string
+	id                   *int
+	created_at           *time.Time
+	updated_at           *time.Time
+	file_id              *string
+	pick_code            *string
+	sha1                 *string
+	name                 *string
+	size                 *int64
+	addsize              *int64
+	parent_id            *string
+	account_id           *string
+	root_id              *string
+	upload_time          *int64
+	addupload_time       *int64
+	_path                *string
+	scan_id              *string
+	download_links       *[]domain.DownloadLink
+	appenddownload_links []domain.DownloadLink
+	clearedFields        map[string]struct{}
+	movie                *int
+	clearedmovie         bool
+	done                 bool
+	oldValue             func(context.Context) (*File, error)
+	predicates           []predicate.File
 }
 
 var _ ent.Mutation = (*FileMutation)(nil)
@@ -5489,6 +5491,71 @@ func (m *FileMutation) ResetScanID() {
 	m.scan_id = nil
 }
 
+// SetDownloadLinks sets the "download_links" field.
+func (m *FileMutation) SetDownloadLinks(dl []domain.DownloadLink) {
+	m.download_links = &dl
+	m.appenddownload_links = nil
+}
+
+// DownloadLinks returns the value of the "download_links" field in the mutation.
+func (m *FileMutation) DownloadLinks() (r []domain.DownloadLink, exists bool) {
+	v := m.download_links
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDownloadLinks returns the old "download_links" field's value of the File entity.
+// If the File object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *FileMutation) OldDownloadLinks(ctx context.Context) (v []domain.DownloadLink, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDownloadLinks is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDownloadLinks requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDownloadLinks: %w", err)
+	}
+	return oldValue.DownloadLinks, nil
+}
+
+// AppendDownloadLinks adds dl to the "download_links" field.
+func (m *FileMutation) AppendDownloadLinks(dl []domain.DownloadLink) {
+	m.appenddownload_links = append(m.appenddownload_links, dl...)
+}
+
+// AppendedDownloadLinks returns the list of values that were appended to the "download_links" field in this mutation.
+func (m *FileMutation) AppendedDownloadLinks() ([]domain.DownloadLink, bool) {
+	if len(m.appenddownload_links) == 0 {
+		return nil, false
+	}
+	return m.appenddownload_links, true
+}
+
+// ClearDownloadLinks clears the value of the "download_links" field.
+func (m *FileMutation) ClearDownloadLinks() {
+	m.download_links = nil
+	m.appenddownload_links = nil
+	m.clearedFields[file.FieldDownloadLinks] = struct{}{}
+}
+
+// DownloadLinksCleared returns if the "download_links" field was cleared in this mutation.
+func (m *FileMutation) DownloadLinksCleared() bool {
+	_, ok := m.clearedFields[file.FieldDownloadLinks]
+	return ok
+}
+
+// ResetDownloadLinks resets all changes to the "download_links" field.
+func (m *FileMutation) ResetDownloadLinks() {
+	m.download_links = nil
+	m.appenddownload_links = nil
+	delete(m.clearedFields, file.FieldDownloadLinks)
+}
+
 // SetMovieID sets the "movie_id" field.
 func (m *FileMutation) SetMovieID(i int) {
 	m.movie = &i
@@ -5599,7 +5666,7 @@ func (m *FileMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *FileMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, file.FieldCreatedAt)
 	}
@@ -5639,6 +5706,9 @@ func (m *FileMutation) Fields() []string {
 	if m.scan_id != nil {
 		fields = append(fields, file.FieldScanID)
 	}
+	if m.download_links != nil {
+		fields = append(fields, file.FieldDownloadLinks)
+	}
 	if m.movie != nil {
 		fields = append(fields, file.FieldMovieID)
 	}
@@ -5676,6 +5746,8 @@ func (m *FileMutation) Field(name string) (ent.Value, bool) {
 		return m.Path()
 	case file.FieldScanID:
 		return m.ScanID()
+	case file.FieldDownloadLinks:
+		return m.DownloadLinks()
 	case file.FieldMovieID:
 		return m.MovieID()
 	}
@@ -5713,6 +5785,8 @@ func (m *FileMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldPath(ctx)
 	case file.FieldScanID:
 		return m.OldScanID(ctx)
+	case file.FieldDownloadLinks:
+		return m.OldDownloadLinks(ctx)
 	case file.FieldMovieID:
 		return m.OldMovieID(ctx)
 	}
@@ -5815,6 +5889,13 @@ func (m *FileMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetScanID(v)
 		return nil
+	case file.FieldDownloadLinks:
+		v, ok := value.([]domain.DownloadLink)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDownloadLinks(v)
+		return nil
 	case file.FieldMovieID:
 		v, ok := value.(int)
 		if !ok {
@@ -5879,6 +5960,9 @@ func (m *FileMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *FileMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(file.FieldDownloadLinks) {
+		fields = append(fields, file.FieldDownloadLinks)
+	}
 	if m.FieldCleared(file.FieldMovieID) {
 		fields = append(fields, file.FieldMovieID)
 	}
@@ -5896,6 +5980,9 @@ func (m *FileMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *FileMutation) ClearField(name string) error {
 	switch name {
+	case file.FieldDownloadLinks:
+		m.ClearDownloadLinks()
+		return nil
 	case file.FieldMovieID:
 		m.ClearMovieID()
 		return nil
@@ -5945,6 +6032,9 @@ func (m *FileMutation) ResetField(name string) error {
 		return nil
 	case file.FieldScanID:
 		m.ResetScanID()
+		return nil
+	case file.FieldDownloadLinks:
+		m.ResetDownloadLinks()
 		return nil
 	case file.FieldMovieID:
 		m.ResetMovieID()

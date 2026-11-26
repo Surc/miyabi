@@ -143,6 +143,28 @@ func (s *accountSession) Info(ctx context.Context, fileID string) (pan.FileInfo,
 	})
 }
 
+// RecycleFile holds the mount stable from the file check through local cleanup.
+// An expired token is refreshed outside that lock.
+func (s *accountSession) RecycleFile(ctx context.Context, fileID string, onRecycled func() error) error {
+	_, err := accountWithToken(ctx, s, func(token string) (struct{}, error) {
+		return struct{}{}, s.WithSource(ctx, func() error {
+			info, err := s.drive.client.Info(ctx, token, fileID)
+			if err == nil {
+				if info.ID != fileID || info.IsDirectory || !WithinSource(info, s.source) {
+					return domain.E(domain.KindConflict, "视频已移出当前媒体目录，请刷新媒体库", nil)
+				}
+				err = s.drive.client.RecycleFile(ctx, token, fileID, info.ParentID)
+			}
+			if err != nil && !errors.Is(err, pan.ErrNotFound) {
+				return err
+			}
+			// A retry can finish local cleanup after a successful recycle.
+			return onRecycled()
+		})
+	})
+	return err
+}
+
 func (s *accountSession) Read(ctx context.Context, pickCode string, limit int64) ([]byte, error) {
 	return readAccount(ctx, s, func(token string) ([]byte, error) {
 		return s.drive.client.ReadMetadata(ctx, token, pickCode, limit)
