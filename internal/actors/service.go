@@ -283,6 +283,46 @@ func (s *Service) Detail(ctx context.Context, id int) (Detail, error) {
 	}, nil
 }
 
+// Identity is the local actor information needed to follow new works.
+type Identity struct {
+	Name      string
+	Avatar    string
+	Names     []string
+	SourceIDs map[string]string
+}
+
+func (s *Service) Identity(ctx context.Context, id int) (Identity, error) {
+	profile, err := s.db.ActorProfile.Query().
+		Where(actorprofile.ID(id), actorprofile.HasSources()).
+		WithSources().WithAliases().Only(ctx)
+	if ent.IsNotFound(err) {
+		return Identity{}, ErrNotFound
+	}
+	if err != nil {
+		return Identity{}, err
+	}
+	identity := Identity{
+		Name:      profile.Name,
+		Avatar:    "/api/actors/" + strconv.Itoa(profile.ID) + "/avatar",
+		Names:     []string{profile.Name},
+		SourceIDs: make(map[string]string, len(profile.Edges.Sources)),
+	}
+	for _, source := range profile.Edges.Sources {
+		if !slices.Contains(identity.Names, source.Name) {
+			identity.Names = append(identity.Names, source.Name)
+		}
+		if identity.SourceIDs[source.Provider] == "" {
+			identity.SourceIDs[source.Provider] = source.SourceID
+		}
+	}
+	for _, alias := range profile.Edges.Aliases {
+		if !slices.Contains(identity.Names, alias.Alias) {
+			identity.Names = append(identity.Names, alias.Alias)
+		}
+	}
+	return identity, nil
+}
+
 // scriptOf classifies a name as Japanese/CJK, Latin, or other.
 func scriptOf(name string) string {
 	for _, r := range name {

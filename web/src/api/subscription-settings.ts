@@ -12,8 +12,6 @@ export type MagnetPreferences = {
 }
 
 export type SubscriptionConfig = {
-  movie_auto_download: boolean
-  actor_auto_download: boolean
   check_time: string
   preferences: MagnetPreferences
   download: { auto_switch: boolean }

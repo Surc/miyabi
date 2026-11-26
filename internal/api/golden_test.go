@@ -185,20 +185,20 @@ type goldenSubscription struct {
 }
 
 func (goldenSubscription) List(context.Context, string, int, int) ([]monitor.Item, error) {
-	taskID, failure, next := 9, "JavDB 暂不可用", goldenTime().Add(time.Hour)
+	failure, next := "JavDB 暂不可用", goldenTime().Add(time.Hour)
 	last := goldenTime()
 	return []monitor.Item{
-		{ID: 2, Kind: "movie", TargetID: "movie-upcoming", Code: "SONE-002", Title: "Upcoming", Cover: "https://media.example/upcoming.jpg", ReleaseDate: "2026-10-01",
-			AutoDownload: true, Status: subscription.StatusWaiting, NextCheckAt: &next, LastCheckedAt: &last, Checks: 3, Error: &failure, CreatedAt: goldenTime(), UpdatedAt: goldenTime()},
-		{ID: 1, Kind: "movie", TargetID: "movie-exact", Code: "ABP-123", Title: "Localized title", Cover: "https://media.example/cover.jpg", ReleaseDate: "2026-08-01",
-			AutoDownload: true, Status: subscription.StatusAdded, Hash: "0000000000000000000000000000000000000003", TaskID: &taskID, Checks: 1, CreatedAt: goldenTime(), UpdatedAt: goldenTime()},
+		{ID: 2, Kind: "actor", TargetID: "7", Title: "Followed actor", Cover: "/api/actors/7/avatar",
+			Status: subscription.StatusActive, NextCheckAt: &next, LastCheckedAt: &last, Checks: 3, Error: &failure, CreatedAt: goldenTime(), UpdatedAt: goldenTime()},
+		{ID: 1, Kind: "actor", TargetID: "3", Title: "Paused actor", Cover: "/api/actors/3/avatar",
+			Status: subscription.StatusPaused, Checks: 1, CreatedAt: goldenTime(), UpdatedAt: goldenTime()},
 	}, nil
 }
 
 func (goldenSubscription) Targets(context.Context, string) ([]monitor.TargetItem, error) {
 	return []monitor.TargetItem{
-		{ID: 2, Kind: "movie", TargetID: "movie-upcoming", Status: subscription.StatusWaiting},
-		{ID: 1, Kind: "movie", TargetID: "movie-exact", Status: subscription.StatusAdded},
+		{ID: 2, Kind: "actor", TargetID: "7", Status: subscription.StatusActive},
+		{ID: 1, Kind: "actor", TargetID: "3", Status: subscription.StatusPaused},
 	}, nil
 }
 

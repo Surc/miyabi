@@ -182,8 +182,9 @@ func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 	}
 	cleanup = append(cleanup, catalogueSvc.Close)
 	proxy := networkSvc.ProxyManager()
+	fanza := providers.NewFANZA(proxy)
 	metadataSvc, err := metadata.New(ctx, store.Client,
-		providers.NewFANZA(proxy),
+		fanza,
 		providers.NewFC2(proxy),
 		providers.NewFC2DB(proxy),
 		providers.NewHEYZO(proxy),
@@ -218,7 +219,6 @@ func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 		return nil, fmt.Errorf("initialize MDCz extension: %w", err)
 	}
 	offlineSvc := offline.New(store.Client, catalogueSvc, driveSvc, taskSvc, libSvc, metadataSvc, offlineSubmitTimeout)
-	monitorSvc := monitor.New(store.Client, catalogueSvc, offlineSvc, taskSvc)
 	gfriendsClient := gfriends.New(cfg.DataDir, &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: netx.NewTransport(networkSvc.ProxyManager()),
@@ -230,6 +230,7 @@ func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 		netx.NewSafeDownloadClient(networkSvc.ProxyManager(), 30*time.Second),
 		actors.NewAVLeague(networkSvc.ProxyManager()),
 	)
+	monitorSvc := monitor.New(store.Client, catalogueSvc, fanza, followedActor(actorsSvc), taskSvc)
 	syncActors := cfg.EmbySyncActors
 	embySvc, err := emby.NewService(ctx, store.Client, emby.Config{
 		Enabled:    cfg.EmbyEnabled,
@@ -272,7 +273,6 @@ func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScan, libSvc.Scan, libSvc.Finished).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindScrape, scrapeSvc.Scrape, scrapeSvc.Finished).WithRetry(database.RetryDelay))
 	taskRegistry.Register(tasks.NewHandler(tasks.KindSubtitle, scrapeSvc.ExportSubtitle, nil).WithRetry(database.RetryDelay))
-	taskRegistry.Register(tasks.NewHandler(tasks.KindSubscriptionBatch, monitorSvc.BatchHandler, monitorSvc.BatchFinished))
 
 	pools := newTaskPools(taskSvc, logger)
 	extras := catalogue.NewMovieExtrasWithRating(catalogueSvc, rating)
@@ -300,7 +300,7 @@ func New(cfg *config.Config, logger *slog.Logger) (_ *App, err error) {
 		Monitor:         monitorSvc,
 		Library:         libSvc,
 		STRM:            strm.New(store.Client, driveSvc),
-		Tasks:           &taskViews{Service: taskSvc, database: store.Client, library: libSvc, monitor: monitorSvc},
+		Tasks:           &taskViews{Service: taskSvc, database: store.Client, library: libSvc},
 		Artwork:         scrapeSvc,
 		Maintenance:     maintenanceSvc,
 		Network:         networkSvc,
@@ -384,7 +384,7 @@ func (a *App) Run(ctx context.Context) error {
 		tasks.RunPeriodic(ctx, a.logger, "sync 115 offline tasks", offlineSyncInterval, nil, a.offline.Sync)
 	})
 	workers.Go(func() {
-		tasks.RunPeriodic(ctx, a.logger, "monitor", monitorCheckInterval, a.monitors.Pending(), a.monitors.Check)
+		tasks.RunPeriodic(ctx, a.logger, "monitor", monitorCheckInterval, nil, a.monitors.Check)
 	})
 
 	serverError := make(chan error, 1)

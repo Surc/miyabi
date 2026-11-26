@@ -17,8 +17,5 @@ func newTaskPools(service *tasks.Service, logger *slog.Logger) []*tasks.Pool {
 		// Subtitle retries are durable and must not occupy the scraper pool.
 		tasks.NewPool(service.Queue(), service, service.Registry(),
 			[]tasks.Kind{tasks.KindSubtitle}, 2, logger),
-		// Batches retain serial submission and pacing without occupying the library worker.
-		tasks.NewPool(service.Queue(), service, service.Registry(),
-			[]tasks.Kind{tasks.KindSubscriptionBatch}, 1, logger),
 	}
 }

@@ -22,12 +22,12 @@ type subscriptionStub struct {
 	actorFeedPage     int
 	actorFeedLimit    int
 	actorFeedCalls    int
+	addedActor        string
 }
 
 func (s *subscriptionStub) Targets(_ context.Context, kind string) ([]monitor.TargetItem, error) {
 	s.targetsCalledKind = kind
 	return []monitor.TargetItem{
-		{ID: 1, Kind: "movie", TargetID: "m1", Status: subscription.StatusWaiting},
 		{ID: 2, Kind: "actor", TargetID: "a1", Status: subscription.StatusActive},
 	}, nil
 }
@@ -49,27 +49,53 @@ func (s *subscriptionStub) UpdateConfig(_ context.Context, cfg monitor.Config) (
 	return cfg, nil
 }
 
+func (s *subscriptionStub) AddActor(_ context.Context, actorKey string) (monitor.Item, error) {
+	s.addedActor = actorKey
+	return monitor.Item{ID: 4, Kind: "actor", TargetID: actorKey}, nil
+}
+
+func TestSubscriptionCreateOnlyAcceptsActors(t *testing.T) {
+	for _, tc := range []struct {
+		body      string
+		status    int
+		wantActor string
+	}{
+		{`{"kind":"actor","target_id":"a1"}`, http.StatusCreated, "a1"},
+		{`{"kind":"movie","target_id":"m1"}`, http.StatusBadRequest, ""},
+	} {
+		stub := &subscriptionStub{}
+		router := NewRouter(Dependencies{Access: NewAccessGateService("", ""), Monitor: stub, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		request := httptest.NewRequest(http.MethodPost, "/api/subscriptions", bytes.NewReader([]byte(tc.body)))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != tc.status || stub.addedActor != tc.wantActor {
+			t.Fatalf("%s: status=%d, added actor %q: %s", tc.body, response.Code, stub.addedActor, response.Body)
+		}
+	}
+}
+
 func TestSubscriptionTargetsHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	stub := &subscriptionStub{}
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/subscriptions/targets?kind=movie", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/subscriptions/targets?kind=actor", nil)
 
 	subscriptionTargetsHandler(stub)(c)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if stub.targetsCalledKind != "movie" {
-		t.Fatalf("expected kind 'movie', got '%s'", stub.targetsCalledKind)
+	if stub.targetsCalledKind != "actor" {
+		t.Fatalf("expected kind 'actor', got '%s'", stub.targetsCalledKind)
 	}
 	var items []monitor.TargetItem
 	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	if len(items) != 1 || items[0].TargetID != "a1" {
+		t.Fatalf("expected the followed actor, got %+v", items)
 	}
 }
 

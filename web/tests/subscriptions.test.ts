@@ -67,22 +67,18 @@ function settled<TQuery, TError, TData, TKey extends QueryKey>(
 }
 
 test.each([
-  { kind: 'movie', path: '/api/subscriptions/targets?kind=movie' },
   { kind: 'actor', path: '/api/subscriptions/targets?kind=actor' },
   { kind: undefined, path: '/api/subscriptions/targets' }
 ] as const)(
   'subscription targets from $path retain and index more than 100 items',
   async ({ kind, path }) => {
     const client = createTestClient()
-    const mockTargets: SubscriptionTarget[] = Array.from({ length: 150 }, (_, i) => {
-      const targetKind = kind ?? (i % 2 === 0 ? 'movie' : 'actor')
-      return {
-        id: i + 1,
-        kind: targetKind,
-        target_id: `${targetKind}-${i + 1}`,
-        status: targetKind === 'actor' ? 'active' : i % 2 === 0 ? 'waiting' : 'added'
-      }
-    })
+    const mockTargets: SubscriptionTarget[] = Array.from({ length: 150 }, (_, i) => ({
+      id: i + 1,
+      kind: 'actor',
+      target_id: String(i + 1),
+      status: i % 2 === 0 ? 'active' : 'paused'
+    }))
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockImplementation(async () => Response.json(mockTargets))
@@ -114,36 +110,48 @@ test.each([
   }
 )
 
-test('subscriptionKeys.all invalidates all target and paginated list queries', async () => {
+test('subscriptionKeys.all invalidates follow targets, actor lists and new works', async () => {
   const client = createTestClient()
 
   let targetsCalls = 0
   let listCalls = 0
+  let feedCalls = 0
 
   const targetsObserver = observe(client, {
-    queryKey: subscriptionKeys.targets('movie'),
+    queryKey: subscriptionKeys.targets('actor'),
     queryFn: () => {
       targetsCalls++
-      return [{ id: 1, kind: 'movie', target_id: 'm-1', status: 'waiting' }]
+      return [{ id: 1, kind: 'actor', target_id: '7', status: 'active' }]
     }
   })
 
   const listObserver = observe(client, {
-    queryKey: subscriptionKeys.list('movie', 1, SUBSCRIPTION_PAGE_SIZE),
+    queryKey: subscriptionKeys.list('actor', 1, SUBSCRIPTION_PAGE_SIZE),
     queryFn: () => {
       listCalls++
-      return [{ id: 1, kind: 'movie', target_id: 'm-1', code: 'M-1', title: 'Movie 1' }]
+      return [{ id: 1, kind: 'actor', target_id: '7', title: 'Actor 7' }]
+    }
+  })
+
+  const feedObserver = observe(client, {
+    queryKey: subscriptionKeys.feed(1, 1),
+    queryFn: () => {
+      feedCalls++
+      return [{ id: 2, code: 'M-1', title: 'New work', origin_id: 1 }]
     }
   })
 
   await settled(targetsObserver)
   await settled(listObserver)
+  await settled(feedObserver)
   assert.equal(targetsCalls, 1)
   assert.equal(listCalls, 1)
+  assert.equal(feedCalls, 1)
 
   // Invalidate all subscriptions
   await client.invalidateQueries({ queryKey: subscriptionKeys.all })
 
   assert.equal(targetsCalls, 2)
   assert.equal(listCalls, 2)
+  assert.equal(feedCalls, 2)
 })

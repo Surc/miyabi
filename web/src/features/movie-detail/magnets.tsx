@@ -36,7 +36,6 @@ import {
 import { formatSize } from '@/lib/format'
 import { notifyOfflineTask, notifyTaskError } from '@/features/tasks/task-toast'
 import { MovieMagnetsSkeleton } from './skeleton'
-import { MovieSubscriptionAction } from './subscription-action'
 import { sortMagnets, type MagnetOrder } from './extensions/magnet-dates'
 import { MagnetPublication, MagnetSort } from './extensions/magnet-publication'
 import { downloadLinkID, DownloadProtocol } from './download-protocol'
@@ -213,8 +212,8 @@ export function MovieMagnets({
           <InlineError onRetry={() => void query.refetch()} retrying={query.isFetching}>
             磁力加载失败
           </InlineError>
-        ) : movieID && query.data?.length === 0 ? (
-          <MovieSubscriptionAction movieID={movieID} />
+        ) : movieID && query.data?.length === 0 && links.size === 0 ? (
+          <p className="text-sm text-muted-foreground">暂无下载链接</p>
         ) : null}
         {ed2k.isError ? (
           <InlineError

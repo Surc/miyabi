@@ -13,7 +13,6 @@ import { EmptyState } from '@/components/empty-state'
 import { InlineError } from '@/components/error-state'
 import { ListPagination } from '@/components/list-pagination'
 import { MovieDetailTrigger } from '@/features/movie-detail/detail-trigger'
-import { MovieSubscribeButton } from '@/features/discover/movie-subscribe-button'
 import { isSubtitleLocalizationTag } from '@/lib/subtitle-tags'
 import { useBrowsePreloader } from './use-preloader'
 import { BrowseCacheSettingsButton } from './cache-settings'
@@ -204,7 +203,6 @@ function CachedMovieCard({ row, phase }: { row: PreloadRow; phase: PreloadState[
   const movie: DiscoverMovie = row.movie
   const count = resource?.data.magnet_count
   const ready = !!resource && resource.data.complete && !resource.stale
-  const subscribable = ready && movie.release_status === 'upcoming' && count === 0
   return (
     <MovieDetailTrigger movie={{ id: movie.id }} className="block rounded-2xl outline-ring">
       <MovieCard
@@ -217,10 +215,6 @@ function CachedMovieCard({ row, phase }: { row: PreloadRow; phase: PreloadState[
             {!ready ? (
               <div className="absolute top-2 right-2">
                 <ResourceLoadingBadge phase={phase} />
-              </div>
-            ) : subscribable ? (
-              <div className="absolute top-2 right-2">
-                <MovieSubscribeButton movie={movie} />
               </div>
             ) : null}
           </>

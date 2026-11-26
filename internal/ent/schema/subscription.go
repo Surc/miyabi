@@ -6,7 +6,7 @@ import (
 	"entgo.io/ent/schema/index"
 )
 
-// Subscription tracks wanted movies or actors to automate library intake.
+// Subscription stores followed actors and the works found for them.
 type Subscription struct {
 	ent.Schema
 }
@@ -22,6 +22,10 @@ func (Subscription) Fields() []ent.Field {
 			Default("movie"),
 		field.String("target_id").
 			NotEmpty(),
+		field.String("fanza_id").
+			Default(""),
+		field.String("javdb_id").
+			Default(""),
 		field.String("code").
 			Default(""),
 		field.String("title").

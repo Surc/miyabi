@@ -1,12 +1,8 @@
-import { BellOffIcon, BellPlusIcon, LoaderCircleIcon } from 'lucide-react'
-
 import { useDiscoverTags, type JavDBZone } from '@/api/discover'
-import { useAddSubscription, useRemoveSubscription, useSubscription } from '@/api/subscriptions'
 import { AppPage } from '@/components/app-page'
 import { InlineError } from '@/components/error-state'
 import { PageBackButton } from '@/components/page-back-button'
 import { PageHeader } from '@/components/page-header'
-import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -48,9 +44,6 @@ export function MetadataSearchPage({
     <AppPage>
       <PageBackButton />
       <PageHeader title={search.name} description={`${METADATA_LABELS[search.kind]}相关影片`}>
-        {search.kind === 'actor' ? (
-          <ActorSubscribeButton actorID={search.id} actorName={search.name} />
-        ) : null}
         {search.kind === 'tag' ? (
           <Select
             value={search.zone ?? 'all'}
@@ -94,36 +87,5 @@ export function MetadataSearchPage({
         searching
       />
     </AppPage>
-  )
-}
-
-function ActorSubscribeButton({ actorID, actorName }: { actorID: string; actorName: string }) {
-  const { subscription, isPending } = useSubscription('actor', actorID)
-  const add = useAddSubscription()
-  const remove = useRemoveSubscription()
-  const subscribed = subscription?.status === 'active' || subscription?.status === 'paused'
-  const busy = isPending || add.isPending || remove.isPending
-
-  return (
-    <Button
-      type="button"
-      variant={subscribed ? 'outline' : 'default'}
-      size="sm"
-      disabled={busy}
-      onClick={() =>
-        subscribed
-          ? remove.mutate(subscription)
-          : add.mutate({ kind: 'actor', target_id: actorID, title: actorName })
-      }
-    >
-      {add.isPending || remove.isPending ? (
-        <LoaderCircleIcon className="animate-spin" />
-      ) : subscribed ? (
-        <BellOffIcon />
-      ) : (
-        <BellPlusIcon />
-      )}
-      {subscribed ? '取消订阅' : '订阅演员'}
-    </Button>
   )
 }
