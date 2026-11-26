@@ -21,6 +21,7 @@ func TestSavedDetailNeedsNoJavDBAndKeepsSourceIdentities(t *testing.T) {
 		Images: []domain.ImageCandidate{{Provider: "fanza", URL: "https://image.example/cover.jpg", Role: "cover"},
 			{Provider: "fanza", URL: "https://image.example/preview.jpg", Role: "preview"},
 			{Provider: "fc2", URL: "https://image.example/fc2-preview.jpg", Role: "preview"}},
+		PreviewVideo: "https://media.example/trailer.mp4?token=abc%2Fdef",
 	}
 	film := lib.database.Movie.Create().SetCode(doc.Code).
 		SetPoster("/api/library/artwork/poster").SetFanarts([]string{"/api/library/artwork/full"}).SaveX(ctx)
@@ -65,6 +66,12 @@ func TestSavedDetailNeedsNoJavDBAndKeepsSourceIdentities(t *testing.T) {
 	}
 	if _, err := lib.Preview(ctx, film.ID, 2); !domain.IsKind(err, domain.KindNotFound) {
 		t.Fatalf("missing preview: %v", err)
+	}
+	restored.Images = nil
+	film.Update().SetMetadata(&restored).ExecX(ctx)
+	detail, err = lib.Movie(ctx, film.ID)
+	if err != nil || detail.PreviewVideo != doc.PreviewVideo || !detail.HasPreview || len(detail.PreviewImages) != 0 {
+		t.Fatalf("saved trailer without images: %+v, %v", detail, err)
 	}
 	if lib.database.Task.Query().CountX(ctx) != jobsBefore {
 		t.Fatal("opening details started work")
