@@ -30,7 +30,9 @@ export function TopPage() {
   const page = search.page ?? 1
   const info = useTopInfo()
   const annual = /^\d{4}$/.test(board)
-  const setBoard = (next: string) => void navigate({ search: { board: next } })
+  const setBoard = (next: string | null) => {
+    if (next !== null) void navigate({ search: { board: next } })
+  }
 
   if (!settings.data) {
     return (

@@ -311,7 +311,13 @@ export function LibrarySubtitles({
               aria-label="字幕文件"
               disabled={change.isPending}
             />
-            <Select value={language} onValueChange={setLanguage} disabled={change.isPending}>
+            <Select
+              value={language}
+              onValueChange={next => {
+                if (next !== null) setLanguage(next)
+              }}
+              disabled={change.isPending}
+            >
               <SelectTrigger aria-label="字幕语言">
                 <SelectValue />
               </SelectTrigger>
