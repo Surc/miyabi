@@ -144,8 +144,8 @@ try {
 
   // Check the delivered frontend and backend together, rather than only health.
   const assets = new URL("../../web/dist/assets/", import.meta.url);
-  const settingsAsset = (await readdir(assets)).find((name) => /^settings-.*\.js$/.test(name));
-  assert.ok(settingsAsset, "Build the settings frontend before packaging");
+  const settingsAsset = (await readdir(assets)).find((name) => /^settings\.metadata-.*\.js$/.test(name));
+  assert.ok(settingsAsset, "Build the metadata settings frontend before packaging");
   const expectedAsset = await readFile(new URL(settingsAsset, assets));
   assert.match(expectedAsset.toString(), /字幕下载/);
   const deliveredAsset = await fetch(`${webBase}/assets/${settingsAsset}`);
