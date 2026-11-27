@@ -56,7 +56,9 @@ export function TopSection() {
         <Select
           value={config?.default_board ?? 'all'}
           disabled={disabled || !info.data}
-          onValueChange={default_board => save({ default_board })}
+          onValueChange={default_board => {
+            if (default_board !== null) save({ default_board })
+          }}
         >
           <SelectTrigger className="w-64 max-w-full" aria-label="默认 TOP 榜单">
             <SelectValue placeholder="加载榜单…" />
